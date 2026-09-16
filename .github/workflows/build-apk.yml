@@ -24,10 +24,6 @@ jobs:
 
       - name: Create Android debug keystore
         run: |
-          if [ -f debug.keystore.base64 ]; then
-            echo "Restoring debug.keystore from debug.keystore.base64..."
-            base64 -d debug.keystore.base64 > debug.keystore
-          fi
           if [ ! -f debug.keystore ]; then
             echo "Generating valid Android debug.keystore with keytool..."
             keytool -genkey -v -keystore debug.keystore \
