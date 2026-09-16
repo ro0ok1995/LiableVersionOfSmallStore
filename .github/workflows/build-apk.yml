@@ -22,12 +22,21 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: Restore debug keystore
+      - name: Create Android debug keystore
         run: |
-          if [ ! -f debug.keystore ] && [ -f debug.keystore.base64 ]; then
-            echo "Decoding debug.keystore from debug.keystore.base64..."
+          if [ -f debug.keystore.base64 ]; then
+            echo "Restoring debug.keystore from debug.keystore.base64..."
             base64 -d debug.keystore.base64 > debug.keystore
           fi
+          if [ ! -f debug.keystore ]; then
+            echo "Generating valid Android debug.keystore with keytool..."
+            keytool -genkey -v -keystore debug.keystore \
+              -storepass android -keypass android \
+              -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          ls -la debug.keystore
 
       - name: Setup environment configuration
         run: |
@@ -35,6 +44,24 @@ jobs:
             echo "Creating .env from .env.example..."
             cp .env.example .env
           fi
+          touch .env
+
+      - name: Verify Gradle Wrapper configuration
+        run: |
+          mkdir -p gradle/wrapper
+          if ! grep -q "gradle-9.3.1" gradle/wrapper/gradle-wrapper.properties 2>/dev/null; then
+            echo "Configuring gradle-wrapper.properties to Gradle 9.3.1..."
+            cat << 'EOF' > gradle/wrapper/gradle-wrapper.properties
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionUrl=https\://services.gradle.org/distributions/gradle-9.3.1-bin.zip
+networkTimeout=10000
+validateDistributionUrl=true
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+EOF
+          fi
+          cat gradle/wrapper/gradle-wrapper.properties
 
       - name: Make gradlew executable
         run: chmod +x ./gradlew
@@ -48,3 +75,4 @@ jobs:
           name: app-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
