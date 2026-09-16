@@ -1,0 +1,6 @@
+{
+  "name": "SmallStore",
+  "description": "Shop-management app for tracking customers, balances, transactions, purchases, payments, and reports",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
