@@ -589,7 +589,7 @@ object StoreStrings {
     const val PERIOD_UNLOCKED_CAPTION_AR = "لكل تبويب فترته الزمنية الخاصة."
 
     const val REPORT_COMPREHENSIVE_CUSTOMER_EN = "Comprehensive Customer Report"
-    const val REPORT_COMPREHENSIVE_CUSTOMER_AR = "التقرير المخصص الشامل"
+    const val REPORT_COMPREHENSIVE_CUSTOMER_AR = "التقرير المخصص الشامل للعميل"
     const val REPORT_COMPREHENSIVE_CUSTOMER_DESC_EN = "Unified comprehensive customer statement including purchases, payments, balance and debt aging"
     const val REPORT_COMPREHENSIVE_CUSTOMER_DESC_AR = "تقرير كشف حساب تفصيلي شامل للعميل متضمناً المشتريات، المدفوعات، الأرصدة وتاريخ الديون"
 

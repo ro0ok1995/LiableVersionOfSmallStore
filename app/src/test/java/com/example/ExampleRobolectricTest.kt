@@ -325,6 +325,8 @@ class ExampleRobolectricTest {
     // Verify report preview has been updated to details
     assertEquals("تفاصيل التقرير", StoreStrings.REPORT_PREVIEW_TITLE_AR)
     assertEquals("Report Details", StoreStrings.REPORT_PREVIEW_TITLE_EN)
+    assertEquals("التقرير المخصص الشامل للعميل", StoreStrings.REPORT_COMPREHENSIVE_CUSTOMER_AR)
+    assertEquals("Comprehensive Customer Report", StoreStrings.REPORT_COMPREHENSIVE_CUSTOMER_EN)
   }
 
   @Test
