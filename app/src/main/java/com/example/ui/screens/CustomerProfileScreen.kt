@@ -24,12 +24,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.ShoppingBag
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -39,7 +43,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -93,11 +102,13 @@ fun CustomerProfileScreen(
     onRecordPurchase: (CustomerAccount) -> Unit,
     onViewAccountStatement: (CustomerAccount) -> Unit,
     onRecordPayment: (CustomerAccount) -> Unit,
+    onArchiveCustomer: (CustomerAccount) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
     val context = LocalContext.current
     val currency = AppCurrency.SYMBOL
+    var showArchiveConfirmDialog by remember { mutableStateOf(false) }
 
     BackHandler {
         onBackClick()
@@ -483,9 +494,69 @@ fun CustomerProfileScreen(
                         testTag = "action_record_payment",
                         onClick = { onRecordPayment(customer) }
                     )
+
+                    // 4. Archive Customer ("أرشفة العميل") - For ACTIVE customer only
+                    if (!customer.isArchived) {
+                        ProfileActionButton(
+                            icon = Icons.Default.Archive,
+                            iconTint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            iconContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            title = if (isArabic) StoreStrings.ARCHIVE_CUSTOMER_AR else StoreStrings.ARCHIVE_CUSTOMER_EN,
+                            subtitle = if (isArabic) StoreStrings.ARCHIVE_CUSTOMER_SUBTITLE_AR else StoreStrings.ARCHIVE_CUSTOMER_SUBTITLE_EN,
+                            testTag = "action_archive_customer",
+                            onClick = { showArchiveConfirmDialog = true }
+                        )
+                    }
                 }
             }
         }
+    }
+
+    if (showArchiveConfirmDialog && customer != null) {
+        AlertDialog(
+            onDismissRequest = { showArchiveConfirmDialog = false },
+            title = {
+                Text(
+                    text = if (isArabic) StoreStrings.ARCHIVE_CONFIRM_TITLE_AR else StoreStrings.ARCHIVE_CONFIRM_TITLE_EN,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Text(
+                    text = if (isArabic) StoreStrings.ARCHIVE_CONFIRM_MESSAGE_AR else StoreStrings.ARCHIVE_CONFIRM_MESSAGE_EN,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showArchiveConfirmDialog = false
+                        onArchiveCustomer(customer)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    ),
+                    modifier = Modifier.testTag("confirm_archive_customer_button")
+                ) {
+                    Text(
+                        text = if (isArabic) StoreStrings.ARCHIVE_CUSTOMER_AR else StoreStrings.ARCHIVE_CUSTOMER_EN,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showArchiveConfirmDialog = false },
+                    modifier = Modifier.testTag("cancel_archive_customer_button")
+                ) {
+                    Text(
+                        text = if (isArabic) StoreStrings.CANCEL_AR else StoreStrings.CANCEL_EN
+                    )
+                }
+            },
+            modifier = Modifier.testTag("archive_customer_dialog")
+        )
     }
 }
 

@@ -38,6 +38,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import com.example.ui.components.CustomerSearchField
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -85,7 +86,7 @@ fun CustomerManagementScreen(
     archivedCustomerIds: Set<String>,
     languageMode: LanguageMode,
     onBackClick: () -> Unit,
-    onAddCustomer: (name: String, phone: String, initialDebt: Double) -> Unit,
+    onAddCustomer: (name: String, phone: String) -> Unit,
     onUpdateCustomer: (CustomerAccount) -> Unit,
     onArchiveCustomer: (String) -> Unit,
     onUnarchiveCustomer: (String) -> Unit,
@@ -207,45 +208,25 @@ fun CustomerManagementScreen(
                 .background(MaterialTheme.colorScheme.surface)
                 .padding(horizontal = 16.dp, vertical = 10.dp)
         ) {
-            // Search Input
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                placeholder = {
-                    Text(
-                        text = if (isArabic) StoreStrings.SEARCH_CUSTOMER_ACCOUNTS_AR else StoreStrings.SEARCH_CUSTOMER_ACCOUNTS_EN,
-                        fontSize = 13.sp
-                    )
+            // Reusable Customer Search Field matching Home & Accounts
+            CustomerSearchField(
+                customers = if (selectedFilter == CustomerFilterTab.ARCHIVED) archivedCustomers else activeCustomers,
+                searchQuery = searchQuery,
+                onSearchQueryChange = { searchQuery = it },
+                onCustomerSelected = { customer ->
+                    searchQuery = customer.customerName
                 },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                onClearSelection = {
+                    searchQuery = ""
                 },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(
-                                imageVector = Icons.Default.Clear,
-                                contentDescription = if (isArabic) "مسح" else "Clear",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(10.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = MaterialTheme.colorScheme.background,
-                    focusedContainerColor = MaterialTheme.colorScheme.background,
-                    unfocusedBorderColor = GeoOutlineVariant,
-                    focusedBorderColor = GeoPrimary
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("customer_mgmt_search_input")
+                selectedCustomerId = null,
+                placeholderText = if (isArabic) StoreStrings.SEARCH_CUSTOMER_ACCOUNTS_AR else StoreStrings.SEARCH_CUSTOMER_ACCOUNTS_EN,
+                isArabic = isArabic,
+                showBalance = false,
+                simpleSuggestions = true,
+                inputTestTag = "customer_mgmt_search_input",
+                dropdownTestTag = "customer_mgmt_search_suggestions",
+                itemTagPrefix = "customer_mgmt_suggestion_"
             )
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -421,8 +402,8 @@ fun CustomerManagementScreen(
         AddCustomerDialog(
             isArabic = isArabic,
             onDismiss = { showAddDialog = false },
-            onConfirm = { name, phone, debt ->
-                onAddCustomer(name, phone, debt)
+            onConfirm = { name, phone ->
+                onAddCustomer(name, phone)
                 showAddDialog = false
             }
         )
@@ -614,9 +595,8 @@ private fun CustomerManagementCard(
                     modifier = Modifier.weight(1f)
                 )
 
-                // 4. Status Badge
+                // 4. Status Badge (Active or Archived)
                 CustomerStatusBadge(
-                    balance = customer.balance,
                     isArchived = isArchived,
                     isArabic = isArabic
                 )
@@ -775,48 +755,67 @@ private fun CustomerManagementCard(
 }
 
 /**
- * Clean status chip indicating customer debt/settlement status or archive status.
+ * Clean status chip indicating customer real active or archived state.
+ * Active: "نشط" / "Active" with green status styling
+ * Archived: "مؤرشف" / "Archived" with slate/gray status styling
  */
 @Composable
 private fun CustomerStatusBadge(
-    balance: Double,
     isArchived: Boolean,
     isArabic: Boolean
 ) {
-    val (label, bgColor, textColor) = when {
-        isArchived -> Triple(
-            if (isArabic) "مؤرشف" else "Archived",
-            Color(0xFFF1F5F9),
-            Color(0xFF475569)
-        )
-        balance > 0.001 -> Triple(
-            if (isArabic) "مدين" else "In Debt",
-            Color(0xFFFFF1F2),
-            Color(0xFFBE123C)
-        )
-        balance < -0.001 -> Triple(
-            if (isArabic) "دائن" else "Credit",
-            Color(0xFFEFF6FF),
-            Color(0xFF1D4ED8)
-        )
-        else -> Triple(
-            if (isArabic) "خالص" else "Settled",
-            Color(0xFFF0FDF4),
-            Color(0xFF15803D)
-        )
-    }
-
-    Surface(
-        color = bgColor,
-        shape = RoundedCornerShape(6.dp)
-    ) {
-        Text(
-            text = label,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            color = textColor,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-        )
+    if (isArchived) {
+        Surface(
+            color = Color(0xFFF1F5F9),
+            shape = RoundedCornerShape(6.dp),
+            modifier = Modifier
+                .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(6.dp))
+                .testTag("customer_status_archived")
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .background(Color(0xFF64748B), CircleShape)
+                )
+                Spacer(modifier = Modifier.width(5.dp))
+                Text(
+                    text = if (isArabic) "مؤرشف" else "Archived",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF475569)
+                )
+            }
+        }
+    } else {
+        Surface(
+            color = Color(0xFFDCFCE7),
+            shape = RoundedCornerShape(6.dp),
+            modifier = Modifier
+                .border(1.dp, Color(0xFF16A34A).copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                .testTag("customer_status_active")
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .background(Color(0xFF16A34A), CircleShape)
+                )
+                Spacer(modifier = Modifier.width(5.dp))
+                Text(
+                    text = if (isArabic) "نشط" else "Active",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF16A34A)
+                )
+            }
+        }
     }
 }
 
@@ -931,11 +930,10 @@ private fun EditCustomerDialog(
 private fun AddCustomerDialog(
     isArabic: Boolean,
     onDismiss: () -> Unit,
-    onConfirm: (name: String, phone: String, initialDebt: Double) -> Unit
+    onConfirm: (name: String, phone: String) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
-    var initialDebtText by remember { mutableStateOf("") }
     var nameError by remember { mutableStateOf(false) }
 
     AlertDialog(
@@ -975,18 +973,6 @@ private fun AddCustomerDialog(
                         .fillMaxWidth()
                         .testTag("add_customer_phone_input")
                 )
-
-                OutlinedTextField(
-                    value = initialDebtText,
-                    onValueChange = { initialDebtText = it },
-                    label = { Text(if (isArabic) "الرصيد / الدين المبدئي (اختياري)" else "Initial Debt / Balance (Optional)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("add_customer_debt_input")
-                )
             }
         },
         confirmButton = {
@@ -995,8 +981,7 @@ private fun AddCustomerDialog(
                     if (name.trim().isBlank()) {
                         nameError = true
                     } else {
-                        val debt = initialDebtText.toDoubleOrNull() ?: 0.0
-                        onConfirm(name.trim(), phone.trim(), debt)
+                        onConfirm(name.trim(), phone.trim())
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = GeoPrimary),

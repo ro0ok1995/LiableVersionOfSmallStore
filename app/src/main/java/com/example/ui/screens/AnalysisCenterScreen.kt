@@ -2500,7 +2500,7 @@ private fun ReportsTabContent(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = if (isArabic) "لا توجد بيانات متاحة للمعاينة في هذه الفترة" else "No data available for preview in this period",
+                                text = if (isArabic) "لا توجد تفاصيل متاحة في هذه الفترة" else "No details available for this period",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

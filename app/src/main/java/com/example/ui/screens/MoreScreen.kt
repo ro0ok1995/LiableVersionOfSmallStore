@@ -33,7 +33,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -64,11 +63,8 @@ fun MoreScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // -------------------------------------------------------------
-        // SECTION 1: Store / Store Information (Single Entry, No Duplicate)
+        // 1: Store / Store Information
         // -------------------------------------------------------------
-        MoreSectionHeader(
-            title = if (isArabic) StoreStrings.STORE_INFORMATION_AR else StoreStrings.STORE_INFORMATION_EN
-        )
         Card(
             shape = RoundedCornerShape(14.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -131,11 +127,8 @@ fun MoreScreen(
         }
 
         // -------------------------------------------------------------
-        // SECTION 2: App Settings
+        // 2: App Settings
         // -------------------------------------------------------------
-        MoreSectionHeader(
-            title = if (isArabic) StoreStrings.APP_SETTINGS_AR else StoreStrings.APP_SETTINGS_EN
-        )
         Card(
             shape = RoundedCornerShape(14.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -197,11 +190,8 @@ fun MoreScreen(
         }
 
         // -------------------------------------------------------------
-        // SECTION 3: Data Center
+        // 3: Data Center
         // -------------------------------------------------------------
-        MoreSectionHeader(
-            title = if (isArabic) StoreStrings.DATA_CENTER_AR else StoreStrings.DATA_CENTER_EN
-        )
         Card(
             shape = RoundedCornerShape(14.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -259,11 +249,8 @@ fun MoreScreen(
         }
 
         // -------------------------------------------------------------
-        // SECTION 4: About SmallStore
+        // 4: About SmallStore
         // -------------------------------------------------------------
-        MoreSectionHeader(
-            title = if (isArabic) StoreStrings.ABOUT_SMALLSTORE_AR else StoreStrings.ABOUT_SMALLSTORE_EN
-        )
         Card(
             shape = RoundedCornerShape(14.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -326,17 +313,4 @@ fun MoreScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
     }
-}
-
-@Composable
-private fun MoreSectionHeader(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.labelMedium.copy(
-            fontWeight = FontWeight.Bold,
-            fontSize = 13.sp
-        ),
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-    )
 }

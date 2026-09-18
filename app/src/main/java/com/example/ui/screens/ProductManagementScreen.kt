@@ -45,6 +45,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import com.example.ui.components.ProductSearchField
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -94,6 +95,7 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 private enum class ProductTabFilter {
+    ALL,
     ACTIVE,
     ARCHIVED
 }
@@ -114,7 +116,7 @@ fun ProductManagementScreen(
     val isArabic = languageMode == LanguageMode.ARABIC
 
     var searchQuery by remember { mutableStateOf("") }
-    var selectedTab by remember { mutableStateOf(ProductTabFilter.ACTIVE) }
+    var selectedTab by remember { mutableStateOf(ProductTabFilter.ALL) }
     var selectedCategoryFilter by remember { mutableStateOf<String?>(null) }
 
     // Dialog states
@@ -136,6 +138,7 @@ fun ProductManagementScreen(
 
     // Current list by tab and search
     val baseList = when (selectedTab) {
+        ProductTabFilter.ALL -> products
         ProductTabFilter.ACTIVE -> activeProducts
         ProductTabFilter.ARCHIVED -> archivedProducts
     }
@@ -278,110 +281,107 @@ fun ProductManagementScreen(
             }
         }
 
-        // Search Bar
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
-            placeholder = {
-                Text(
-                    text = if (isArabic) "البحث باسم المنتج أو التصنيف..." else "Search product name or category...",
-                    fontSize = 14.sp
-                )
+        // Search Bar (unified design matching Home and Accounts)
+        ProductSearchField(
+            products = baseList,
+            searchQuery = searchQuery,
+            onSearchQueryChange = { searchQuery = it },
+            onProductSelected = { product ->
+                searchQuery = product.name
             },
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Default.Search,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            onClearSelection = {
+                searchQuery = ""
             },
-            trailingIcon = {
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { searchQuery = "" }) {
-                        Icon(
-                            imageVector = Icons.Default.Clear,
-                            contentDescription = if (isArabic) "مسح" else "Clear",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            },
-            singleLine = true,
-            shape = RoundedCornerShape(12.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                focusedBorderColor = GeoPrimary,
-                unfocusedBorderColor = GeoOutline
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .testTag("product_search_input")
+            placeholderText = if (isArabic) "البحث باسم المنتج أو التصنيف..." else "Search product name or category...",
+            isArabic = isArabic,
+            inputTestTag = "product_search_input",
+            dropdownTestTag = "product_search_suggestions",
+            itemTagPrefix = "product_suggestion_",
+            modifier = Modifier.padding(horizontal = 16.dp)
         )
 
-        // Filter Tabs & Categories Row
-        Row(
+        // Filter Area: Exactly Two Rows (Status row + Product Types/Categories row)
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            FilterChip(
-                selected = selectedTab == ProductTabFilter.ACTIVE,
-                onClick = { selectedTab = ProductTabFilter.ACTIVE },
-                label = {
-                    Text(
-                        text = if (isArabic) "النشطة (${activeProducts.size})" else "Active (${activeProducts.size})",
-                        fontSize = 12.sp,
-                        fontWeight = if (selectedTab == ProductTabFilter.ACTIVE) FontWeight.Bold else FontWeight.Normal
-                    )
-                },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = GeoPrimary.copy(alpha = 0.15f),
-                    selectedLabelColor = GeoPrimary
-                ),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.testTag("filter_tab_active_products")
-            )
-
-            FilterChip(
-                selected = selectedTab == ProductTabFilter.ARCHIVED,
-                onClick = { selectedTab = ProductTabFilter.ARCHIVED },
-                label = {
-                    Text(
-                        text = if (isArabic) "المؤرشفة (${archivedProducts.size})" else "Archived (${archivedProducts.size})",
-                        fontSize = 12.sp,
-                        fontWeight = if (selectedTab == ProductTabFilter.ARCHIVED) FontWeight.Bold else FontWeight.Normal
-                    )
-                },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = StatusAmber.copy(alpha = 0.15f),
-                    selectedLabelColor = StatusAmber
-                ),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.testTag("filter_tab_archived_products")
-            )
-
-            if (allCategories.isNotEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .height(20.dp)
-                        .background(GeoOutline)
+            // ROW 1 — STATUS: All | Active | Archived
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FilterChip(
+                    selected = selectedTab == ProductTabFilter.ALL,
+                    onClick = { selectedTab = ProductTabFilter.ALL },
+                    label = {
+                        Text(
+                            text = if (isArabic) "الكل (${products.size})" else "All (${products.size})",
+                            fontSize = 12.sp,
+                            fontWeight = if (selectedTab == ProductTabFilter.ALL) FontWeight.Bold else FontWeight.Normal
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = GeoPrimary.copy(alpha = 0.15f),
+                        selectedLabelColor = GeoPrimary
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.testTag("filter_tab_all_products")
                 )
 
+                FilterChip(
+                    selected = selectedTab == ProductTabFilter.ACTIVE,
+                    onClick = { selectedTab = ProductTabFilter.ACTIVE },
+                    label = {
+                        Text(
+                            text = if (isArabic) "النشطة (${activeProducts.size})" else "Active (${activeProducts.size})",
+                            fontSize = 12.sp,
+                            fontWeight = if (selectedTab == ProductTabFilter.ACTIVE) FontWeight.Bold else FontWeight.Normal
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = StatusGreen.copy(alpha = 0.15f),
+                        selectedLabelColor = StatusGreen
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.testTag("filter_tab_active_products")
+                )
+
+                FilterChip(
+                    selected = selectedTab == ProductTabFilter.ARCHIVED,
+                    onClick = { selectedTab = ProductTabFilter.ARCHIVED },
+                    label = {
+                        Text(
+                            text = if (isArabic) "المؤرشفة (${archivedProducts.size})" else "Archived (${archivedProducts.size})",
+                            fontSize = 12.sp,
+                            fontWeight = if (selectedTab == ProductTabFilter.ARCHIVED) FontWeight.Bold else FontWeight.Normal
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = StatusAmber.copy(alpha = 0.15f),
+                        selectedLabelColor = StatusAmber
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.testTag("filter_tab_archived_products")
+                )
+            }
+
+            // ROW 2 — EXISTING PRODUCT TYPES / CATEGORIES
+            if (allCategories.isNotEmpty()) {
                 LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.weight(1f)
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     item {
                         FilterChip(
                             selected = selectedCategoryFilter == null,
                             onClick = { selectedCategoryFilter = null },
                             label = { Text(if (isArabic) "كل التصنيفات" else "All Categories", fontSize = 11.sp) },
-                            shape = RoundedCornerShape(8.dp)
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.testTag("filter_category_all")
                         )
                     }
                     items(allCategories) { category ->
@@ -391,7 +391,8 @@ fun ProductManagementScreen(
                                 selectedCategoryFilter = if (selectedCategoryFilter == category) null else category
                             },
                             label = { Text(category, fontSize = 11.sp) },
-                            shape = RoundedCornerShape(8.dp)
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.testTag("filter_category_$category")
                         )
                     }
                 }
@@ -436,7 +437,7 @@ fun ProductManagementScreen(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = if (selectedTab == ProductTabFilter.ACTIVE && searchQuery.isEmpty() && selectedCategoryFilter == null) {
+                        text = if (selectedTab != ProductTabFilter.ARCHIVED && searchQuery.isEmpty() && selectedCategoryFilter == null) {
                             if (isArabic) "اضغط على زر 'إضافة منتج' لإدراج منتج جديد في قاعدة البيانات" else "Tap 'Add Product' to register a new product item"
                         } else {
                             if (isArabic) "جرب تغيير مصطلح البحث أو إزالة التصفية" else "Try adjusting your search terms or filters"

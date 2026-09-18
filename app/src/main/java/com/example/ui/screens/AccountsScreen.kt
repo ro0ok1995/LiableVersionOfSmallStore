@@ -98,7 +98,7 @@ fun AccountsScreen(
     onCustomerClick: (CustomerAccount) -> Unit,
     onOpenAddCustomerDialog: () -> Unit,
     onCloseAddCustomerDialog: () -> Unit,
-    onAddCustomer: (name: String, phone: String, initialDebt: Double) -> Unit,
+    onAddCustomer: (name: String, phone: String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
@@ -186,15 +186,16 @@ fun AccountsScreen(
                 onSearchQueryChange = onSearchQueryChange,
                 onCustomerSelected = { customer ->
                     onSearchQueryChange(customer.customerName)
-                    onCustomerClick(customer)
                 },
                 onClearSelection = {
                     onSearchQueryChange("")
                 },
-                selectedCustomerId = selectedCustomerDetails?.id,
+                selectedCustomerId = null,
                 placeholderText = if (isArabic) StoreStrings.SEARCH_CUSTOMER_ACCOUNTS_AR else StoreStrings.SEARCH_CUSTOMER_ACCOUNTS_EN,
                 currency = currency,
                 isArabic = isArabic,
+                showBalance = false,
+                simpleSuggestions = true,
                 inputTestTag = "accounts_search_input",
                 dropdownTestTag = "accounts_search_results_overlay",
                 itemTagPrefix = "search_result_item_"
@@ -565,12 +566,11 @@ private fun CustomerCardItem(
 private fun AddCustomerDialog(
     isArabic: Boolean,
     onDismiss: () -> Unit,
-    onConfirm: (name: String, phone: String, initialDebt: Double) -> Unit
+    onConfirm: (name: String, phone: String) -> Unit
 ) {
     val focusManager = LocalFocusManager.current
     var name by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
-    var initialDebtStr by remember { mutableStateOf("") }
     var nameError by remember { mutableStateOf(false) }
 
     AlertDialog(
@@ -626,20 +626,6 @@ private fun AddCustomerDialog(
                         .fillMaxWidth()
                         .testTag("add_customer_phone_field")
                 )
-
-                OutlinedTextField(
-                    value = initialDebtStr,
-                    onValueChange = { initialDebtStr = it },
-                    label = {
-                        Text(if (isArabic) "الرصيد الافتتاحي / دين سابق (اختياري)" else "Initial Debt / Balance (optional)")
-                    },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("add_customer_debt_field")
-                )
             }
         },
         confirmButton = {
@@ -649,8 +635,7 @@ private fun AddCustomerDialog(
                         nameError = true
                     } else {
                         focusManager.clearFocus()
-                        val debt = initialDebtStr.toDoubleOrNull() ?: 0.0
-                        onConfirm(name, phone, debt)
+                        onConfirm(name.trim(), phone.trim())
                     }
                 },
                 shape = RoundedCornerShape(8.dp),

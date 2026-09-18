@@ -651,7 +651,7 @@ fun SalesReportPresentation(
                     modifier = Modifier.size(20.dp)
                 )
                 Text(
-                    text = if (isArabic) "معاينة التقرير التفصيلي" else "Detailed Report Preview",
+                    text = if (isArabic) "تفاصيل التقرير التفصيلي" else "Detailed Report Details",
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurface
                 )

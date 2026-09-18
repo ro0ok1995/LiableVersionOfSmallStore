@@ -236,6 +236,7 @@ class MainViewModel @JvmOverloads constructor(
     }
 
     fun saveStoreInfo(info: StoreInfo) {
+        if (info.storeName.length > 40) return
         viewModelScope.launch {
             val wasSaved = repository.isStoreInfoSaved()
             repository.saveStoreInfo(info, markAsSaved = true)
@@ -378,19 +379,23 @@ class MainViewModel @JvmOverloads constructor(
         _uiState.update { it.copy(showAddCustomerDialog = false) }
     }
 
-    fun addCustomer(name: String, phone: String, initialDebt: Double) {
+    fun addCustomer(name: String, phone: String) {
         val newCustomer = CustomerAccount(
             id = "c_${System.currentTimeMillis()}",
             customerName = name.trim(),
             phone = phone.trim(),
-            balance = initialDebt,
-            totalDebt = initialDebt,
+            balance = 0.0,
+            totalDebt = 0.0,
             hasRecentActivity = true
         )
         _uiState.update { it.copy(showAddCustomerDialog = false) }
         viewModelScope.launch {
             repository.addCustomer(newCustomer)
         }
+    }
+
+    fun addCustomer(name: String, phone: String, initialDebt: Double) {
+        addCustomer(name, phone)
     }
 
     fun updateCustomer(customer: CustomerAccount) {
@@ -405,6 +410,14 @@ class MainViewModel @JvmOverloads constructor(
 
     // CUSTOMERS ARCHIVE / RESTORE / DELETE
     fun archiveCustomer(customerId: String, date: String = getCurrentDateString()) {
+        _uiState.update { state ->
+            state.copy(
+                accountsSelectedCustomerDetails = if (state.accountsSelectedCustomerDetails?.id == customerId) null else state.accountsSelectedCustomerDetails,
+                homeSelectedCustomer = if (state.homeSelectedCustomer?.id == customerId) null else state.homeSelectedCustomer,
+                purchasesCustomer = if (state.purchasesCustomer?.id == customerId) null else state.purchasesCustomer,
+                quickPaymentCustomer = if (state.quickPaymentCustomer?.id == customerId) null else state.quickPaymentCustomer
+            )
+        }
         viewModelScope.launch {
             repository.archiveCustomer(customerId, date)
         }
@@ -742,6 +755,7 @@ class MainViewModel @JvmOverloads constructor(
 
     // PURCHASES / CART
     fun setPurchasesCustomer(customer: CustomerAccount?) {
+        if (customer?.isArchived == true) return
         _uiState.update { it.copy(purchasesCustomer = customer) }
     }
 
@@ -805,6 +819,7 @@ class MainViewModel @JvmOverloads constructor(
     fun completeSettlement(cashAmount: Double, debtAmount: Double, notes: String) {
         val state = _uiState.value
         val customer = state.purchasesCustomer ?: state.customers.firstOrNull() ?: return
+        if (customer.isArchived || state.customers.none { it.id == customer.id }) return
         val total = state.settlementTotal
         val isFullCash = debtAmount <= 0.01
         val txId = "tx_${System.currentTimeMillis()}"
@@ -869,6 +884,7 @@ class MainViewModel @JvmOverloads constructor(
 
     // QUICK PAYMENT
     fun openQuickPayment(customer: CustomerAccount? = null) {
+        if (customer?.isArchived == true) return
         _uiState.update {
             it.copy(
                 quickPaymentCustomer = customer,
@@ -880,6 +896,7 @@ class MainViewModel @JvmOverloads constructor(
     }
 
     fun setQuickPaymentCustomer(customer: CustomerAccount?) {
+        if (customer?.isArchived == true) return
         _uiState.update {
             it.copy(quickPaymentCustomer = customer)
         }
@@ -896,6 +913,7 @@ class MainViewModel @JvmOverloads constructor(
     fun completeQuickPayment() {
         val state = _uiState.value
         val customer = state.quickPaymentCustomer ?: return
+        if (customer.isArchived || state.customers.none { it.id == customer.id }) return
         val amount = state.quickPaymentAmount.toDoubleOrNull() ?: return
         if (amount <= 0.0 || amount > (customer.balance + 0.001)) return
 

@@ -2,7 +2,6 @@ package com.example.ui.components
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
@@ -16,7 +15,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -24,11 +22,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -49,9 +45,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
@@ -62,35 +56,25 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.model.AppCurrency
-import com.example.model.CustomerAccount
-import com.example.model.StoreStrings
-import com.example.ui.theme.statusGreen
-import com.example.ui.theme.statusRed
-import java.util.Locale
+import com.example.model.ProductItem
 
 /**
- * Reusable Customer Search Field with attached dropdown suggestions.
- * Follows the SmallStore Design System with Arabic RTL support,
- * clean empty states, and reliable selection/clearing behavior.
+ * Reusable Product Search Field with attached dropdown suggestions.
+ * Matches the unified Home and Accounts search-bar design and interaction pattern.
  */
 @Composable
-fun CustomerSearchField(
-    customers: List<CustomerAccount>,
+fun ProductSearchField(
+    products: List<ProductItem>,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
-    onCustomerSelected: (CustomerAccount) -> Unit,
+    onProductSelected: (ProductItem) -> Unit,
     onClearSelection: () -> Unit,
     modifier: Modifier = Modifier,
-    selectedCustomerId: String? = null,
     placeholderText: String? = null,
-    currency: String = AppCurrency.SYMBOL,
     isArabic: Boolean = true,
-    showBalance: Boolean = true,
-    simpleSuggestions: Boolean = false,
-    inputTestTag: String = "customer_search_input",
-    dropdownTestTag: String = "customer_search_suggestions",
-    itemTagPrefix: String = "customer_suggestion_",
+    inputTestTag: String = "product_search_input",
+    dropdownTestTag: String = "product_search_suggestions",
+    itemTagPrefix: String = "product_suggestion_",
     maxDropdownHeight: Dp = 240.dp
 ) {
     val focusManager = LocalFocusManager.current
@@ -108,19 +92,20 @@ fun CustomerSearchField(
 
     val layoutDirection = if (isArabic) LayoutDirection.Rtl else LayoutDirection.Ltr
 
-    // Filter customers immediately based on input (name or phone)
-    val filteredCustomers = remember(customers, searchQuery) {
+    // Filter products immediately based on input (name or category)
+    val filteredProducts = remember(products, searchQuery) {
         if (searchQuery.isBlank()) {
-            customers
+            products
         } else {
             val q = searchQuery.trim().lowercase()
-            customers.filter {
-                it.customerName.lowercase().contains(q) || it.phone.contains(q)
+            products.filter {
+                it.name.lowercase().contains(q) || it.category.lowercase().contains(q)
             }
         }
     }
 
-    val placeholder = placeholderText ?: if (isArabic) StoreStrings.SEARCH_CUSTOMER_AR else StoreStrings.SEARCH_CUSTOMER_EN
+    val placeholder = placeholderText
+        ?: if (isArabic) "البحث باسم المنتج أو التصنيف..." else "Search product name or category..."
 
     // Close dropdown on Android system back press when open
     BackHandler(enabled = isDropdownOpen) {
@@ -132,7 +117,7 @@ fun CustomerSearchField(
         Column(
             modifier = modifier.fillMaxWidth()
         ) {
-            // THE SEARCH INPUT FIELD
+            // THE SEARCH INPUT FIELD (matching Home and Accounts search bars)
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { newQuery ->
@@ -171,7 +156,7 @@ fun CustomerSearchField(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(end = 4.dp)
                     ) {
-                        if (searchQuery.isNotBlank() || selectedCustomerId != null) {
+                        if (searchQuery.isNotBlank()) {
                             IconButton(
                                 onClick = {
                                     onSearchQueryChange("")
@@ -191,7 +176,7 @@ fun CustomerSearchField(
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
-                        } else if (customers.isNotEmpty()) {
+                        } else if (products.isNotEmpty()) {
                             IconButton(
                                 onClick = {
                                     isDropdownOpen = !isDropdownOpen
@@ -200,7 +185,7 @@ fun CustomerSearchField(
                             ) {
                                 Icon(
                                     imageVector = if (isDropdownOpen) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                                    contentDescription = if (isArabic) "قائمة العملاء" else "Customer list",
+                                    contentDescription = if (isArabic) "قائمة المنتجات" else "Product list",
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(20.dp)
                                 )
@@ -214,7 +199,7 @@ fun CustomerSearchField(
                     focusedContainerColor = MaterialTheme.colorScheme.surface,
                     unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = if (selectedCustomerId != null) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outlineVariant
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
                 ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(
@@ -237,8 +222,8 @@ fun CustomerSearchField(
                         .padding(top = 4.dp)
                         .testTag(dropdownTestTag)
                 ) {
-                    if (filteredCustomers.isEmpty()) {
-                        // Clean empty state when no matching customers
+                    if (filteredProducts.isEmpty()) {
+                        // Clean empty state when no matching products
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -262,44 +247,28 @@ fun CustomerSearchField(
                             }
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = if (isArabic) "لا يوجد عملاء مطابقون" else "No matching customers found",
+                                text = if (isArabic) "لا توجد منتجات مطابقة" else "No matching products found",
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     } else {
-                        // Scrollable list of available customers
+                        // Scrollable list of available products
                         LazyColumn(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .heightIn(max = maxDropdownHeight)
                         ) {
-                            items(filteredCustomers, key = { it.id }) { customer ->
-                                if (simpleSuggestions) {
-                                    SimpleCustomerDropdownRow(
-                                        customer = customer,
-                                        testTag = "$itemTagPrefix${customer.id}",
-                                        onClick = {
-                                            onCustomerSelected(customer)
-                                            isDropdownOpen = false
-                                            focusManager.clearFocus()
-                                        }
-                                    )
-                                } else {
-                                    val isSelected = customer.id == selectedCustomerId
-                                    CustomerDropdownRow(
-                                        customer = customer,
-                                        isSelected = isSelected,
-                                        currency = currency,
-                                        showBalance = showBalance,
-                                        testTag = "$itemTagPrefix${customer.id}",
-                                        onClick = {
-                                            onCustomerSelected(customer)
-                                            isDropdownOpen = false
-                                            focusManager.clearFocus()
-                                        }
-                                    )
-                                }
+                            items(filteredProducts, key = { it.id }) { product ->
+                                SimpleProductDropdownRow(
+                                    product = product,
+                                    testTag = "$itemTagPrefix${product.id}",
+                                    onClick = {
+                                        onProductSelected(product)
+                                        isDropdownOpen = false
+                                        focusManager.clearFocus()
+                                    }
+                                )
                                 HorizontalDivider(
                                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
                                     thickness = 0.5.dp,
@@ -314,9 +283,15 @@ fun CustomerSearchField(
     }
 }
 
+/**
+ * Product search suggestion item containing ONLY:
+ * 1. Product Name
+ * 2. Product Type directly underneath
+ * Strictly no prices, stocks, status badges, buttons, edit/delete controls, or card actions.
+ */
 @Composable
-private fun SimpleCustomerDropdownRow(
-    customer: CustomerAccount,
+private fun SimpleProductDropdownRow(
+    product: ProductItem,
     testTag: String,
     onClick: () -> Unit
 ) {
@@ -328,7 +303,7 @@ private fun SimpleCustomerDropdownRow(
             .testTag(testTag)
     ) {
         Text(
-            text = customer.customerName,
+            text = product.name,
             style = MaterialTheme.typography.bodyMedium.copy(
                 fontWeight = FontWeight.SemiBold
             ),
@@ -336,106 +311,16 @@ private fun SimpleCustomerDropdownRow(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
-        if (customer.phone.isNotBlank()) {
+        if (product.category.isNotBlank()) {
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = customer.phone,
+                text = product.category,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-        }
-    }
-}
-
-@Composable
-private fun CustomerDropdownRow(
-    customer: CustomerAccount,
-    isSelected: Boolean,
-    currency: String,
-    showBalance: Boolean,
-    testTag: String,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .background(
-                if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent
-            )
-            .padding(horizontal = 14.dp, vertical = 11.dp)
-            .testTag(testTag),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.weight(1f)
-        ) {
-            // Customer avatar with initial
-            Surface(
-                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primaryContainer,
-                shape = CircleShape,
-                modifier = Modifier.size(34.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        text = customer.customerName.take(1),
-                        fontWeight = FontWeight.Bold,
-                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onPrimaryContainer,
-                        fontSize = 14.sp
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.width(10.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = customer.customerName,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold
-                    ),
-                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                if (customer.phone.isNotBlank()) {
-                    Text(
-                        text = customer.phone,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 12.sp,
-                        maxLines = 1
-                    )
-                }
-            }
-        }
-
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            if (showBalance) {
-                Text(
-                    text = String.format(Locale.US, "%,.2f %s", customer.balance, currency),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (customer.balance > 0) MaterialTheme.colorScheme.statusRed else MaterialTheme.colorScheme.statusGreen
-                )
-            }
-
-            if (isSelected) {
-                Icon(
-                    imageVector = Icons.Default.Check,
-                    contentDescription = "Selected",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
         }
     }
 }

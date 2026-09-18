@@ -308,8 +308,8 @@ fun SmallStoreApp(
                                     onCloseAddCustomerDialog = {
                                         mainViewModel.closeAddCustomerDialog()
                                     },
-                                    onAddCustomer = { name, phone, initialDebt ->
-                                        mainViewModel.addCustomer(name, phone, initialDebt)
+                                    onAddCustomer = { name, phone ->
+                                        mainViewModel.addCustomer(name, phone)
                                     }
                                 )
                             }
@@ -336,6 +336,10 @@ fun SmallStoreApp(
                                     },
                                     onRecordPayment = { customer ->
                                         mainViewModel.openQuickPayment(customer)
+                                    },
+                                    onArchiveCustomer = { customer ->
+                                        mainViewModel.archiveCustomer(customer.id)
+                                        mainViewModel.navigateBackFromCustomerDetails()
                                     }
                                 )
                             }
@@ -514,8 +518,8 @@ fun SmallStoreApp(
                                         focusManager.clearFocus()
                                         mainViewModel.navigateTo(NavDestination.DATA_CENTER)
                                     },
-                                    onAddCustomer = { name, phone, initialDebt ->
-                                        mainViewModel.addCustomer(name, phone, initialDebt)
+                                    onAddCustomer = { name, phone ->
+                                        mainViewModel.addCustomer(name, phone)
                                     },
                                     onUpdateCustomer = { updated ->
                                         mainViewModel.updateCustomer(updated)

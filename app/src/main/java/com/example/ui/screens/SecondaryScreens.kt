@@ -49,6 +49,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -73,6 +74,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.AppThemeMode
@@ -86,6 +88,19 @@ import com.example.ui.theme.GeoOutlineVariant
 import com.example.ui.theme.GeoPrimary
 import com.example.ui.theme.StatusGreen
 import com.example.ui.theme.StatusRed
+
+private fun isValidStoreNameChar(c: Char): Boolean {
+    if (c in 'a'..'z' || c in 'A'..'Z') return true
+    if (c in '0'..'9' || c in '\u0660'..'\u0669' || c in '\u06F0'..'\u06F9') return true
+    if (c == ' ') return true
+    if (c == '-' || c == '_' || c == '.' || c == '&' || c == '\'' || c == ',' || c == '،' || c == '/' || c == '(' || c == ')') return true
+    val block = Character.UnicodeBlock.of(c)
+    return block == Character.UnicodeBlock.ARABIC ||
+        block == Character.UnicodeBlock.ARABIC_SUPPLEMENT ||
+        block == Character.UnicodeBlock.ARABIC_EXTENDED_A ||
+        block == Character.UnicodeBlock.ARABIC_PRESENTATION_FORMS_A ||
+        block == Character.UnicodeBlock.ARABIC_PRESENTATION_FORMS_B
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -105,6 +120,10 @@ fun StoreInformationScreen(
     var taxNumber by remember(storeInfo) { mutableStateOf(storeInfo.taxNumber) }
     var crNumber by remember(storeInfo) { mutableStateOf(storeInfo.crNumber) }
     var showSavedMessage by remember { mutableStateOf(false) }
+
+    val isLengthValid = name.length <= 40
+    val isCharsValid = name.all { isValidStoreNameChar(it) }
+    val isStoreNameValid = isLengthValid && isCharsValid
 
     Column(
         modifier = modifier
@@ -142,10 +161,39 @@ fun StoreInformationScreen(
         ) {
             OutlinedTextField(
                 value = name,
-                onValueChange = { name = it },
+                onValueChange = { input ->
+                    if (input.all { isValidStoreNameChar(it) }) {
+                        name = input
+                        showSavedMessage = false
+                    }
+                },
                 label = { Text(if (isArabic) "اسم المتجر" else "Store Name") },
                 leadingIcon = { Icon(Icons.Default.Storefront, contentDescription = null) },
                 singleLine = true,
+                isError = !isLengthValid,
+                textStyle = LocalTextStyle.current.copy(textDirection = TextDirection.Content),
+                supportingText = {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        if (!isLengthValid) {
+                            Text(
+                                text = if (isArabic) "الحد الأقصى 40 حرفاً" else "Maximum 40 characters",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        } else {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                        Text(
+                            text = "${name.length}/40",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isLengthValid) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                            modifier = Modifier.testTag("store_name_counter")
+                        )
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("input_store_name")
@@ -208,10 +256,11 @@ fun StoreInformationScreen(
 
             Button(
                 onClick = {
+                    if (!isStoreNameValid) return@Button
                     focusManager.clearFocus()
                     onSaveStoreInfo(
                         storeInfo.copy(
-                            storeName = name,
+                            storeName = name.trim(),
                             ownerName = owner,
                             phone = phone,
                             address = address,
@@ -221,6 +270,7 @@ fun StoreInformationScreen(
                     )
                     showSavedMessage = true
                 },
+                enabled = isStoreNameValid,
                 shape = RoundedCornerShape(10.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = GeoPrimary),
                 modifier = Modifier
@@ -290,50 +340,15 @@ fun DataCenterScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Header summary
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            // Non-clickable screen description below title
+            Text(
+                text = if (isArabic) "إدارة بيانات العملاء والمنتجات والأرشيف" else "Manage customer, product, and archive data",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, GeoOutlineVariant, RoundedCornerShape(14.dp))
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Surface(
-                        color = GeoPrimary.copy(alpha = 0.10f),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.size(46.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.CloudDownload,
-                                contentDescription = null,
-                                tint = GeoPrimary,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.width(14.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = if (isArabic) "مركز إدارة السجلات والبيانات" else "Records & Data Management",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = if (isArabic) "إدارة مباشرة لقواعد بيانات العملاء والمنتجات والأرشيف" else "Direct management of customers, products, and archives",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
+                    .padding(horizontal = 4.dp, vertical = 2.dp)
+            )
 
             // 1. Customers
             Card(
