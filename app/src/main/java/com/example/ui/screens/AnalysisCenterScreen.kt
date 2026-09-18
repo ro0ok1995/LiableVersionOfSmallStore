@@ -1211,7 +1211,8 @@ private fun StatisticsTabContent(
                                 subtitle = subtitle,
                                 kpis = kpis,
                                 headers = headers,
-                                rows = rows
+                                rows = rows,
+                                isArabic = isArabic
                             )
                             ReportExporter.shareFile(context, file, "application/pdf", title)
                             Toast.makeText(context, if (isArabic) "تم تجهيز تقرير PDF للمشاركة" else "PDF statistics ready for export", Toast.LENGTH_SHORT).show()
@@ -2551,7 +2552,8 @@ private fun ReportsTabContent(
                             subtitle = if (isArabic) "الفترة: $periodLabel" else "Period: $periodLabel",
                             kpis = exportKpis,
                             headers = tableHeaders,
-                            rows = previewRows
+                            rows = previewRows,
+                            isArabic = isArabic
                         )
                         ReportExporter.shareFile(context, file, "application/pdf", reportTitle)
                     }

@@ -129,7 +129,8 @@ object ReportExporter {
     }
 
     /**
-     * Generates a standard PDF document using Android's native PdfDocument.
+     * Generates a professional, structured PDF document supporting RTL (Arabic) and LTR (English) layouts,
+     * multi-page pagination, clean header/metadata, KPI cards, table with alternating rows, and summary totals.
      */
     fun generatePdfReport(
         title: String,
@@ -138,122 +139,364 @@ object ReportExporter {
         kpis: List<Pair<String, String>>,
         headers: List<String>,
         rows: List<ReportPreviewRow>,
-        outputStream: OutputStream
+        outputStream: OutputStream,
+        isArabic: Boolean = true
     ) {
         val pdfDocument = PdfDocument()
-        val pageInfo = PdfDocument.PageInfo.Builder(595, 842, 1).create() // A4 portrait: 595 x 842 pt
-        val page = pdfDocument.startPage(pageInfo)
-        val canvas = page.canvas
+        val pageWidth = 595 // A4 portrait width in points
+        val pageHeight = 842 // A4 portrait height in points
+        val margin = 32f
+        val contentWidth = pageWidth - (2 * margin) // 531f
 
         val primaryColor = Color.parseColor("#4A3B69")
         val darkTextColor = Color.parseColor("#1C1B1F")
         val grayTextColor = Color.parseColor("#605D62")
         val lightBgColor = Color.parseColor("#F5F3F7")
+        val headerBgColor = Color.parseColor("#EDE9F2")
         val borderColor = Color.parseColor("#D9D5DC")
+        val altRowColor = Color.parseColor("#FBFBFC")
 
         val paint = Paint().apply {
             isAntiAlias = true
         }
 
-        // Header Background Banner
-        paint.color = primaryColor
-        canvas.drawRect(0f, 0f, 595f, 90f, paint)
+        // Relative column weight ratios for 4 columns: [Col1: 22%, Col2: 28%, Col3: 25%, Col4: 25%]
+        val colWeights = floatArrayOf(0.22f, 0.28f, 0.25f, 0.25f)
+        val colWidths = FloatArray(4) { i -> contentWidth * colWeights[i] }
 
-        // Store Name & App Identity
-        paint.color = Color.WHITE
-        paint.textSize = 18f
-        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        canvas.drawText("SmallStore - $storeName", 30f, 40f, paint)
-
-        // Report Title
-        paint.textSize = 14f
-        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
-        canvas.drawText(title, 30f, 65f, paint)
-
-        // Date and Subtitle under header
-        paint.color = grayTextColor
-        paint.textSize = 10f
-        val currentDate = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.US).format(Date())
-        canvas.drawText("$subtitle  •  $currentDate", 30f, 115f, paint)
-
-        // KPI Summary Cards
-        var startX = 30f
-        val cardWidth = 160f
-        val cardHeight = 45f
-        for ((kpiTitle, kpiVal) in kpis.take(3)) {
-            paint.color = lightBgColor
-            canvas.drawRoundRect(startX, 130f, startX + cardWidth, 130f + cardHeight, 6f, 6f, paint)
-            paint.color = borderColor
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 1f
-            canvas.drawRoundRect(startX, 130f, startX + cardWidth, 130f + cardHeight, 6f, 6f, paint)
-
-            paint.style = Paint.Style.FILL
-            paint.color = grayTextColor
-            paint.textSize = 9f
-            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
-            canvas.drawText(kpiTitle, startX + 10f, 146f, paint)
-
-            paint.color = primaryColor
-            paint.textSize = 12f
-            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            canvas.drawText(kpiVal, startX + 10f, 164f, paint)
-
-            startX += cardWidth + 20f
-        }
-
-        // Table Header
-        var currentY = 205f
-        paint.color = lightBgColor
-        paint.style = Paint.Style.FILL
-        canvas.drawRect(30f, currentY, 565f, currentY + 24f, paint)
-
-        paint.color = darkTextColor
-        paint.textSize = 10f
-        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        val colX = floatArrayOf(40f, 180f, 340f, 480f)
-        for (i in headers.indices) {
-            if (i < colX.size) {
-                canvas.drawText(headers[i], colX[i], currentY + 16f, paint)
+        // Precompute column X start and end positions based on direction (RTL or LTR)
+        val colStarts = FloatArray(4)
+        val colEnds = FloatArray(4)
+        if (isArabic) {
+            // RTL: Col 0 starts at margin + contentWidth (right side), goes left
+            var curRight = margin + contentWidth
+            for (i in 0 until 4) {
+                val w = colWidths[i]
+                colEnds[i] = curRight
+                colStarts[i] = curRight - w
+                curRight -= w
+            }
+        } else {
+            // LTR: Col 0 starts at left margin, goes right
+            var curLeft = margin
+            for (i in 0 until 4) {
+                val w = colWidths[i]
+                colStarts[i] = curLeft
+                colEnds[i] = curLeft + w
+                curLeft += w
             }
         }
-        currentY += 24f
 
-        // Table Rows
-        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
-        for ((idx, row) in rows.withIndex()) {
-            if (idx % 2 == 1) {
-                paint.color = Color.parseColor("#FAF9FB")
-                paint.style = Paint.Style.FILL
-                canvas.drawRect(30f, currentY, 565f, currentY + 22f, paint)
-            }
-            paint.color = darkTextColor
-            paint.style = Paint.Style.FILL
-            paint.textSize = 9.5f
-            val cols = listOf(row.col1, row.col2, row.col3, row.col4)
-            for (i in cols.indices) {
-                if (i < colX.size) {
-                    canvas.drawText(cols[i], colX[i], currentY + 15f, paint)
+        fun drawCellText(
+            canvas: android.graphics.Canvas,
+            text: String,
+            colIndex: Int,
+            baselineY: Float,
+            textPaint: Paint,
+            alignEnd: Boolean = false
+        ) {
+            if (isArabic) {
+                // In RTL: Standard columns align Right (near colEnds[colIndex]). Numeric/amounts (alignEnd) align Left (near colStarts[colIndex])
+                if (alignEnd) {
+                    textPaint.textAlign = Paint.Align.LEFT
+                    canvas.drawText(text, colStarts[colIndex] + 6f, baselineY, textPaint)
+                } else {
+                    textPaint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(text, colEnds[colIndex] - 6f, baselineY, textPaint)
+                }
+            } else {
+                // In LTR: Standard columns align Left (near colStarts[colIndex]). Numeric/amounts (alignEnd) align Right (near colEnds[colIndex])
+                if (alignEnd) {
+                    textPaint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(text, colEnds[colIndex] - 6f, baselineY, textPaint)
+                } else {
+                    textPaint.textAlign = Paint.Align.LEFT
+                    canvas.drawText(text, colStarts[colIndex] + 6f, baselineY, textPaint)
                 }
             }
-            // Row separator
+        }
+
+        // Pagination split: calculate items per page
+        // Page 1 has header banner (75pt), subtitle/meta (30pt), KPI cards (60pt), table header (24pt) -> starts around Y=210
+        // Available table height on Page 1: 780 - 210 = 570pt -> at 22pt/row ~ 22-25 rows
+        // Page 2+ has compact header (45pt), table header (24pt) -> starts around Y=85 -> ~30 rows
+        val rowsPerPageFirst = 22
+        val rowsPerPageSubsequent = 28
+        val totalRows = rows.size
+        val totalPages = if (totalRows <= rowsPerPageFirst) 1 else 1 + Math.ceil((totalRows - rowsPerPageFirst).toDouble() / rowsPerPageSubsequent).toInt()
+
+        var currentRowIdx = 0
+        val currentDate = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.US).format(Date())
+
+        for (pageNumber in 1..totalPages) {
+            val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create()
+            val page = pdfDocument.startPage(pageInfo)
+            val canvas = page.canvas
+
+            var currentY = margin
+
+            if (pageNumber == 1) {
+                // --- Page 1 Top Banner ---
+                val bannerHeight = 72f
+                paint.color = primaryColor
+                paint.style = Paint.Style.FILL
+                canvas.drawRoundRect(margin, currentY, margin + contentWidth, currentY + bannerHeight, 8f, 8f, paint)
+
+                // Store Title in Banner
+                paint.color = Color.WHITE
+                paint.textSize = 17f
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                if (isArabic) {
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText("سمول ستور  |  $storeName", margin + contentWidth - 16f, currentY + 30f, paint)
+                } else {
+                    paint.textAlign = Paint.Align.LEFT
+                    canvas.drawText("SmallStore  |  $storeName", margin + 16f, currentY + 30f, paint)
+                }
+
+                // Report Sub-title / Title in Banner
+                paint.textSize = 12.5f
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+                if (isArabic) {
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(title, margin + contentWidth - 16f, currentY + 54f, paint)
+                } else {
+                    paint.textAlign = Paint.Align.LEFT
+                    canvas.drawText(title, margin + 16f, currentY + 54f, paint)
+                }
+
+                currentY += bannerHeight + 14f
+
+                // Meta Line: Subtitle (Period or Filter) & Current Date
+                paint.color = grayTextColor
+                paint.textSize = 9.5f
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+                if (isArabic) {
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(subtitle, margin + contentWidth, currentY + 10f, paint)
+                    paint.textAlign = Paint.Align.LEFT
+                    canvas.drawText("تاريخ الإصدار: $currentDate", margin, currentY + 10f, paint)
+                } else {
+                    paint.textAlign = Paint.Align.LEFT
+                    canvas.drawText(subtitle, margin, currentY + 10f, paint)
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText("Generated: $currentDate", margin + contentWidth, currentY + 10f, paint)
+                }
+
+                currentY += 22f
+
+                // KPI Cards (if any)
+                if (kpis.isNotEmpty()) {
+                    val kpiCount = kpis.size.coerceAtMost(3)
+                    val cardSpacing = 10f
+                    val totalSpacing = cardSpacing * (kpiCount - 1)
+                    val cardWidth = (contentWidth - totalSpacing) / kpiCount
+                    val cardHeight = 44f
+
+                    for (k in 0 until kpiCount) {
+                        val (kpiTitle, kpiVal) = kpis[k]
+                        val cardLeft = if (isArabic) {
+                            // In RTL, 1st KPI goes on the right
+                            margin + contentWidth - (k + 1) * cardWidth - k * cardSpacing
+                        } else {
+                            margin + k * (cardWidth + cardSpacing)
+                        }
+
+                        // Background card
+                        paint.color = lightBgColor
+                        paint.style = Paint.Style.FILL
+                        canvas.drawRoundRect(cardLeft, currentY, cardLeft + cardWidth, currentY + cardHeight, 6f, 6f, paint)
+                        // Border
+                        paint.color = borderColor
+                        paint.style = Paint.Style.STROKE
+                        paint.strokeWidth = 0.8f
+                        canvas.drawRoundRect(cardLeft, currentY, cardLeft + cardWidth, currentY + cardHeight, 6f, 6f, paint)
+
+                        // KPI Label
+                        paint.style = Paint.Style.FILL
+                        paint.color = grayTextColor
+                        paint.textSize = 8.5f
+                        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+                        if (isArabic) {
+                            paint.textAlign = Paint.Align.RIGHT
+                            canvas.drawText(kpiTitle, cardLeft + cardWidth - 8f, currentY + 16f, paint)
+                        } else {
+                            paint.textAlign = Paint.Align.LEFT
+                            canvas.drawText(kpiTitle, cardLeft + 8f, currentY + 16f, paint)
+                        }
+
+                        // KPI Value
+                        paint.color = primaryColor
+                        paint.textSize = 11.5f
+                        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                        if (isArabic) {
+                            paint.textAlign = Paint.Align.RIGHT
+                            canvas.drawText(kpiVal, cardLeft + cardWidth - 8f, currentY + 34f, paint)
+                        } else {
+                            paint.textAlign = Paint.Align.LEFT
+                            canvas.drawText(kpiVal, cardLeft + 8f, currentY + 34f, paint)
+                        }
+                    }
+                    currentY += cardHeight + 14f
+                }
+            } else {
+                // --- Subsequent Pages Header ---
+                paint.color = primaryColor
+                paint.style = Paint.Style.FILL
+                canvas.drawRoundRect(margin, currentY, margin + contentWidth, currentY + 32f, 4f, 4f, paint)
+
+                paint.color = Color.WHITE
+                paint.textSize = 10.5f
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                if (isArabic) {
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText("$storeName  •  $title", margin + contentWidth - 12f, currentY + 20f, paint)
+                    paint.textAlign = Paint.Align.LEFT
+                    canvas.drawText(subtitle, margin + 12f, currentY + 20f, paint)
+                } else {
+                    paint.textAlign = Paint.Align.LEFT
+                    canvas.drawText("$storeName  •  $title", margin + 12f, currentY + 20f, paint)
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(subtitle, margin + contentWidth - 12f, currentY + 20f, paint)
+                }
+                currentY += 40f
+            }
+
+            // --- Table Header ---
+            val headerHeight = 24f
+            paint.color = headerBgColor
+            paint.style = Paint.Style.FILL
+            canvas.drawRect(margin, currentY, margin + contentWidth, currentY + headerHeight, paint)
+
+            paint.color = borderColor
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 0.8f
+            canvas.drawRect(margin, currentY, margin + contentWidth, currentY + headerHeight, paint)
+
+            paint.style = Paint.Style.FILL
+            paint.color = darkTextColor
+            paint.textSize = 9.5f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+
+            for (i in headers.indices) {
+                if (i < 4) {
+                    val isAmountCol = (i == 3)
+                    drawCellText(canvas, headers[i], i, currentY + 16f, paint, alignEnd = isAmountCol)
+                }
+            }
+            currentY += headerHeight
+
+            // --- Table Rows ---
+            val rowHeight = 22f
+            val pageRowsLimit = if (pageNumber == 1) rowsPerPageFirst else rowsPerPageSubsequent
+            var rowsDrawnThisPage = 0
+
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+            paint.textSize = 9f
+
+            while (currentRowIdx < totalRows && rowsDrawnThisPage < pageRowsLimit) {
+                val row = rows[currentRowIdx]
+
+                // Alternating row background
+                if (currentRowIdx % 2 == 1) {
+                    paint.color = altRowColor
+                    paint.style = Paint.Style.FILL
+                    canvas.drawRect(margin, currentY, margin + contentWidth, currentY + rowHeight, paint)
+                }
+
+                // Row borders
+                paint.color = borderColor
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 0.5f
+                canvas.drawRect(margin, currentY, margin + contentWidth, currentY + rowHeight, paint)
+
+                // Cells
+                paint.style = Paint.Style.FILL
+                paint.color = darkTextColor
+
+                drawCellText(canvas, row.col1, 0, currentY + 15f, paint, alignEnd = false)
+                drawCellText(canvas, row.col2, 1, currentY + 15f, paint, alignEnd = false)
+                drawCellText(canvas, row.col3, 2, currentY + 15f, paint, alignEnd = false)
+
+                // 4th column is amount / total -> bold & aligned end
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                drawCellText(canvas, row.col4, 3, currentY + 15f, paint, alignEnd = true)
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+
+                currentY += rowHeight
+                currentRowIdx++
+                rowsDrawnThisPage++
+            }
+
+            // If empty rows list (e.g. no transactions)
+            if (totalRows == 0 && pageNumber == 1) {
+                paint.style = Paint.Style.FILL
+                paint.color = grayTextColor
+                paint.textSize = 10f
+                paint.textAlign = Paint.Align.CENTER
+                val emptyMsg = if (isArabic) "لا توجد سجلات متاحة في هذه الفترة" else "No records available for this period"
+                canvas.drawText(emptyMsg, pageWidth / 2f, currentY + 30f, paint)
+                currentY += 50f
+            }
+
+            // Summary Totals bar on the last page (if table has rows)
+            if (pageNumber == totalPages && totalRows > 0) {
+                currentY += 4f
+                val summaryHeight = 22f
+                paint.color = headerBgColor
+                paint.style = Paint.Style.FILL
+                canvas.drawRect(margin, currentY, margin + contentWidth, currentY + summaryHeight, paint)
+
+                paint.color = borderColor
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 0.8f
+                canvas.drawRect(margin, currentY, margin + contentWidth, currentY + summaryHeight, paint)
+
+                paint.style = Paint.Style.FILL
+                paint.color = primaryColor
+                paint.textSize = 9.5f
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+
+                val countLabel = if (isArabic) "إجمالي السجلات: $totalRows" else "Total Records: $totalRows"
+                if (isArabic) {
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(countLabel, margin + contentWidth - 10f, currentY + 15f, paint)
+                } else {
+                    paint.textAlign = Paint.Align.LEFT
+                    canvas.drawText(countLabel, margin + 10f, currentY + 15f, paint)
+                }
+            }
+
+            // --- Footer ---
+            val footerY = pageHeight - margin
             paint.color = borderColor
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 0.5f
-            canvas.drawLine(30f, currentY + 22f, 565f, currentY + 22f, paint)
-            currentY += 22f
-            if (currentY > 780f) break
+            canvas.drawLine(margin, footerY - 14f, margin + contentWidth, footerY - 14f, paint)
+
+            paint.style = Paint.Style.FILL
+            paint.color = grayTextColor
+            paint.textSize = 8f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+
+            val footerText = if (isArabic) "تم الإصدار عبر تطبيق سمول ستور  •  مستند إلكتروني معتمد" else "Generated via SmallStore App • Verified Electronic Document"
+            val pageNumberText = if (isArabic) "صفحة $pageNumber من $totalPages" else "Page $pageNumber of $totalPages"
+
+            if (isArabic) {
+                paint.textAlign = Paint.Align.RIGHT
+                canvas.drawText(footerText, margin + contentWidth, footerY, paint)
+                paint.textAlign = Paint.Align.LEFT
+                canvas.drawText(pageNumberText, margin, footerY, paint)
+            } else {
+                paint.textAlign = Paint.Align.LEFT
+                canvas.drawText(footerText, margin, footerY, paint)
+                paint.textAlign = Paint.Align.RIGHT
+                canvas.drawText(pageNumberText, margin + contentWidth, footerY, paint)
+            }
+
+            pdfDocument.finishPage(page)
         }
 
-        // Footer
-        paint.style = Paint.Style.FILL
-        paint.color = grayTextColor
-        paint.textSize = 8.5f
-        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
-        canvas.drawText("Generated by SmallStore App • Electronic Document", 30f, 815f, paint)
-        canvas.drawText("Page 1 of 1", 510f, 815f, paint)
-
-        pdfDocument.finishPage(page)
         outputStream.use { os ->
             pdfDocument.writeTo(os)
             os.flush()
@@ -417,11 +660,12 @@ object ReportExporter {
         subtitle: String,
         kpis: List<Pair<String, String>>,
         headers: List<String>,
-        rows: List<ReportPreviewRow>
+        rows: List<ReportPreviewRow>,
+        isArabic: Boolean = true
     ): File {
         val file = File(context.cacheDir, fileName)
         FileOutputStream(file).use { fos ->
-            generatePdfReport(title, storeName, subtitle, kpis, headers, rows, fos)
+            generatePdfReport(title, storeName, subtitle, kpis, headers, rows, fos, isArabic)
         }
         return file
     }
