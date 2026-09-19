@@ -8,6 +8,7 @@ import com.example.model.NavDestination
 import com.example.model.StoreStrings
 import com.example.viewmodel.AnalysisTab
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -560,12 +561,31 @@ class ExampleRobolectricTest {
       "مشتريات آجل" to "500.00 ₪"
     )
 
+    val itemBreakdowns = listOf(
+      com.example.ui.screens.AggregatedProductLine(
+        productId = "prod-1",
+        productName = "سكر أبيض 1 كغم",
+        totalQuantity = 12,
+        totalSales = 60.0,
+        profitMargin = 0.0
+      ),
+      com.example.ui.screens.AggregatedProductLine(
+        productId = "prod-2",
+        productName = "زيت زيتون 1 لتر",
+        totalQuantity = 5,
+        totalSales = 175.0,
+        profitMargin = 0.0
+      )
+    )
+
     // Verify customer data integrity for this one selected customer
     assertEquals("أحمد خليل", selectedCustomer.customerName)
     assertEquals("0599123456", selectedCustomer.phone)
     assertEquals(350.0, selectedCustomer.balance, 0.001)
     assertEquals(2, customerTransactions.size)
     assertEquals(650.0, customerTransactions.sumOf { it.amount }, 0.001)
+    assertEquals(2, itemBreakdowns.size)
+    assertEquals(17, itemBreakdowns.sumOf { it.totalQuantity })
 
     // Test PDF generation invocation for this customer in Arabic
     try {
@@ -580,6 +600,7 @@ class ExampleRobolectricTest {
         totalCash = 0.0,
         totalDebt = 500.0,
         totalPayments = 150.0,
+        itemBreakdowns = itemBreakdowns,
         outputStream = outStreamAr,
         isArabic = true
       )
@@ -604,6 +625,7 @@ class ExampleRobolectricTest {
         totalCash = 0.0,
         totalDebt = 500.0,
         totalPayments = 150.0,
+        itemBreakdowns = itemBreakdowns,
         outputStream = outStreamEn,
         isArabic = false
       )
@@ -614,5 +636,393 @@ class ExampleRobolectricTest {
     } catch (_: IllegalStateException) {
       // Expected in headless Robolectric JVM without Skia PDF engine
     }
+  }
+
+  @Test
+  fun testReportCsvExportsSalesAndTransactionsAndCustomer() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+
+    // 1. Test Sales & Items CSV
+    val salesKpis = listOf(
+      "إجمالي المبيعات" to "1,500.00 ₪",
+      "مبيعات كاش" to "1,000.00 ₪",
+      "مبيعات آجل" to "500.00 ₪"
+    )
+    val itemBreakdowns = listOf(
+      com.example.ui.screens.AggregatedProductLine(
+        productId = "p-1",
+        productName = "سكر أبيض",
+        totalQuantity = 20,
+        totalSales = 100.0,
+        profitMargin = 15.0
+      ),
+      com.example.ui.screens.AggregatedProductLine(
+        productId = "p-2",
+        productName = "زيت نباتي",
+        totalQuantity = 10,
+        totalSales = 250.0,
+        profitMargin = 30.0
+      )
+    )
+    val invoices = listOf(
+      com.example.model.TransactionItem(
+        id = "INV-1",
+        customerName = "خالد عمر",
+        amount = 100.0,
+        date = "2026/09/19",
+        relativeTime = "اليوم",
+        activityType = "شراء نقدي (كاش)",
+        isCredit = false,
+        title = "فاتورة مبيعات #1",
+        notes = "دفع نقدي"
+      ),
+      com.example.model.TransactionItem(
+        id = "INV-2",
+        customerName = "سامر جميل",
+        amount = 250.0,
+        date = "2026/09/19",
+        relativeTime = "اليوم",
+        activityType = "شراء آجل",
+        isCredit = true,
+        title = "فاتورة مبيعات #2",
+        notes = "أجل"
+      )
+    )
+
+    val salesCsv = com.example.util.ReportExporter.generateSalesAndItemsCsv(
+      title = "تقرير المبيعات والأصناف",
+      storeName = "بقالة الأمل",
+      subtitle = "الفترة: اليوم",
+      kpis = salesKpis,
+      itemBreakdowns = itemBreakdowns,
+      invoices = invoices,
+      isArabic = true
+    )
+    assertTrue("Sales CSV must start with UTF-8 BOM", salesCsv.startsWith("\uFEFF"))
+    assertTrue("Sales CSV must contain store name", salesCsv.contains("بقالة الأمل"))
+    assertTrue("Sales CSV must contain report title", salesCsv.contains("تقرير المبيعات والأصناف"))
+    assertTrue("Sales CSV must contain Sales Summary section", salesCsv.contains("ملخص المبيعات"))
+    assertTrue("Sales CSV must contain item section", salesCsv.contains("جدول تفاصيل مبيعات الأصناف"))
+    assertTrue("Sales CSV must contain items", salesCsv.contains("سكر أبيض") && salesCsv.contains("زيت نباتي"))
+    assertTrue("Sales CSV must contain item totals row", salesCsv.contains("إجمالي الأصناف"))
+    assertTrue("Sales CSV must contain invoice section", salesCsv.contains("سجل فواتير المبيعات"))
+    assertTrue("Sales CSV must contain invoice records", salesCsv.contains("خالد عمر") && salesCsv.contains("سامر جميل"))
+    assertTrue("Sales CSV must contain invoices totals row", salesCsv.contains("إجمالي الفواتير"))
+
+    // 2. Test Transactions CSV
+    val txKpis = listOf(
+      "إجمالي الكاش" to "1,000.00 ₪",
+      "إجمالي الآجل" to "500.00 ₪",
+      "إجمالي التسديد" to "200.00 ₪"
+    )
+    val txCsv = com.example.util.ReportExporter.generateTransactionsCsv(
+      title = "تقرير حركة المعاملات",
+      storeName = "بقالة الأمل",
+      subtitle = "الفترة: اليوم",
+      kpis = txKpis,
+      transactions = invoices,
+      totalCash = 1000.0,
+      totalDebt = 500.0,
+      totalPayments = 200.0,
+      isArabic = true
+    )
+    assertTrue("Tx CSV must start with UTF-8 BOM", txCsv.startsWith("\uFEFF"))
+    assertTrue("Tx CSV must contain summary", txCsv.contains("ملخص المعاملات"))
+    assertTrue("Tx CSV must contain transactions section", txCsv.contains("تفاصيل المعاملات"))
+    assertTrue("Tx CSV must contain records", txCsv.contains("خالد عمر"))
+    assertTrue("Tx CSV must contain grand totals", txCsv.contains("إجمالي المعاملات"))
+    assertTrue("Tx CSV must contain final breakdown", txCsv.contains("ملخص الإجماليات النهائي"))
+
+    // 3. Test Comprehensive Customer CSV
+    val customer = CustomerAccount(
+      id = "CUST-99",
+      customerName = "محمود عادل",
+      phone = "0599123456",
+      balance = 350.0,
+      totalDebt = 350.0
+    )
+    val customerTx = listOf(
+      com.example.model.TransactionItem(
+        id = "TX-1",
+        customerName = "محمود عادل",
+        amount = 350.0,
+        date = "2026/09/18",
+        relativeTime = "أمس",
+        activityType = "شراء بالدين",
+        isCredit = true,
+        title = "شراء آجل",
+        notes = "بضاعة تموينية"
+      )
+    )
+    val customerItems = listOf(
+      com.example.ui.screens.AggregatedProductLine(
+        productId = "cp-1",
+        productName = "أرز بسمتي",
+        totalQuantity = 5,
+        totalSales = 150.0,
+        profitMargin = 20.0
+      )
+    )
+    val custCsv = com.example.util.ReportExporter.generateCustomerCsv(
+      title = StoreStrings.REPORT_COMPREHENSIVE_CUSTOMER_AR,
+      storeName = "بقالة الأمل",
+      subtitle = "الفترة: هذا الشهر",
+      customer = customer,
+      kpis = emptyList(),
+      transactions = customerTx,
+      totalCash = 0.0,
+      totalDebt = 350.0,
+      totalPayments = 0.0,
+      itemBreakdowns = customerItems,
+      isArabic = true
+    )
+    assertTrue("Cust CSV must start with UTF-8 BOM", custCsv.startsWith("\uFEFF"))
+    assertTrue("Cust CSV must have title", custCsv.contains("التقرير المخصص الشامل للعميل"))
+    assertTrue("Cust CSV must have selected customer section", custCsv.contains("بيانات العميل المحدد"))
+    assertTrue("Cust CSV must have customer name", custCsv.contains("محمود عادل"))
+    assertTrue("Cust CSV must have customer phone", custCsv.contains("0599123456"))
+    assertTrue("Cust CSV must have customer summary", custCsv.contains("ملخص حساب العميل"))
+    assertTrue("Cust CSV must have Most Ordered Products section", custCsv.contains("أكثر الأصناف طلباً لهذا العميل"))
+    assertTrue("Cust CSV must have ordered product row", custCsv.contains("أرز بسمتي") && custCsv.contains("#1"))
+    assertTrue("Cust CSV must have customer transactions section", custCsv.contains("تفاصيل التقرير"))
+    assertTrue("Cust CSV must have transaction row", custCsv.contains("بضاعة تموينية"))
+    assertTrue("Cust CSV must have final customer balance row", custCsv.contains("الرصيد والحساب النهائي للعميل"))
+  }
+
+  @Test
+  fun testReportTxtExportsSalesAndTransactionsAndCustomer() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+
+    // 1. Test Sales & Items TXT
+    val salesKpis = listOf(
+      "إجمالي المبيعات" to "1,500.00 ₪",
+      "مبيعات كاش" to "1,000.00 ₪",
+      "مبيعات آجل" to "500.00 ₪"
+    )
+    val itemBreakdowns = listOf(
+      com.example.ui.screens.AggregatedProductLine(
+        productId = "p-1",
+        productName = "سكر أبيض",
+        totalQuantity = 20,
+        totalSales = 100.0,
+        profitMargin = 15.0
+      ),
+      com.example.ui.screens.AggregatedProductLine(
+        productId = "p-2",
+        productName = "زيت نباتي",
+        totalQuantity = 10,
+        totalSales = 250.0,
+        profitMargin = 30.0
+      )
+    )
+    val invoices = listOf(
+      com.example.model.TransactionItem(
+        id = "INV-1",
+        customerName = "خالد عمر",
+        amount = 100.0,
+        date = "2026/09/19",
+        relativeTime = "اليوم",
+        activityType = "شراء نقدي (كاش)",
+        isCredit = false,
+        title = "فاتورة مبيعات #1",
+        notes = "دفع نقدي"
+      ),
+      com.example.model.TransactionItem(
+        id = "INV-2",
+        customerName = "سامر جميل",
+        amount = 250.0,
+        date = "2026/09/19",
+        relativeTime = "اليوم",
+        activityType = "شراء آجل",
+        isCredit = true,
+        title = "فاتورة مبيعات #2",
+        notes = "أجل"
+      )
+    )
+
+    val salesTxt = com.example.util.ReportExporter.generateSalesAndItemsTxt(
+      title = "تقرير المبيعات والأصناف",
+      storeName = "بقالة الأمل",
+      subtitle = "الفترة: اليوم",
+      kpis = salesKpis,
+      itemBreakdowns = itemBreakdowns,
+      invoices = invoices,
+      isArabic = true
+    )
+    assertTrue("Sales TXT must contain store name", salesTxt.contains("بقالة الأمل"))
+    assertTrue("Sales TXT must contain report title", salesTxt.contains("تقرير المبيعات والأصناف"))
+    assertTrue("Sales TXT must contain header section", salesTxt.contains("معلومات المتجر والتقرير"))
+    assertTrue("Sales TXT must contain sales summary section", salesTxt.contains("ملخص المبيعات"))
+    assertTrue("Sales TXT must contain item section", salesTxt.contains("جدول تفاصيل مبيعات الأصناف"))
+    assertTrue("Sales TXT must contain items", salesTxt.contains("سكر أبيض") && salesTxt.contains("زيت نباتي"))
+    assertTrue("Sales TXT must contain item totals", salesTxt.contains("إجمالي الأصناف") && salesTxt.contains("إجمالي مبيعات الأصناف"))
+    assertTrue("Sales TXT must contain invoice section", salesTxt.contains("سجل فواتير المبيعات"))
+    assertTrue("Sales TXT must contain invoice records", salesTxt.contains("خالد عمر") && salesTxt.contains("سامر جميل"))
+    assertTrue("Sales TXT must contain invoice totals", salesTxt.contains("إجمالي الفواتير"))
+
+    val salesFile = com.example.util.ReportExporter.createCachedSalesAndItemsTxt(
+      context = context,
+      fileName = "Sales_And_Items_Test.txt",
+      title = "تقرير المبيعات والأصناف",
+      storeName = "بقالة الأمل",
+      subtitle = "الفترة: اليوم",
+      kpis = salesKpis,
+      itemBreakdowns = itemBreakdowns,
+      invoices = invoices,
+      isArabic = true
+    )
+    assertTrue("Sales TXT file must exist", salesFile.exists() && salesFile.length() > 0)
+    assertTrue("Sales TXT filename must end with .txt", salesFile.name.endsWith(".txt"))
+
+    // English Sales TXT test
+    val salesTxtEn = com.example.util.ReportExporter.generateSalesAndItemsTxt(
+      title = "Sales & Items Report",
+      storeName = "Al-Amal Store",
+      subtitle = "Period: Today",
+      kpis = emptyList(),
+      itemBreakdowns = itemBreakdowns,
+      invoices = invoices,
+      isArabic = false
+    )
+    assertTrue("Sales TXT En must contain English header", salesTxtEn.contains("STORE & REPORT INFORMATION"))
+    assertTrue("Sales TXT En must contain Sales Summary", salesTxtEn.contains("SALES SUMMARY"))
+    assertTrue("Sales TXT En must contain Item Sales Details", salesTxtEn.contains("ITEM SALES DETAILS"))
+    assertTrue("Sales TXT En must contain Invoices Log", salesTxtEn.contains("SALES INVOICES LOG"))
+
+    // 2. Test Transactions TXT
+    val txKpis = listOf(
+      "إجمالي الكاش" to "1,000.00 ₪",
+      "إجمالي الآجل" to "500.00 ₪",
+      "إجمالي التسديد" to "200.00 ₪"
+    )
+    val txTxt = com.example.util.ReportExporter.generateTransactionsTxt(
+      title = "تقرير حركة المعاملات",
+      storeName = "بقالة الأمل",
+      subtitle = "الفترة: اليوم",
+      kpis = txKpis,
+      transactions = invoices,
+      totalCash = 1000.0,
+      totalDebt = 500.0,
+      totalPayments = 200.0,
+      isArabic = true
+    )
+    assertTrue("Tx TXT must contain header", txTxt.contains("معلومات المتجر والتقرير"))
+    assertTrue("Tx TXT must contain summary", txTxt.contains("ملخص المعاملات"))
+    assertTrue("Tx TXT must contain transactions section", txTxt.contains("تفاصيل المعاملات"))
+    assertTrue("Tx TXT must contain records", txTxt.contains("خالد عمر"))
+    assertFalse("Tx TXT must NOT contain UI filter tabs", txTxt.contains("الكل | كاش | آجل | تسديد") || txTxt.contains("All | Cash | Credit | Received"))
+    assertTrue("Tx TXT must contain grand totals", txTxt.contains("إجمالي المعاملات"))
+    assertTrue("Tx TXT must contain final breakdown", txTxt.contains("ملخص الإجماليات النهائي"))
+
+    val txFile = com.example.util.ReportExporter.createCachedTransactionsTxt(
+      context = context,
+      fileName = "Transactions_Test.txt",
+      title = "تقرير حركة المعاملات",
+      storeName = "بقالة الأمل",
+      subtitle = "الفترة: اليوم",
+      kpis = txKpis,
+      transactions = invoices,
+      totalCash = 1000.0,
+      totalDebt = 500.0,
+      totalPayments = 200.0,
+      isArabic = true
+    )
+    assertTrue("Tx TXT file must exist", txFile.exists() && txFile.length() > 0)
+    assertTrue("Tx TXT filename must end with .txt", txFile.name.endsWith(".txt"))
+
+    // 3. Test Comprehensive Customer TXT
+    val customer = CustomerAccount(
+      id = "CUST-99",
+      customerName = "محمود عادل",
+      phone = "0599123456",
+      balance = 350.0,
+      totalDebt = 350.0
+    )
+    val customerTx = listOf(
+      com.example.model.TransactionItem(
+        id = "TX-1",
+        customerName = "محمود عادل",
+        amount = 350.0,
+        date = "2026/09/18",
+        relativeTime = "أمس",
+        activityType = "شراء بالدين",
+        isCredit = true,
+        title = "شراء آجل",
+        notes = "بضاعة تموينية"
+      )
+    )
+    val customerItems = listOf(
+      com.example.ui.screens.AggregatedProductLine(
+        productId = "cp-1",
+        productName = "أرز بسمتي",
+        totalQuantity = 5,
+        totalSales = 150.0,
+        profitMargin = 20.0
+      )
+    )
+    val custTxt = com.example.util.ReportExporter.generateCustomerTxt(
+      title = StoreStrings.REPORT_COMPREHENSIVE_CUSTOMER_AR,
+      storeName = "بقالة الأمل",
+      subtitle = "الفترة: هذا الشهر",
+      customer = customer,
+      kpis = emptyList(),
+      transactions = customerTx,
+      totalCash = 0.0,
+      totalDebt = 350.0,
+      totalPayments = 0.0,
+      itemBreakdowns = customerItems,
+      isArabic = true
+    )
+    assertTrue("Cust TXT must have title", custTxt.contains("التقرير المخصص الشامل للعميل"))
+    assertTrue("Cust TXT must have selected customer section", custTxt.contains("بيانات العميل المحدد"))
+    assertTrue("Cust TXT must have customer name", custTxt.contains("محمود عادل"))
+    assertTrue("Cust TXT must have customer phone", custTxt.contains("0599123456"))
+    assertTrue("Cust TXT must have customer summary", custTxt.contains("ملخص حساب العميل"))
+    assertTrue("Cust TXT must have Most Ordered Products section", custTxt.contains("أكثر الأصناف طلباً لهذا العميل"))
+    assertTrue("Cust TXT must have ordered product row", custTxt.contains("أرز بسمتي") && custTxt.contains("#1"))
+    assertTrue("Cust TXT must have customer transactions section", custTxt.contains("تفاصيل التقرير"))
+    assertTrue("Cust TXT must have transaction row", custTxt.contains("بضاعة تموينية"))
+    assertTrue("Cust TXT must have final customer balance row", custTxt.contains("الرصيد والحساب النهائي للعميل"))
+    assertFalse("Cust TXT must not contain unrelated customers", custTxt.contains("خالد عمر") || custTxt.contains("سامر جميل"))
+
+    val custFile = com.example.util.ReportExporter.createCachedCustomerTxt(
+      context = context,
+      fileName = "Comprehensive_Customer_Report_محمود_عادل_Test.txt",
+      title = StoreStrings.REPORT_COMPREHENSIVE_CUSTOMER_AR,
+      storeName = "بقالة الأمل",
+      subtitle = "الفترة: هذا الشهر",
+      customer = customer,
+      kpis = emptyList(),
+      transactions = customerTx,
+      totalCash = 0.0,
+      totalDebt = 350.0,
+      totalPayments = 0.0,
+      itemBreakdowns = customerItems,
+      isArabic = true
+    )
+    assertTrue("Cust TXT file must exist", custFile.exists() && custFile.length() > 0)
+    assertTrue("Cust TXT filename must end with .txt", custFile.name.endsWith(".txt"))
+    val fileContent = custFile.readText(Charsets.UTF_8)
+    assertTrue("Cust file content must match", fileContent.contains("محمود عادل") && fileContent.contains("أرز بسمتي"))
+
+    // English Customer TXT test
+    val custTxtEn = com.example.util.ReportExporter.generateCustomerTxt(
+      title = StoreStrings.REPORT_COMPREHENSIVE_CUSTOMER_EN,
+      storeName = "Al-Amal Store",
+      subtitle = "Period: This Month",
+      customer = customer,
+      kpis = emptyList(),
+      transactions = customerTx,
+      totalCash = 0.0,
+      totalDebt = 350.0,
+      totalPayments = 0.0,
+      itemBreakdowns = customerItems,
+      isArabic = false
+    )
+    assertTrue("Cust TXT En must have title", custTxtEn.contains("Comprehensive Customer Report"))
+    assertTrue("Cust TXT En must have selected customer section", custTxtEn.contains("SELECTED CUSTOMER"))
+    assertTrue("Cust TXT En must have Customer Summary", custTxtEn.contains("CUSTOMER SUMMARY"))
+    assertTrue("Cust TXT En must have Most Ordered Products", custTxtEn.contains("MOST ORDERED PRODUCTS FOR THIS CUSTOMER"))
+    assertTrue("Cust TXT En must have Report Details", custTxtEn.contains("REPORT DETAILS"))
   }
 }

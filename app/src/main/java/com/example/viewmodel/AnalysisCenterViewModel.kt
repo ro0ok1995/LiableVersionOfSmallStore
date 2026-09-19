@@ -2,9 +2,14 @@ package com.example.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.db.TransactionItemLineEntity
+import com.example.model.AnalyticsExportDataPreparer
+import com.example.model.AnalyticsReportData
+import com.example.model.AppCurrency
 import com.example.model.CustomerAccount
 import com.example.model.PeriodFilter
 import com.example.model.TransactionItem
+import com.example.ui.components.BreakdownChartType
 import com.example.util.ReportPreviewRow
 import com.example.util.StatementRow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -292,6 +297,9 @@ data class AnalysisCenterUiState(
     // Statement tab filters
     val statementFilter: StatementTxFilter = StatementTxFilter.ALL,
 
+    // Statistics tab chart mode (circular/donut, bar/column, combined/combo)
+    val selectedChartType: BreakdownChartType = BreakdownChartType.DONUT,
+
     // Reports tab state
     val selectedReportType: ReportType = ReportType.DEBT_BALANCES,
     val isExporting: Boolean = false,
@@ -302,6 +310,10 @@ class AnalysisCenterViewModel : ViewModel() {
 
     private val _uiState = MutableStateFlow(AnalysisCenterUiState())
     val uiState: StateFlow<AnalysisCenterUiState> = _uiState.asStateFlow()
+
+    fun selectChartType(chartType: BreakdownChartType) {
+        _uiState.update { it.copy(selectedChartType = chartType) }
+    }
 
     fun selectTab(tab: AnalysisTab) {
         _uiState.update { state ->
@@ -562,5 +574,36 @@ class AnalysisCenterViewModel : ViewModel() {
                 runningBalance = running
             )
         }
+    }
+
+    /**
+     * Prepares structured Analytics export data reflecting the current state, active period,
+     * selected customer scope (ALL_CUSTOMERS or ONE_SELECTED_CUSTOMER), and selected chart mode.
+     */
+    fun getAnalyticsExportData(
+        transactions: List<TransactionItem>,
+        transactionLines: List<TransactionItemLineEntity> = emptyList(),
+        allCustomers: List<CustomerAccount> = emptyList(),
+        storeName: String = "",
+        currency: String = AppCurrency.SYMBOL,
+        isArabic: Boolean = true,
+        today: LocalDate = LocalDate.now()
+    ): AnalyticsReportData {
+        val state = _uiState.value
+        val (start, end) = getActiveDateRange()
+        return AnalyticsExportDataPreparer.prepareAnalyticsData(
+            transactions = transactions,
+            transactionLines = transactionLines,
+            allCustomers = allCustomers,
+            selectedCustomer = state.selectedCustomer,
+            activePeriod = getActivePeriod(),
+            customStartDate = start,
+            customEndDate = end,
+            selectedChartType = state.selectedChartType,
+            storeName = storeName,
+            currency = currency,
+            isArabic = isArabic,
+            today = today
+        )
     }
 }

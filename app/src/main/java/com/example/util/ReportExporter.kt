@@ -12,6 +12,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.core.content.FileProvider
+import com.example.model.AnalyticsReportData
 import com.example.model.AppCurrency
 import com.example.model.CustomerAccount
 import com.example.model.SettlementType
@@ -754,6 +755,7 @@ object ReportExporter {
         totalCash: Double,
         totalDebt: Double,
         totalPayments: Double,
+        itemBreakdowns: List<AggregatedProductLine> = emptyList(),
         isArabic: Boolean = true
     ): File {
         val file = File(context.cacheDir, fileName)
@@ -768,11 +770,81 @@ object ReportExporter {
                 totalCash = totalCash,
                 totalDebt = totalDebt,
                 totalPayments = totalPayments,
+                itemBreakdowns = itemBreakdowns,
                 outputStream = fos,
                 isArabic = isArabic
             )
         }
         return file
+    }
+
+    /**
+     * Creates a specialized Analytics / Statistics PDF report file in cache directory.
+     * Generates a structured vector PDF supporting both ALL_CUSTOMERS and ONE_SELECTED_CUSTOMER.
+     */
+    fun createCachedAnalyticsPdf(
+        context: Context,
+        fileName: String,
+        data: AnalyticsReportData,
+        isArabic: Boolean = true
+    ): File {
+        val file = File(context.cacheDir, fileName)
+        FileOutputStream(file).use { fos ->
+            AnalyticsPdfGenerator.generateAnalyticsPdf(
+                data = data,
+                outputStream = fos,
+                isArabic = isArabic
+            )
+        }
+        return file
+    }
+
+    /**
+     * Creates a specialized Analytics / Statistics CSV report file in cache directory.
+     * Generates a structured RFC-4180 CSV with UTF-8 BOM supporting both ALL_CUSTOMERS and ONE_SELECTED_CUSTOMER.
+     */
+    fun createCachedAnalyticsCsv(
+        context: Context,
+        fileName: String,
+        data: AnalyticsReportData,
+        isArabic: Boolean = true
+    ): File {
+        val csv = generateAnalyticsCsv(data, isArabic)
+        return createCachedCsv(context, fileName, csv)
+    }
+
+    /**
+     * Generates structured CSV string for Analytics / Statistics report matching the PDF report.
+     */
+    fun generateAnalyticsCsv(
+        data: AnalyticsReportData,
+        isArabic: Boolean = true
+    ): String {
+        return AnalyticsCsvGenerator.generateAnalyticsCsv(data, isArabic)
+    }
+
+    /**
+     * Creates a specialized Analytics / Statistics TXT report file in cache directory.
+     * Generates a human-readable text report supporting both ALL_CUSTOMERS and ONE_SELECTED_CUSTOMER.
+     */
+    fun createCachedAnalyticsTxt(
+        context: Context,
+        fileName: String,
+        data: AnalyticsReportData,
+        isArabic: Boolean = true
+    ): File {
+        val txt = generateAnalyticsTxt(data, isArabic)
+        return createCachedTxt(context, fileName, txt)
+    }
+
+    /**
+     * Generates structured TXT string for Analytics / Statistics report matching the PDF and CSV reports.
+     */
+    fun generateAnalyticsTxt(
+        data: AnalyticsReportData,
+        isArabic: Boolean = true
+    ): String {
+        return AnalyticsTxtGenerator.generateAnalyticsTxt(data, isArabic)
     }
 
     /**
@@ -784,9 +856,11 @@ object ReportExporter {
      * 2. SELECTED CUSTOMER INFORMATION: Shows ONLY this one selected customer's identity, phone number, and debt status.
      *    Never shows customer lists, directories, or other customers.
      * 3. CUSTOMER SUMMARY: Financial summary cards with real calculated amounts (Balance Due, Cash Purchases, Debt Purchases, Payments).
-     * 4. REPORT DETAILS ("تفاصيل التقرير" / "Report Details"): Structured 5-column transaction ledger table for this customer
+     * 4. MOST ORDERED PRODUCTS FOR THIS CUSTOMER ("أكثر الأصناف طلباً لهذا العميل" / "Most Ordered Products for This Customer"):
+     *    Ranked products ordered by this specific customer with Rank, Product, Quantity, and Total amount.
+     * 5. REPORT DETAILS ("تفاصيل التقرير" / "Report Details"): Structured 5-column transaction ledger table for this customer
      *    (Date, Type, Description/Notes, Settlement, Amount) with semantic badges and selectable vector text.
-     * 5. FINAL TOTALS: Grand total transactions row and comprehensive balance summary card.
+     * 6. FINAL TOTALS: Grand total transactions row and comprehensive balance summary card.
      *
      * Multi-page pagination with repeated headers, persistent customer identity banner on sub-pages,
      * consistent page numbering ("صفحة X من Y"), true RTL/LTR, and zero UI filter tabs.
@@ -801,6 +875,7 @@ object ReportExporter {
         totalCash: Double,
         totalDebt: Double,
         totalPayments: Double,
+        itemBreakdowns: List<AggregatedProductLine> = emptyList(),
         outputStream: OutputStream,
         isArabic: Boolean = true
     ) {
@@ -825,7 +900,7 @@ object ReportExporter {
 
         val paint = Paint().apply { isAntiAlias = true }
 
-        // Columns definition: Date (18%), Type (18%), Description / Notes (25%), Settlement (17%), Amount (22%)
+        // Columns definition for transactions table: Date (18%), Type (18%), Description / Notes (25%), Settlement (17%), Amount (22%)
         val weights = floatArrayOf(0.18f, 0.18f, 0.25f, 0.17f, 0.22f)
         val colWidths = FloatArray(weights.size) { i -> contentWidth * weights[i] }
         val colStarts = FloatArray(weights.size)
@@ -844,6 +919,29 @@ object ReportExporter {
                 val w = colWidths[i]
                 colStarts[i] = curLeft
                 colEnds[i] = curLeft + w
+                curLeft += w
+            }
+        }
+
+        // Columns definition for Most Ordered Products table: Rank (12%), Product (50%), Quantity (16%), Total (22%)
+        val prodWeights = floatArrayOf(0.12f, 0.50f, 0.16f, 0.22f)
+        val prodColWidths = FloatArray(prodWeights.size) { i -> contentWidth * prodWeights[i] }
+        val prodColStarts = FloatArray(prodWeights.size)
+        val prodColEnds = FloatArray(prodWeights.size)
+        if (isArabic) {
+            var curRight = margin + contentWidth
+            for (i in prodWeights.indices) {
+                val w = prodColWidths[i]
+                prodColEnds[i] = curRight
+                prodColStarts[i] = curRight - w
+                curRight -= w
+            }
+        } else {
+            var curLeft = margin
+            for (i in prodWeights.indices) {
+                val w = prodColWidths[i]
+                prodColStarts[i] = curLeft
+                prodColEnds[i] = curLeft + w
                 curLeft += w
             }
         }
@@ -875,6 +973,33 @@ object ReportExporter {
             }
         }
 
+        fun drawProdCellText(
+            canvas: android.graphics.Canvas,
+            text: String,
+            colIndex: Int,
+            baselineY: Float,
+            textPaint: Paint,
+            alignEnd: Boolean = false
+        ) {
+            if (isArabic) {
+                if (alignEnd) {
+                    textPaint.textAlign = Paint.Align.LEFT
+                    canvas.drawText(text, prodColStarts[colIndex] + 6f, baselineY, textPaint)
+                } else {
+                    textPaint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(text, prodColEnds[colIndex] - 6f, baselineY, textPaint)
+                }
+            } else {
+                if (alignEnd) {
+                    textPaint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(text, prodColEnds[colIndex] - 6f, baselineY, textPaint)
+                } else {
+                    textPaint.textAlign = Paint.Align.LEFT
+                    canvas.drawText(text, prodColStarts[colIndex] + 6f, baselineY, textPaint)
+                }
+            }
+        }
+
         fun fitText(text: String, maxWidth: Float, textPaint: Paint): String {
             if (textPaint.measureText(text) <= maxWidth) return text
             var truncated = text
@@ -890,19 +1015,67 @@ object ReportExporter {
             listOf("Date", "Type", "Description / Notes", "Settlement", "Amount")
         }
 
+        val prodHeaders = if (isArabic) {
+            listOf("الترتيب", "الصنف", "الكمية", "الإجمالي")
+        } else {
+            listOf("Rank", "Product", "Quantity", "Total")
+        }
+
         val currentDate = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.US).format(Date())
 
-        // Calculate total pages dynamically
+        // Calculate total pages dynamically including top products and transactions
         fun calculateTotalPages(): Int {
-            if (transactions.isEmpty()) return 1
+            if (transactions.isEmpty() && itemBreakdowns.isEmpty()) return 1
             var simPage = 1
-            var simY = margin + 72f + 14f + 22f + 52f + 12f + 44f + 14f + 26f + 22f
-            for (i in transactions.indices) {
-                if (simY + 22f > printableBottomY) {
+            var simY = margin + 72f + 14f + 22f + 52f + 12f + 44f + 14f // Header + Customer card + KPIs
+
+            // Simulate Most Ordered Products section
+            val prodSecH = 26f + 22f + if (itemBreakdowns.isEmpty()) 24f else (itemBreakdowns.size * 22f)
+            if (simY + 50f > printableBottomY) {
+                simPage++
+                simY = margin + 38f
+            }
+            simY += 26f + 22f // Section header + Table header
+            if (itemBreakdowns.isEmpty()) {
+                if (simY + 24f > printableBottomY) {
                     simPage++
-                    simY = margin + 38f + 22f + 22f
+                    simY = margin + 38f + 22f + 24f
                 } else {
-                    simY += 22f
+                    simY += 24f
+                }
+            } else {
+                for (p in itemBreakdowns.indices) {
+                    if (simY + 22f > printableBottomY) {
+                        simPage++
+                        simY = margin + 38f + 22f + 22f
+                    } else {
+                        simY += 22f
+                    }
+                }
+            }
+            simY += 14f
+
+            // Simulate Transactions section
+            if (simY + 50f > printableBottomY) {
+                simPage++
+                simY = margin + 38f
+            }
+            simY += 26f + 22f // Section header + Table header
+            if (transactions.isEmpty()) {
+                if (simY + 26f > printableBottomY) {
+                    simPage++
+                    simY = margin + 38f + 22f + 26f
+                } else {
+                    simY += 26f
+                }
+            } else {
+                for (i in transactions.indices) {
+                    if (simY + 22f > printableBottomY) {
+                        simPage++
+                        simY = margin + 38f + 22f + 22f
+                    } else {
+                        simY += 22f
+                    }
                 }
             }
             if (simY + 60f > printableBottomY) {
@@ -991,9 +1164,9 @@ object ReportExporter {
 
                 paint.style = Paint.Style.FILL
                 paint.color = primaryColor
-                paint.textSize = 12f
+                paint.textSize = 13f
                 paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                val custLabel = if (isArabic) "العميل المحدد: ${customer.customerName}" else "Selected Customer: ${customer.customerName}"
+                val custLabel = if (isArabic) "العميل: ${customer.customerName}" else "Customer: ${customer.customerName}"
                 if (isArabic) {
                     paint.textAlign = Paint.Align.RIGHT
                     canvas.drawText(custLabel, margin + contentWidth - 14f, y + 22f, paint)
@@ -1175,7 +1348,27 @@ object ReportExporter {
             }
         }
 
-        fun checkPageBreak(requiredHeight: Float) {
+        fun drawProdTableHeader(canvas: android.graphics.Canvas, y: Float) {
+            val hHeight = 22f
+            paint.color = headerBgColor
+            paint.style = Paint.Style.FILL
+            canvas.drawRect(margin, y, margin + contentWidth, y + hHeight, paint)
+            paint.color = borderColor
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 0.8f
+            canvas.drawRect(margin, y, margin + contentWidth, y + hHeight, paint)
+
+            paint.style = Paint.Style.FILL
+            paint.color = darkTextColor
+            paint.textSize = 9f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+
+            for (i in prodHeaders.indices) {
+                drawProdCellText(canvas, prodHeaders[i], i, y + 15f, paint, alignEnd = (i >= 2))
+            }
+        }
+
+        fun checkPageBreak(requiredHeight: Float, onContinuedPage: ((android.graphics.Canvas, Float) -> Unit)? = null) {
             if (activePage.currentY + requiredHeight > printableBottomY) {
                 drawFooter(activePage.canvas, activePage.pageNum)
                 pdfDocument.finishPage(activePage.page)
@@ -1183,14 +1376,99 @@ object ReportExporter {
                 currentPageNum++
                 activePage = startNewPage()
 
-                // Re-draw table header on continued page
-                drawTableHeader(activePage.canvas, activePage.currentY)
-                activePage.currentY += 22f
+                onContinuedPage?.invoke(activePage.canvas, activePage.currentY)
             }
         }
 
         // =====================================================================
-        // 4. REPORT DETAILS ("تفاصيل التقرير" / "Report Details")
+        // 4. MOST ORDERED PRODUCTS FOR THIS CUSTOMER
+        // =====================================================================
+        checkPageBreak(50f)
+        val prodSectionBadgeHeight = 22f
+        paint.color = lightBgColor
+        paint.style = Paint.Style.FILL
+        activePage.canvas.drawRoundRect(margin, activePage.currentY, margin + contentWidth, activePage.currentY + prodSectionBadgeHeight, 4f, 4f, paint)
+        paint.color = primaryColor
+        paint.textSize = 10f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        val prodSecTitle = if (isArabic) {
+            "أكثر الأصناف طلباً لهذا العميل (${itemBreakdowns.size} صنف)"
+        } else {
+            "Most Ordered Products for This Customer (${itemBreakdowns.size} Products)"
+        }
+        if (isArabic) {
+            paint.textAlign = Paint.Align.RIGHT
+            activePage.canvas.drawText(prodSecTitle, margin + contentWidth - 10f, activePage.currentY + 15f, paint)
+        } else {
+            paint.textAlign = Paint.Align.LEFT
+            activePage.canvas.drawText(prodSecTitle, margin + 10f, activePage.currentY + 15f, paint)
+        }
+        activePage.currentY += prodSectionBadgeHeight + 4f
+
+        // Product Table Column Header
+        drawProdTableHeader(activePage.canvas, activePage.currentY)
+        activePage.currentY += 22f
+
+        if (itemBreakdowns.isEmpty()) {
+            val emptyH = 24f
+            paint.color = grayTextColor
+            paint.textSize = 9f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+            paint.textAlign = Paint.Align.CENTER
+            val emptyMsg = if (isArabic) "لا توجد تفاصيل أصناف فردية مسجلة لهذا العميل في هذه الفترة" else "No detailed product order records found for this customer in this period"
+            activePage.canvas.drawText(emptyMsg, pageWidth / 2f, activePage.currentY + 16f, paint)
+            activePage.currentY += emptyH
+        } else {
+            val rowHeight = 22f
+            itemBreakdowns.forEachIndexed { idx, item ->
+                checkPageBreak(rowHeight) { canvas, y ->
+                    drawProdTableHeader(canvas, y)
+                    activePage.currentY += 22f
+                }
+
+                if (idx % 2 == 1) {
+                    paint.color = altRowColor
+                    paint.style = Paint.Style.FILL
+                    activePage.canvas.drawRect(margin, activePage.currentY, margin + contentWidth, activePage.currentY + rowHeight, paint)
+                }
+                paint.color = borderColor
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 0.5f
+                activePage.canvas.drawRect(margin, activePage.currentY, margin + contentWidth, activePage.currentY + rowHeight, paint)
+
+                paint.style = Paint.Style.FILL
+                paint.color = darkTextColor
+                paint.textSize = 8.5f
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+
+                // Col 0: Rank (#1, #2, ...)
+                val rankText = "#${idx + 1}"
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                paint.color = if (idx == 0) primaryColor else darkTextColor
+                drawProdCellText(activePage.canvas, rankText, 0, activePage.currentY + 15f, paint, alignEnd = false)
+
+                // Col 1: Product name
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+                paint.color = darkTextColor
+                val prodNameDisplay = fitText(item.productName, prodColWidths[1] - 12f, paint)
+                drawProdCellText(activePage.canvas, prodNameDisplay, 1, activePage.currentY + 15f, paint, alignEnd = false)
+
+                // Col 2: Quantity
+                val qtyText = "${item.totalQuantity}"
+                drawProdCellText(activePage.canvas, qtyText, 2, activePage.currentY + 15f, paint, alignEnd = true)
+
+                // Col 3: Total amount with currency formatting
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                paint.color = primaryColor
+                drawProdCellText(activePage.canvas, AppCurrency.formatAmountWithDecimals(item.totalSales, isArabic), 3, activePage.currentY + 15f, paint, alignEnd = true)
+
+                activePage.currentY += rowHeight
+            }
+        }
+        activePage.currentY += 12f
+
+        // =====================================================================
+        // 5. REPORT DETAILS ("تفاصيل التقرير" / "Report Details")
         // =====================================================================
         checkPageBreak(50f)
         val sectionBadgeHeight = 22f
@@ -1231,7 +1509,10 @@ object ReportExporter {
         } else {
             val rowHeight = 22f
             transactions.forEachIndexed { idx, tx ->
-                checkPageBreak(rowHeight)
+                checkPageBreak(rowHeight) { canvas, y ->
+                    drawTableHeader(canvas, y)
+                    activePage.currentY += 22f
+                }
 
                 if (idx % 2 == 1) {
                     paint.color = altRowColor
@@ -2395,7 +2676,1018 @@ object ReportExporter {
         return file
     }
 
+    /**
+     * Creates a specialized Sales & Items CSV report file in cache directory.
+     */
+    fun createCachedSalesAndItemsCsv(
+        context: Context,
+        fileName: String,
+        title: String,
+        storeName: String,
+        subtitle: String,
+        kpis: List<Pair<String, String>>,
+        itemBreakdowns: List<AggregatedProductLine>,
+        invoices: List<TransactionItem>,
+        isArabic: Boolean = true
+    ): File {
+        val csv = generateSalesAndItemsCsv(
+            title = title,
+            storeName = storeName,
+            subtitle = subtitle,
+            kpis = kpis,
+            itemBreakdowns = itemBreakdowns,
+            invoices = invoices,
+            isArabic = isArabic
+        )
+        return createCachedCsv(context, fileName, csv)
+    }
+
+    /**
+     * Creates a specialized Transaction CSV report file in cache directory.
+     */
+    fun createCachedTransactionsCsv(
+        context: Context,
+        fileName: String,
+        title: String,
+        storeName: String,
+        subtitle: String,
+        kpis: List<Pair<String, String>>,
+        transactions: List<TransactionItem>,
+        totalCash: Double,
+        totalDebt: Double,
+        totalPayments: Double,
+        isArabic: Boolean = true
+    ): File {
+        val csv = generateTransactionsCsv(
+            title = title,
+            storeName = storeName,
+            subtitle = subtitle,
+            kpis = kpis,
+            transactions = transactions,
+            totalCash = totalCash,
+            totalDebt = totalDebt,
+            totalPayments = totalPayments,
+            isArabic = isArabic
+        )
+        return createCachedCsv(context, fileName, csv)
+    }
+
+    /**
+     * Creates a specialized Comprehensive Customer CSV report file in cache directory.
+     * Guaranteed to represent ONLY ONE specific selected customer.
+     */
+    fun createCachedCustomerCsv(
+        context: Context,
+        fileName: String,
+        title: String,
+        storeName: String,
+        subtitle: String,
+        customer: CustomerAccount,
+        kpis: List<Pair<String, String>>,
+        transactions: List<TransactionItem>,
+        totalCash: Double,
+        totalDebt: Double,
+        totalPayments: Double,
+        itemBreakdowns: List<AggregatedProductLine> = emptyList(),
+        isArabic: Boolean = true
+    ): File {
+        val csv = generateCustomerCsv(
+            title = title,
+            storeName = storeName,
+            subtitle = subtitle,
+            customer = customer,
+            kpis = kpis,
+            transactions = transactions,
+            totalCash = totalCash,
+            totalDebt = totalDebt,
+            totalPayments = totalPayments,
+            itemBreakdowns = itemBreakdowns,
+            isArabic = isArabic
+        )
+        return createCachedCsv(context, fileName, csv)
+    }
+
+    /**
+     * Generates structured CSV data for Sales & Items report matching the final PDF report.
+     * Sections: 1. Report Info, 2. Summary KPIs, 3. Item Details Table & Totals, 4. Invoice Details Table & Totals.
+     */
+    fun generateSalesAndItemsCsv(
+        title: String,
+        storeName: String,
+        subtitle: String,
+        kpis: List<Pair<String, String>>,
+        itemBreakdowns: List<AggregatedProductLine>,
+        invoices: List<TransactionItem>,
+        isArabic: Boolean = true
+    ): String {
+        val sb = StringBuilder()
+        sb.append("\uFEFF") // UTF-8 BOM for spreadsheet encoding compatibility
+        val currentDate = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.US).format(Date())
+
+        // SECTION 1: Report Information
+        val storeLabel = if (isArabic) "المتجر" else "Store"
+        val storeVal = if (isArabic) "سمول ستور | $storeName" else "SmallStore | $storeName"
+        val titleLabel = if (isArabic) "عنوان التقرير" else "Report Title"
+        val periodLabel = if (isArabic) "الفترة" else "Period"
+        val dateLabel = if (isArabic) "تاريخ الإصدار" else "Generated Date"
+
+        sb.append(csvRow(storeLabel, storeVal))
+        sb.append(csvRow(titleLabel, title))
+        sb.append(csvRow(periodLabel, subtitle))
+        sb.append(csvRow(dateLabel, currentDate))
+        sb.append("\n")
+
+        // SECTION 2: Summary (KPIs)
+        val summarySecTitle = if (isArabic) "ملخص المبيعات" else "Sales Summary"
+        sb.append(csvRow(summarySecTitle))
+        if (kpis.isNotEmpty()) {
+            for ((k, v) in kpis) {
+                sb.append(csvRow(k, v))
+            }
+        } else {
+            val totalSalesVal = itemBreakdowns.sumOf { it.totalSales }
+            val cashVal = invoices.filter { !it.isCredit }.sumOf { it.amount }
+            val debtVal = invoices.filter { it.isCredit }.sumOf { it.amount }
+            sb.append(csvRow(if (isArabic) "إجمالي المبيعات" else "Total Sales", AppCurrency.formatAmountWithDecimals(totalSalesVal, isArabic)))
+            sb.append(csvRow(if (isArabic) "مبيعات كاش" else "Cash Sales", AppCurrency.formatAmountWithDecimals(cashVal, isArabic)))
+            sb.append(csvRow(if (isArabic) "مبيعات آجل" else "Debt Sales", AppCurrency.formatAmountWithDecimals(debtVal, isArabic)))
+        }
+        sb.append("\n")
+
+        // SECTION 3: Item Details
+        val itemsSecTitle = if (isArabic) {
+            "جدول تفاصيل مبيعات الأصناف (${itemBreakdowns.size} صنف)"
+        } else {
+            "Item Sales Breakdown (${itemBreakdowns.size} Items)"
+        }
+        sb.append(csvRow(itemsSecTitle))
+        val itemHeaders = if (isArabic) {
+            listOf("الصنف / البيان", "الكمية المباعة", "إجمالي المبيعات", "هامش الربح")
+        } else {
+            listOf("Item / Description", "Qty Sold", "Total Sales", "Profit Margin")
+        }
+        sb.append(csvRow(itemHeaders))
+
+        val totalItemsQuantity = itemBreakdowns.sumOf { it.totalQuantity }
+        val totalItemsSales = itemBreakdowns.sumOf { it.totalSales }
+        val totalItemsProfit = itemBreakdowns.sumOf { it.profitMargin }
+
+        if (itemBreakdowns.isEmpty()) {
+            sb.append(csvRow(if (isArabic) "لا توجد تفاصيل أصناف لهذه الفترة" else "No item details for this period", "", "", ""))
+        } else {
+            for (item in itemBreakdowns) {
+                sb.append(csvRow(
+                    item.productName,
+                    item.totalQuantity.toString(),
+                    AppCurrency.formatAmountWithDecimals(item.totalSales, isArabic),
+                    AppCurrency.formatAmountWithDecimals(item.profitMargin, isArabic)
+                ))
+            }
+            // Items Totals Row
+            val totalItemsLbl = if (isArabic) "إجمالي الأصناف" else "Items Grand Total"
+            sb.append(csvRow(
+                totalItemsLbl,
+                totalItemsQuantity.toString(),
+                AppCurrency.formatAmountWithDecimals(totalItemsSales, isArabic),
+                AppCurrency.formatAmountWithDecimals(totalItemsProfit, isArabic)
+            ))
+        }
+        sb.append("\n")
+
+        // SECTION 4: Invoice Details
+        val invSecTitle = if (isArabic) {
+            "سجل فواتير المبيعات (${invoices.size} فاتورة)"
+        } else {
+            "Sales Invoices Log (${invoices.size} Invoices)"
+        }
+        sb.append(csvRow(invSecTitle))
+        val invHeaders = if (isArabic) {
+            listOf("التاريخ / الفاتورة", "العميل", "طريقة الدفع", "المبلغ")
+        } else {
+            listOf("Date / Ref", "Customer", "Payment Type", "Amount")
+        }
+        sb.append(csvRow(invHeaders))
+
+        val totalInvoicesAmount = invoices.sumOf { it.amount }
+
+        if (invoices.isEmpty()) {
+            sb.append(csvRow(if (isArabic) "لا توجد فواتير مبيعات لهذه الفترة" else "No sales invoices for this period", "", "", ""))
+        } else {
+            for (inv in invoices) {
+                val dateDesc = "${inv.date} - ${inv.title.ifBlank { inv.notes.ifBlank { inv.date } }}"
+                val isCash = !inv.isCredit && (
+                    inv.activityType.contains("كاش") ||
+                    inv.activityType.contains("Cash") ||
+                    (!inv.activityType.contains("تسديد") &&
+                     !inv.activityType.contains("Payment") &&
+                     !inv.activityType.contains("آجل") &&
+                     !inv.activityType.contains("دين"))
+                )
+                val typeLabel = if (isCash) (if (isArabic) "كاش" else "Cash") else (if (isArabic) "آجل" else "Debt")
+                sb.append(csvRow(
+                    dateDesc,
+                    inv.customerName,
+                    typeLabel,
+                    AppCurrency.formatAmountWithDecimals(inv.amount, isArabic)
+                ))
+            }
+            // Invoices Totals Row
+            val totalInvLbl = if (isArabic) "إجمالي الفواتير" else "Invoices Grand Total"
+            sb.append(csvRow(
+                totalInvLbl,
+                invoices.size.toString(),
+                "-",
+                AppCurrency.formatAmountWithDecimals(totalInvoicesAmount, isArabic)
+            ))
+        }
+
+        return sb.toString()
+    }
+
+    /**
+     * Generates structured CSV data for Transactions report matching the final PDF report.
+     * Sections: 1. Report Info, 2. Summary KPIs, 3. Transaction Details Table, Grand Totals & Breakdown.
+     */
+    fun generateTransactionsCsv(
+        title: String,
+        storeName: String,
+        subtitle: String,
+        kpis: List<Pair<String, String>>,
+        transactions: List<TransactionItem>,
+        totalCash: Double,
+        totalDebt: Double,
+        totalPayments: Double,
+        isArabic: Boolean = true
+    ): String {
+        val sb = StringBuilder()
+        sb.append("\uFEFF") // UTF-8 BOM
+        val currentDate = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.US).format(Date())
+
+        // SECTION 1: Report Information
+        val storeLabel = if (isArabic) "المتجر" else "Store"
+        val storeVal = if (isArabic) "سمول ستور | $storeName" else "SmallStore | $storeName"
+        val titleLabel = if (isArabic) "عنوان التقرير" else "Report Title"
+        val periodLabel = if (isArabic) "الفترة" else "Period"
+        val dateLabel = if (isArabic) "تاريخ الإصدار" else "Generated Date"
+
+        sb.append(csvRow(storeLabel, storeVal))
+        sb.append(csvRow(titleLabel, title))
+        sb.append(csvRow(periodLabel, subtitle))
+        sb.append(csvRow(dateLabel, currentDate))
+        sb.append("\n")
+
+        // SECTION 2: Summary
+        val summarySecTitle = if (isArabic) "ملخص المعاملات" else "Transactions Summary"
+        sb.append(csvRow(summarySecTitle))
+        if (kpis.isNotEmpty()) {
+            for ((k, v) in kpis) {
+                sb.append(csvRow(k, v))
+            }
+        } else {
+            sb.append(csvRow(if (isArabic) "إجمالي الكاش" else "Cash Sum", AppCurrency.formatAmountWithDecimals(totalCash, isArabic)))
+            sb.append(csvRow(if (isArabic) "إجمالي الآجل" else "Debt Sum", AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)))
+            sb.append(csvRow(if (isArabic) "إجمالي التسديد" else "Payments", AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)))
+        }
+        sb.append("\n")
+
+        // SECTION 3: Transaction Details
+        val txSecTitle = if (isArabic) {
+            "تفاصيل المعاملات (${transactions.size} معاملة)"
+        } else {
+            "Transaction Details (${transactions.size} Transactions)"
+        }
+        sb.append(csvRow(txSecTitle))
+        val txHeaders = if (isArabic) {
+            listOf("التاريخ", "العميل", "نوع المعاملة", "البيان / التسوية", "المبلغ")
+        } else {
+            listOf("Date", "Customer", "Transaction Type", "Notes / Settlement", "Amount")
+        }
+        sb.append(csvRow(txHeaders))
+
+        if (transactions.isEmpty()) {
+            sb.append(csvRow(if (isArabic) "لا توجد معاملات متاحة في هذه الفترة" else "No transactions available for this period", "", "", "", ""))
+        } else {
+            for (tx in transactions) {
+                val customerName = tx.customerName.ifBlank { if (isArabic) "عميل عام" else "General" }
+                val isPayment = tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
+                val isDebt = !isPayment && (tx.isCredit || tx.activityType.contains("آجل") ||
+                    tx.activityType.contains("دين") || tx.activityType.contains("Debt") ||
+                    tx.activityType.contains("شراء بالدين"))
+
+                val typeLabel = if (isPayment) {
+                    if (isArabic) "تسديد (دفعة)" else "Payment"
+                } else if (isDebt) {
+                    if (isArabic) "شراء آجل (دين)" else "Credit Purchase"
+                } else {
+                    if (isArabic) "شراء نقدي (كاش)" else "Cash Purchase"
+                }
+
+                val settlementStr = when (tx.settlementType) {
+                    SettlementType.FULL -> if (isArabic) "تسوية كاملة" else "Full Settlement"
+                    SettlementType.PARTIAL -> if (isArabic) "تسوية جزئية" else "Partial Settlement"
+                    null -> ""
+                }
+                val rawNotes = tx.notes.ifBlank { tx.title }
+                val noteText = if (settlementStr.isNotBlank() && rawNotes.isNotBlank()) {
+                    "$settlementStr - $rawNotes"
+                } else if (settlementStr.isNotBlank()) {
+                    settlementStr
+                } else if (rawNotes.isNotBlank()) {
+                    rawNotes
+                } else {
+                    "-"
+                }
+
+                sb.append(csvRow(
+                    tx.date,
+                    customerName,
+                    typeLabel,
+                    noteText,
+                    AppCurrency.formatAmountWithDecimals(tx.amount, isArabic)
+                ))
+            }
+
+            // Grand Totals Row
+            val totalLbl = if (isArabic) "إجمالي المعاملات (${transactions.size} معاملة)" else "Transactions Total (${transactions.size} Transactions)"
+            sb.append(csvRow(
+                totalLbl,
+                "",
+                "",
+                "",
+                AppCurrency.formatAmountWithDecimals(transactions.sumOf { it.amount }, isArabic)
+            ))
+
+            // Final Totals Breakdown
+            sb.append("\n")
+            val breakdownTitle = if (isArabic) "ملخص الإجماليات النهائي" else "Final Totals Breakdown"
+            sb.append(csvRow(breakdownTitle))
+            sb.append(csvRow(if (isArabic) "إجمالي الكاش" else "Cash Total", AppCurrency.formatAmountWithDecimals(totalCash, isArabic)))
+            sb.append(csvRow(if (isArabic) "إجمالي الآجل" else "Debt Total", AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)))
+            sb.append(csvRow(if (isArabic) "إجمالي التسديد" else "Payments Total", AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)))
+        }
+
+        return sb.toString()
+    }
+
+    /**
+     * Generates structured CSV data for Comprehensive Customer Report matching the final PDF report.
+     * Guaranteed to represent ONLY ONE specific selected customer.
+     * Sections: 1. Report Info, 2. Selected Customer, 3. Customer Summary,
+     * 4. Most Ordered Products for This Customer, 5. Report Details (Transactions) & Final Balance Summary.
+     */
+    fun generateCustomerCsv(
+        title: String,
+        storeName: String,
+        subtitle: String,
+        customer: CustomerAccount,
+        kpis: List<Pair<String, String>>,
+        transactions: List<TransactionItem>,
+        totalCash: Double,
+        totalDebt: Double,
+        totalPayments: Double,
+        itemBreakdowns: List<AggregatedProductLine>,
+        isArabic: Boolean = true
+    ): String {
+        val sb = StringBuilder()
+        sb.append("\uFEFF") // UTF-8 BOM
+        val currentDate = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.US).format(Date())
+
+        // SECTION 1: Report Information
+        val storeLabel = if (isArabic) "المتجر" else "Store"
+        val storeVal = if (isArabic) "سمول ستور | $storeName" else "SmallStore | $storeName"
+        val reportTitle = if (isArabic) StoreStrings.REPORT_COMPREHENSIVE_CUSTOMER_AR else StoreStrings.REPORT_COMPREHENSIVE_CUSTOMER_EN
+        val titleLabel = if (isArabic) "عنوان التقرير" else "Report Title"
+        val periodLabel = if (isArabic) "الفترة" else "Period"
+        val dateLabel = if (isArabic) "تاريخ الإصدار" else "Generated Date"
+
+        sb.append(csvRow(storeLabel, storeVal))
+        sb.append(csvRow(titleLabel, reportTitle))
+        sb.append(csvRow(periodLabel, subtitle))
+        sb.append(csvRow(dateLabel, currentDate))
+        sb.append("\n")
+
+        // SECTION 2: Selected Customer
+        val custSecTitle = if (isArabic) "بيانات العميل المحدد" else "Selected Customer Details"
+        sb.append(csvRow(custSecTitle))
+        sb.append(csvRow(if (isArabic) "اسم العميل" else "Customer Name", customer.customerName))
+        val phoneVal = customer.phone.ifBlank { if (isArabic) "غير محدد" else "Not Specified" }
+        sb.append(csvRow(if (isArabic) "رقم الهاتف" else "Phone Number", phoneVal))
+        sb.append(csvRow(if (isArabic) "الرصيد المستحق" else "Outstanding Balance", AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)))
+        val statusVal = if (customer.balance > 0) {
+            if (isArabic) "رصيد مستحق" else "Balance Due"
+        } else {
+            if (isArabic) "الحساب مسدد بالكامل" else "Fully Settled Account"
+        }
+        sb.append(csvRow(if (isArabic) "حالة الحساب" else "Account Status", statusVal))
+        sb.append("\n")
+
+        // SECTION 3: Customer Summary
+        val summarySecTitle = if (isArabic) "ملخص حساب العميل" else "Customer Account Summary"
+        sb.append(csvRow(summarySecTitle))
+        sb.append(csvRow(if (isArabic) "الرصيد المستحق" else "Outstanding Balance", AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)))
+        sb.append(csvRow(if (isArabic) "مشتريات كاش" else "Cash Purchases", AppCurrency.formatAmountWithDecimals(totalCash, isArabic)))
+        sb.append(csvRow(if (isArabic) "مشتريات آجل" else "Credit Purchases", AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)))
+        sb.append(csvRow(if (isArabic) "إجمالي المسدد" else "Total Payments", AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)))
+        sb.append("\n")
+
+        // SECTION 4: MOST ORDERED PRODUCTS FOR THIS CUSTOMER
+        val prodSecTitle = if (isArabic) {
+            "أكثر الأصناف طلباً لهذا العميل (${itemBreakdowns.size} صنف)"
+        } else {
+            "Most Ordered Products for This Customer (${itemBreakdowns.size} Products)"
+        }
+        sb.append(csvRow(prodSecTitle))
+        val prodHeaders = if (isArabic) {
+            listOf("الترتيب", "اسم الصنف", "الكمية", "إجمالي المبلغ")
+        } else {
+            listOf("Rank", "Product Name", "Quantity", "Total Amount")
+        }
+        sb.append(csvRow(prodHeaders))
+
+        if (itemBreakdowns.isEmpty()) {
+            sb.append(csvRow(if (isArabic) "لا توجد تفاصيل أصناف فردية مسجلة لهذا العميل في هذه الفترة" else "No detailed product order records found for this customer in this period", "", "", ""))
+        } else {
+            itemBreakdowns.forEachIndexed { idx, item ->
+                sb.append(csvRow(
+                    "#${idx + 1}",
+                    item.productName,
+                    item.totalQuantity.toString(),
+                    AppCurrency.formatAmountWithDecimals(item.totalSales, isArabic)
+                ))
+            }
+            // Product Totals Row
+            val prodTotalLbl = if (isArabic) "إجمالي الأصناف المطلوبة" else "Total Ordered Products"
+            sb.append(csvRow(
+                prodTotalLbl,
+                itemBreakdowns.size.toString(),
+                itemBreakdowns.sumOf { it.totalQuantity }.toString(),
+                AppCurrency.formatAmountWithDecimals(itemBreakdowns.sumOf { it.totalSales }, isArabic)
+            ))
+        }
+        sb.append("\n")
+
+        // SECTION 5: Report Details
+        val txSecTitle = if (isArabic) {
+            "تفاصيل التقرير (${transactions.size} معاملة مسجلة)"
+        } else {
+            "Report Details (${transactions.size} Recorded Transactions)"
+        }
+        sb.append(csvRow(txSecTitle))
+        val txHeaders = if (isArabic) {
+            listOf("التاريخ", "نوع المعاملة", "البيان / تفاصيل العملية", "التسوية", "المبلغ")
+        } else {
+            listOf("Date", "Transaction Type", "Description / Notes", "Settlement", "Amount")
+        }
+        sb.append(csvRow(txHeaders))
+
+        if (transactions.isEmpty()) {
+            sb.append(csvRow(if (isArabic) "لا توجد معاملات مسجلة لهذا العميل في هذه الفترة" else "No transactions recorded for this customer in this period", "", "", "", ""))
+        } else {
+            for (tx in transactions) {
+                val isPayment = tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
+                val isDebt = !isPayment && (tx.isCredit || tx.activityType.contains("آجل") ||
+                    tx.activityType.contains("دين") || tx.activityType.contains("Debt") ||
+                    tx.activityType.contains("شراء بالدين"))
+
+                val typeLabel = if (isPayment) {
+                    if (isArabic) "تسديد" else "Payment"
+                } else if (isDebt) {
+                    if (isArabic) "شراء آجل" else "Credit Purchase"
+                } else {
+                    if (isArabic) "شراء كاش" else "Cash Purchase"
+                }
+
+                val desc = tx.notes.ifBlank { tx.title.ifBlank { tx.activityType } }
+
+                val settlementStr = when (tx.settlementType) {
+                    SettlementType.FULL -> if (isArabic) "تسوية كاملة" else "Full Settlement"
+                    SettlementType.PARTIAL -> if (isArabic) "تسوية جزئية" else "Partial Settlement"
+                    null -> "-"
+                }
+
+                sb.append(csvRow(
+                    tx.date,
+                    typeLabel,
+                    desc,
+                    settlementStr,
+                    AppCurrency.formatAmountWithDecimals(tx.amount, isArabic)
+                ))
+            }
+
+            // Final Totals Row
+            val totalLbl = if (isArabic) "إجمالي العمليات المعروضة (${transactions.size})" else "Total Operations (${transactions.size})"
+            sb.append(csvRow(
+                totalLbl,
+                "",
+                "",
+                "",
+                AppCurrency.formatAmountWithDecimals(transactions.sumOf { it.amount }, isArabic)
+            ))
+
+            // Balance Summary Row
+            sb.append("\n")
+            val finalBalanceTitle = if (isArabic) "الرصيد والحساب النهائي للعميل" else "Final Customer Balance & Totals"
+            sb.append(csvRow(finalBalanceTitle))
+            sb.append(csvRow(if (isArabic) "الرصيد المستحق" else "Balance Due", AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)))
+            sb.append(csvRow(if (isArabic) "مشتريات كاش" else "Cash Purchases", AppCurrency.formatAmountWithDecimals(totalCash, isArabic)))
+            sb.append(csvRow(if (isArabic) "مشتريات آجل" else "Debt Purchases", AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)))
+            sb.append(csvRow(if (isArabic) "إجمالي المسدد" else "Total Payments", AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)))
+        }
+
+        return sb.toString()
+    }
+
     private fun escapeCsv(value: String): String {
-        return value.replace("\"", "\"\"")
+        return value.replace("\"", "\"\"").replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+    }
+
+    private fun csvRow(vararg cells: String): String {
+        return cells.joinToString(",") { "\"${escapeCsv(it)}\"" } + "\n"
+    }
+
+    private fun csvRow(cells: List<String>): String {
+        return cells.joinToString(",") { "\"${escapeCsv(it)}\"" } + "\n"
+    }
+
+    /**
+     * Creates a temporary TXT file in cache directory.
+     */
+    fun createCachedTxt(context: Context, fileName: String, content: String): File {
+        val file = File(context.cacheDir, fileName)
+        FileOutputStream(file).use { fos ->
+            fos.write(content.toByteArray(Charsets.UTF_8))
+            fos.flush()
+        }
+        return file
+    }
+
+    /**
+     * Creates a specialized Sales & Items TXT report file in cache directory.
+     */
+    fun createCachedSalesAndItemsTxt(
+        context: Context,
+        fileName: String,
+        title: String,
+        storeName: String,
+        subtitle: String,
+        kpis: List<Pair<String, String>>,
+        itemBreakdowns: List<AggregatedProductLine>,
+        invoices: List<TransactionItem>,
+        isArabic: Boolean = true
+    ): File {
+        val txt = generateSalesAndItemsTxt(
+            title = title,
+            storeName = storeName,
+            subtitle = subtitle,
+            kpis = kpis,
+            itemBreakdowns = itemBreakdowns,
+            invoices = invoices,
+            isArabic = isArabic
+        )
+        return createCachedTxt(context, fileName, txt)
+    }
+
+    /**
+     * Creates a specialized Transaction TXT report file in cache directory.
+     */
+    fun createCachedTransactionsTxt(
+        context: Context,
+        fileName: String,
+        title: String,
+        storeName: String,
+        subtitle: String,
+        kpis: List<Pair<String, String>>,
+        transactions: List<TransactionItem>,
+        totalCash: Double,
+        totalDebt: Double,
+        totalPayments: Double,
+        isArabic: Boolean = true
+    ): File {
+        val txt = generateTransactionsTxt(
+            title = title,
+            storeName = storeName,
+            subtitle = subtitle,
+            kpis = kpis,
+            transactions = transactions,
+            totalCash = totalCash,
+            totalDebt = totalDebt,
+            totalPayments = totalPayments,
+            isArabic = isArabic
+        )
+        return createCachedTxt(context, fileName, txt)
+    }
+
+    /**
+     * Creates a specialized Comprehensive Customer TXT report file in cache directory.
+     * Guaranteed to represent ONLY ONE specific selected customer.
+     */
+    fun createCachedCustomerTxt(
+        context: Context,
+        fileName: String,
+        title: String,
+        storeName: String,
+        subtitle: String,
+        customer: CustomerAccount,
+        kpis: List<Pair<String, String>>,
+        transactions: List<TransactionItem>,
+        totalCash: Double,
+        totalDebt: Double,
+        totalPayments: Double,
+        itemBreakdowns: List<AggregatedProductLine> = emptyList(),
+        isArabic: Boolean = true
+    ): File {
+        val txt = generateCustomerTxt(
+            title = title,
+            storeName = storeName,
+            subtitle = subtitle,
+            customer = customer,
+            kpis = kpis,
+            transactions = transactions,
+            totalCash = totalCash,
+            totalDebt = totalDebt,
+            totalPayments = totalPayments,
+            itemBreakdowns = itemBreakdowns,
+            isArabic = isArabic
+        )
+        return createCachedTxt(context, fileName, txt)
+    }
+
+    /**
+     * Generates structured TXT data for Sales & Items report matching the final PDF report.
+     * Sections: 1. Store/Report Header, 2. Sales Summary, 3. Item Details & Totals, 4. Invoice Details & Totals.
+     */
+    fun generateSalesAndItemsTxt(
+        title: String,
+        storeName: String,
+        subtitle: String,
+        kpis: List<Pair<String, String>>,
+        itemBreakdowns: List<AggregatedProductLine>,
+        invoices: List<TransactionItem>,
+        isArabic: Boolean = true
+    ): String {
+        val sb = StringBuilder()
+        val sepDouble = "=================================================="
+        val sepSingle = "--------------------------------------------------"
+        val currentDate = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.US).format(Date())
+
+        // 1. Header
+        sb.appendLine(sepDouble)
+        sb.appendLine(if (isArabic) "معلومات المتجر والتقرير" else "STORE & REPORT INFORMATION")
+        sb.appendLine(sepDouble)
+        sb.appendLine("${if (isArabic) "المتجر" else "Store"}: ${if (isArabic) "سمول ستور | $storeName" else "SmallStore | $storeName"}")
+        sb.appendLine("${if (isArabic) "عنوان التقرير" else "Report Title"}: $title")
+        sb.appendLine("${if (isArabic) "الفترة" else "Period"}: $subtitle")
+        sb.appendLine("${if (isArabic) "تاريخ ووقت الإصدار" else "Generated Date & Time"}: $currentDate")
+        sb.appendLine()
+
+        // 2. Summary
+        sb.appendLine(sepDouble)
+        sb.appendLine(if (isArabic) "ملخص المبيعات" else "SALES SUMMARY")
+        sb.appendLine(sepDouble)
+        if (kpis.isNotEmpty()) {
+            for ((k, v) in kpis) {
+                sb.appendLine("$k: $v")
+            }
+        } else {
+            val totalSalesVal = itemBreakdowns.sumOf { it.totalSales }
+            val cashVal = invoices.filter { !it.isCredit }.sumOf { it.amount }
+            val debtVal = invoices.filter { it.isCredit }.sumOf { it.amount }
+            sb.appendLine("${if (isArabic) "إجمالي المبيعات" else "Total Sales"}: ${AppCurrency.formatAmountWithDecimals(totalSalesVal, isArabic)}")
+            sb.appendLine("${if (isArabic) "مبيعات كاش" else "Cash Sales"}: ${AppCurrency.formatAmountWithDecimals(cashVal, isArabic)}")
+            sb.appendLine("${if (isArabic) "مبيعات آجل" else "Credit Sales"}: ${AppCurrency.formatAmountWithDecimals(debtVal, isArabic)}")
+        }
+        sb.appendLine()
+
+        // 3. Item Details
+        val itemsSecTitle = if (isArabic) {
+            "جدول تفاصيل مبيعات الأصناف (${itemBreakdowns.size} صنف)"
+        } else {
+            "ITEM SALES DETAILS (${itemBreakdowns.size} Items)"
+        }
+        sb.appendLine(sepDouble)
+        sb.appendLine(itemsSecTitle)
+        sb.appendLine(sepDouble)
+
+        val totalItemsQuantity = itemBreakdowns.sumOf { it.totalQuantity }
+        val totalItemsSales = itemBreakdowns.sumOf { it.totalSales }
+        val totalItemsProfit = itemBreakdowns.sumOf { it.profitMargin }
+
+        if (itemBreakdowns.isEmpty()) {
+            sb.appendLine(if (isArabic) "لا توجد تفاصيل أصناف لهذه الفترة" else "No item details for this period")
+        } else {
+            itemBreakdowns.forEachIndexed { idx, item ->
+                sb.appendLine("#${idx + 1} | ${item.productName}")
+                val qtyLabel = if (isArabic) "الكمية المباعة" else "Qty Sold"
+                val salesLabel = if (isArabic) "إجمالي المبيعات" else "Total Sales"
+                val profitLabel = if (isArabic) "هامش الربح" else "Profit Margin"
+                sb.appendLine("   $qtyLabel: ${item.totalQuantity} | $salesLabel: ${AppCurrency.formatAmountWithDecimals(item.totalSales, isArabic)} | $profitLabel: ${AppCurrency.formatAmountWithDecimals(item.profitMargin, isArabic)}")
+                sb.appendLine(sepSingle)
+            }
+            sb.appendLine("${if (isArabic) "إجمالي الأصناف" else "Total Items"}: ${itemBreakdowns.size} ${if (isArabic) "صنف" else "Items"}")
+            sb.appendLine("${if (isArabic) "إجمالي الكميات المباعة" else "Total Quantity Sold"}: $totalItemsQuantity")
+            sb.appendLine("${if (isArabic) "إجمالي مبيعات الأصناف" else "Total Item Sales"}: ${AppCurrency.formatAmountWithDecimals(totalItemsSales, isArabic)}")
+            sb.appendLine("${if (isArabic) "إجمالي أرباح الأصناف" else "Total Item Profit"}: ${AppCurrency.formatAmountWithDecimals(totalItemsProfit, isArabic)}")
+        }
+        sb.appendLine()
+
+        // 4. Invoice Details
+        val invSecTitle = if (isArabic) {
+            "سجل فواتير المبيعات (${invoices.size} فاتورة)"
+        } else {
+            "SALES INVOICES LOG (${invoices.size} Invoices)"
+        }
+        sb.appendLine(sepDouble)
+        sb.appendLine(invSecTitle)
+        sb.appendLine(sepDouble)
+
+        val totalInvoicesAmount = invoices.sumOf { it.amount }
+
+        if (invoices.isEmpty()) {
+            sb.appendLine(if (isArabic) "لا توجد فواتير مبيعات لهذه الفترة" else "No sales invoices for this period")
+        } else {
+            invoices.forEachIndexed { idx, inv ->
+                val dateDesc = "${inv.date} - ${inv.title.ifBlank { inv.notes.ifBlank { if (isArabic) "فاتورة مبيعات" else "Sales Invoice" } }}"
+                val isCash = !inv.isCredit && (
+                    inv.activityType.contains("كاش") ||
+                    inv.activityType.contains("Cash") ||
+                    (!inv.activityType.contains("تسديد") &&
+                     !inv.activityType.contains("Payment") &&
+                     !inv.activityType.contains("آجل") &&
+                     !inv.activityType.contains("دين"))
+                )
+                val typeLabel = if (isCash) (if (isArabic) "كاش" else "Cash") else (if (isArabic) "آجل" else "Debt")
+                sb.appendLine("#${idx + 1} | $dateDesc")
+                sb.appendLine("   ${if (isArabic) "العميل" else "Customer"}: ${inv.customerName}")
+                sb.appendLine("   ${if (isArabic) "طريقة الدفع" else "Payment Method"}: $typeLabel")
+                sb.appendLine("   ${if (isArabic) "المبلغ" else "Amount"}: ${AppCurrency.formatAmountWithDecimals(inv.amount, isArabic)}")
+                sb.appendLine(sepSingle)
+            }
+            sb.appendLine("${if (isArabic) "إجمالي الفواتير" else "Total Invoices"}: ${invoices.size} ${if (isArabic) "فاتورة" else "Invoices"}")
+            sb.appendLine("${if (isArabic) "إجمالي مبالغ الفواتير" else "Total Invoices Amount"}: ${AppCurrency.formatAmountWithDecimals(totalInvoicesAmount, isArabic)}")
+        }
+        sb.appendLine(sepDouble)
+
+        return sb.toString()
+    }
+
+    /**
+     * Generates structured TXT data for Transactions report matching the final PDF report.
+     * Sections: 1. Store/Report Header, 2. Transactions Summary, 3. Transaction Details, Grand Totals & Breakdown.
+     */
+    fun generateTransactionsTxt(
+        title: String,
+        storeName: String,
+        subtitle: String,
+        kpis: List<Pair<String, String>>,
+        transactions: List<TransactionItem>,
+        totalCash: Double,
+        totalDebt: Double,
+        totalPayments: Double,
+        isArabic: Boolean = true
+    ): String {
+        val sb = StringBuilder()
+        val sepDouble = "=================================================="
+        val sepSingle = "--------------------------------------------------"
+        val currentDate = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.US).format(Date())
+
+        // 1. Header
+        sb.appendLine(sepDouble)
+        sb.appendLine(if (isArabic) "معلومات المتجر والتقرير" else "STORE & REPORT INFORMATION")
+        sb.appendLine(sepDouble)
+        sb.appendLine("${if (isArabic) "المتجر" else "Store"}: ${if (isArabic) "سمول ستور | $storeName" else "SmallStore | $storeName"}")
+        sb.appendLine("${if (isArabic) "عنوان التقرير" else "Report Title"}: $title")
+        sb.appendLine("${if (isArabic) "الفترة" else "Period"}: $subtitle")
+        sb.appendLine("${if (isArabic) "تاريخ ووقت الإصدار" else "Generated Date & Time"}: $currentDate")
+        sb.appendLine()
+
+        // 2. Summary
+        sb.appendLine(sepDouble)
+        sb.appendLine(if (isArabic) "ملخص المعاملات" else "TRANSACTIONS SUMMARY")
+        sb.appendLine(sepDouble)
+        if (kpis.isNotEmpty()) {
+            for ((k, v) in kpis) {
+                sb.appendLine("$k: $v")
+            }
+        } else {
+            sb.appendLine("${if (isArabic) "إجمالي الكاش" else "Cash Sum"}: ${AppCurrency.formatAmountWithDecimals(totalCash, isArabic)}")
+            sb.appendLine("${if (isArabic) "إجمالي الآجل" else "Debt Sum"}: ${AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)}")
+            sb.appendLine("${if (isArabic) "إجمالي التسديد" else "Payments"}: ${AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)}")
+        }
+        sb.appendLine()
+
+        // 3. Transaction Details
+        val txSecTitle = if (isArabic) {
+            "تفاصيل المعاملات (${transactions.size} معاملة)"
+        } else {
+            "TRANSACTION DETAILS (${transactions.size} Transactions)"
+        }
+        sb.appendLine(sepDouble)
+        sb.appendLine(txSecTitle)
+        sb.appendLine(sepDouble)
+
+        if (transactions.isEmpty()) {
+            sb.appendLine(if (isArabic) "لا توجد معاملات متاحة في هذه الفترة" else "No transactions available for this period")
+        } else {
+            transactions.forEachIndexed { idx, tx ->
+                val customerName = tx.customerName.ifBlank { if (isArabic) "عميل عام" else "General" }
+                val isPayment = tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
+                val isDebt = !isPayment && (tx.isCredit || tx.activityType.contains("آجل") ||
+                    tx.activityType.contains("دين") || tx.activityType.contains("Debt") ||
+                    tx.activityType.contains("شراء بالدين"))
+
+                val typeLabel = if (isPayment) {
+                    if (isArabic) "تسديد (دفعة)" else "Payment"
+                } else if (isDebt) {
+                    if (isArabic) "شراء آجل (دين)" else "Credit Purchase"
+                } else {
+                    if (isArabic) "شراء نقدي (كاش)" else "Cash Purchase"
+                }
+
+                val settlementStr = when (tx.settlementType) {
+                    SettlementType.FULL -> if (isArabic) "تسوية كاملة" else "Full Settlement"
+                    SettlementType.PARTIAL -> if (isArabic) "تسوية جزئية" else "Partial Settlement"
+                    null -> ""
+                }
+                val rawNotes = tx.notes.ifBlank { tx.title }
+                val noteText = if (settlementStr.isNotBlank() && rawNotes.isNotBlank()) {
+                    "$settlementStr - $rawNotes"
+                } else if (settlementStr.isNotBlank()) {
+                    settlementStr
+                } else if (rawNotes.isNotBlank()) {
+                    rawNotes
+                } else {
+                    "-"
+                }
+
+                sb.appendLine("#${idx + 1} | ${tx.date} | $customerName")
+                sb.appendLine("   ${if (isArabic) "نوع المعاملة" else "Transaction Type"}: $typeLabel")
+                sb.appendLine("   ${if (isArabic) "البيان / التسوية" else "Notes / Settlement"}: $noteText")
+                sb.appendLine("   ${if (isArabic) "المبلغ" else "Amount"}: ${AppCurrency.formatAmountWithDecimals(tx.amount, isArabic)}")
+                sb.appendLine(sepSingle)
+            }
+
+            sb.appendLine("${if (isArabic) "إجمالي المعاملات" else "Total Transactions"}: ${transactions.size} ${if (isArabic) "معاملة" else "Transactions"}")
+            sb.appendLine("${if (isArabic) "إجمالي مبالغ العمليات" else "Total Operations Amount"}: ${AppCurrency.formatAmountWithDecimals(transactions.sumOf { it.amount }, isArabic)}")
+            sb.appendLine()
+
+            // Final Breakdown
+            sb.appendLine(sepDouble)
+            sb.appendLine(if (isArabic) "ملخص الإجماليات النهائي" else "FINAL TOTALS BREAKDOWN")
+            sb.appendLine(sepDouble)
+            sb.appendLine("${if (isArabic) "إجمالي الكاش" else "Cash Total"}: ${AppCurrency.formatAmountWithDecimals(totalCash, isArabic)}")
+            sb.appendLine("${if (isArabic) "إجمالي الآجل" else "Debt Total"}: ${AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)}")
+            sb.appendLine("${if (isArabic) "إجمالي التسديد" else "Payments Total"}: ${AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)}")
+        }
+        sb.appendLine(sepDouble)
+
+        return sb.toString()
+    }
+
+    /**
+     * Generates structured TXT data for Comprehensive Customer Report matching the final PDF report.
+     * Guaranteed to represent ONLY ONE specific selected customer.
+     * Sections: 1. Report Information, 2. Selected Customer Details, 3. Customer Summary,
+     * 4. Most Ordered Products for This Customer, 5. Report Details (Transactions) & Final Balance Summary.
+     */
+    fun generateCustomerTxt(
+        title: String,
+        storeName: String,
+        subtitle: String,
+        customer: CustomerAccount,
+        kpis: List<Pair<String, String>>,
+        transactions: List<TransactionItem>,
+        totalCash: Double,
+        totalDebt: Double,
+        totalPayments: Double,
+        itemBreakdowns: List<AggregatedProductLine>,
+        isArabic: Boolean = true
+    ): String {
+        val sb = StringBuilder()
+        val sepDouble = "=================================================="
+        val sepSingle = "--------------------------------------------------"
+        val currentDate = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.US).format(Date())
+
+        // 1. Report Information
+        val reportTitle = if (isArabic) StoreStrings.REPORT_COMPREHENSIVE_CUSTOMER_AR else StoreStrings.REPORT_COMPREHENSIVE_CUSTOMER_EN
+        sb.appendLine(sepDouble)
+        sb.appendLine(if (isArabic) "معلومات المتجر والتقرير" else "STORE & REPORT INFORMATION")
+        sb.appendLine(sepDouble)
+        sb.appendLine("${if (isArabic) "المتجر" else "Store"}: ${if (isArabic) "سمول ستور | $storeName" else "SmallStore | $storeName"}")
+        sb.appendLine("${if (isArabic) "عنوان التقرير" else "Report Title"}: $reportTitle")
+        sb.appendLine("${if (isArabic) "الفترة" else "Period"}: $subtitle")
+        sb.appendLine("${if (isArabic) "تاريخ ووقت الإصدار" else "Generated Date & Time"}: $currentDate")
+        sb.appendLine()
+
+        // 2. Selected Customer Details
+        sb.appendLine(sepDouble)
+        sb.appendLine(if (isArabic) "بيانات العميل المحدد" else "SELECTED CUSTOMER")
+        sb.appendLine(sepDouble)
+        sb.appendLine("${if (isArabic) "اسم العميل" else "Customer Name"}: ${customer.customerName}")
+        val phoneVal = customer.phone.ifBlank { if (isArabic) "غير محدد" else "Not Specified" }
+        sb.appendLine("${if (isArabic) "رقم الهاتف" else "Phone Number"}: $phoneVal")
+        sb.appendLine("${if (isArabic) "الرصيد المستحق" else "Outstanding Balance"}: ${AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)}")
+        val statusVal = if (customer.balance > 0) {
+            if (isArabic) "رصيد مستحق" else "Balance Due"
+        } else {
+            if (isArabic) "الحساب مسدد بالكامل" else "Fully Settled Account"
+        }
+        sb.appendLine("${if (isArabic) "حالة الحساب" else "Account Status"}: $statusVal")
+        sb.appendLine()
+
+        // 3. Customer Summary
+        sb.appendLine(sepDouble)
+        sb.appendLine(if (isArabic) "ملخص حساب العميل" else "CUSTOMER SUMMARY")
+        sb.appendLine(sepDouble)
+        sb.appendLine("${if (isArabic) "الرصيد المستحق" else "Outstanding Balance"}: ${AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)}")
+        sb.appendLine("${if (isArabic) "مشتريات كاش" else "Cash Purchases"}: ${AppCurrency.formatAmountWithDecimals(totalCash, isArabic)}")
+        sb.appendLine("${if (isArabic) "مشتريات آجل" else "Credit Purchases"}: ${AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)}")
+        sb.appendLine("${if (isArabic) "إجمالي المسدد" else "Total Payments"}: ${AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)}")
+        sb.appendLine()
+
+        // 4. Most Ordered Products for This Customer
+        val prodSecTitle = if (isArabic) {
+            "أكثر الأصناف طلباً لهذا العميل (${itemBreakdowns.size} صنف)"
+        } else {
+            "MOST ORDERED PRODUCTS FOR THIS CUSTOMER (${itemBreakdowns.size} Products)"
+        }
+        sb.appendLine(sepDouble)
+        sb.appendLine(prodSecTitle)
+        sb.appendLine(sepDouble)
+
+        if (itemBreakdowns.isEmpty()) {
+            sb.appendLine(if (isArabic) "لا توجد تفاصيل أصناف فردية مسجلة لهذا العميل في هذه الفترة" else "No detailed product order records found for this customer in this period")
+        } else {
+            itemBreakdowns.forEachIndexed { idx, item ->
+                sb.appendLine("#${idx + 1} | ${item.productName}")
+                val qtyLbl = if (isArabic) "الكمية" else "Quantity"
+                val amtLbl = if (isArabic) "إجمالي المبلغ" else "Total Amount"
+                sb.appendLine("   $qtyLbl: ${item.totalQuantity} | $amtLbl: ${AppCurrency.formatAmountWithDecimals(item.totalSales, isArabic)}")
+                sb.appendLine(sepSingle)
+            }
+            sb.appendLine("${if (isArabic) "إجمالي الأصناف المطلوبة" else "Total Ordered Products"}: ${itemBreakdowns.size} ${if (isArabic) "صنف" else "Products"}")
+            sb.appendLine("${if (isArabic) "إجمالي الكمية" else "Total Quantity"}: ${itemBreakdowns.sumOf { it.totalQuantity }}")
+            sb.appendLine("${if (isArabic) "إجمالي المبلغ" else "Total Amount"}: ${AppCurrency.formatAmountWithDecimals(itemBreakdowns.sumOf { it.totalSales }, isArabic)}")
+        }
+        sb.appendLine()
+
+        // 5. Report Details
+        val txSecTitle = if (isArabic) {
+            "تفاصيل التقرير (${transactions.size} معاملة مسجلة)"
+        } else {
+            "REPORT DETAILS (${transactions.size} Recorded Transactions)"
+        }
+        sb.appendLine(sepDouble)
+        sb.appendLine(txSecTitle)
+        sb.appendLine(sepDouble)
+
+        if (transactions.isEmpty()) {
+            sb.appendLine(if (isArabic) "لا توجد معاملات مسجلة لهذا العميل في هذه الفترة" else "No transactions recorded for this customer in this period")
+        } else {
+            transactions.forEachIndexed { idx, tx ->
+                val isPayment = tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
+                val isDebt = !isPayment && (tx.isCredit || tx.activityType.contains("آجل") ||
+                    tx.activityType.contains("دين") || tx.activityType.contains("Debt") ||
+                    tx.activityType.contains("شراء بالدين"))
+
+                val typeLabel = if (isPayment) {
+                    if (isArabic) "تسديد" else "Payment"
+                } else if (isDebt) {
+                    if (isArabic) "شراء آجل" else "Credit Purchase"
+                } else {
+                    if (isArabic) "شراء كاش" else "Cash Purchase"
+                }
+
+                val desc = tx.notes.ifBlank { tx.title.ifBlank { tx.activityType } }
+
+                val settlementStr = when (tx.settlementType) {
+                    SettlementType.FULL -> if (isArabic) "تسوية كاملة" else "Full Settlement"
+                    SettlementType.PARTIAL -> if (isArabic) "تسوية جزئية" else "Partial Settlement"
+                    null -> "-"
+                }
+
+                sb.appendLine("#${idx + 1} | ${tx.date}")
+                sb.appendLine("   ${if (isArabic) "نوع المعاملة" else "Transaction Type"}: $typeLabel")
+                sb.appendLine("   ${if (isArabic) "البيان / تفاصيل العملية" else "Description / Notes"}: $desc")
+                sb.appendLine("   ${if (isArabic) "التسوية" else "Settlement"}: $settlementStr")
+                sb.appendLine("   ${if (isArabic) "المبلغ" else "Amount"}: ${AppCurrency.formatAmountWithDecimals(tx.amount, isArabic)}")
+                sb.appendLine(sepSingle)
+            }
+
+            sb.appendLine("${if (isArabic) "إجمالي العمليات المعروضة" else "Total Operations"}: ${transactions.size}")
+            sb.appendLine("${if (isArabic) "إجمالي مبالغ العمليات" else "Total Amount"}: ${AppCurrency.formatAmountWithDecimals(transactions.sumOf { it.amount }, isArabic)}")
+            sb.appendLine()
+
+            // Final Balance & Totals
+            sb.appendLine(sepDouble)
+            sb.appendLine(if (isArabic) "الرصيد والحساب النهائي للعميل" else "FINAL CUSTOMER BALANCE & TOTALS")
+            sb.appendLine(sepDouble)
+            sb.appendLine("${if (isArabic) "الرصيد المستحق" else "Outstanding Balance"}: ${AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)}")
+            sb.appendLine("${if (isArabic) "مشتريات كاش" else "Cash Purchases"}: ${AppCurrency.formatAmountWithDecimals(totalCash, isArabic)}")
+            sb.appendLine("${if (isArabic) "مشتريات آجل" else "Debt Purchases"}: ${AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)}")
+            sb.appendLine("${if (isArabic) "إجمالي المسدد" else "Total Payments"}: ${AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)}")
+        }
+        sb.appendLine(sepDouble)
+
+        return sb.toString()
     }
 }

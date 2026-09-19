@@ -87,6 +87,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.model.AnalyticsExportDataPreparer
+import com.example.model.AnalyticsReportData
+import com.example.model.AnalyticsReportScope
 import com.example.model.AppCurrency
 import com.example.model.CustomerAccount
 import com.example.model.LanguageMode
@@ -298,9 +301,13 @@ fun AnalysisCenterScreen(
                     StatisticsTabContent(
                         transactions = transactions,
                         selectedCustomer = uiState.selectedCustomer,
+                        allCustomers = customers,
+                        transactionLines = transactionLines,
                         activePeriod = activePeriod,
                         customStartDate = activeStartDate,
                         customEndDate = activeEndDate,
+                        selectedChartType = uiState.selectedChartType,
+                        onChartTypeSelected = { viewModel.selectChartType(it) },
                         currency = currency,
                         isArabic = isArabic,
                         context = context,
@@ -839,9 +846,13 @@ private fun PeriodSelectorChip(
 private fun StatisticsTabContent(
     transactions: List<TransactionItem>,
     selectedCustomer: CustomerAccount?,
+    allCustomers: List<CustomerAccount> = emptyList(),
+    transactionLines: List<TransactionItemLineEntity> = emptyList(),
     activePeriod: PeriodFilter,
     customStartDate: LocalDate?,
     customEndDate: LocalDate?,
+    selectedChartType: BreakdownChartType = BreakdownChartType.DONUT,
+    onChartTypeSelected: (BreakdownChartType) -> Unit = {},
     currency: String,
     isArabic: Boolean,
     context: Context,
@@ -903,7 +914,26 @@ private fun StatisticsTabContent(
         )
     }
 
-    var selectedChartType by remember { mutableStateOf(BreakdownChartType.DONUT) }
+    // Prepared Analytics export data reflecting current calculation models, scope, and selected chart mode
+    val analyticsReportData = remember(
+        transactions, transactionLines, allCustomers, selectedCustomer,
+        activePeriod, customStartDate, customEndDate, selectedChartType,
+        storeInfo.storeName, currency, isArabic
+    ) {
+        AnalyticsExportDataPreparer.prepareAnalyticsData(
+            transactions = transactions,
+            transactionLines = transactionLines,
+            allCustomers = allCustomers,
+            selectedCustomer = selectedCustomer,
+            activePeriod = activePeriod,
+            customStartDate = customStartDate,
+            customEndDate = customEndDate,
+            selectedChartType = selectedChartType,
+            storeName = storeInfo.storeName,
+            currency = currency,
+            isArabic = isArabic
+        )
+    }
 
     val breakdownChartItems = remember(
         totalDebtSales, totalCashSales, fullSettlementAmount, partialSettlementAmount,
@@ -1059,7 +1089,7 @@ private fun StatisticsTabContent(
                     BreakdownChartTabButton(
                         title = if (isArabic) StoreStrings.CHART_TAB_DONUT_AR else StoreStrings.CHART_TAB_DONUT_EN,
                         selected = selectedChartType == BreakdownChartType.DONUT,
-                        onClick = { selectedChartType = BreakdownChartType.DONUT },
+                        onClick = { onChartTypeSelected(BreakdownChartType.DONUT) },
                         modifier = Modifier
                             .weight(1f)
                             .testTag("chart_tab_donut")
@@ -1067,7 +1097,7 @@ private fun StatisticsTabContent(
                     BreakdownChartTabButton(
                         title = if (isArabic) StoreStrings.CHART_TAB_COLUMN_AR else StoreStrings.CHART_TAB_COLUMN_EN,
                         selected = selectedChartType == BreakdownChartType.COLUMN,
-                        onClick = { selectedChartType = BreakdownChartType.COLUMN },
+                        onClick = { onChartTypeSelected(BreakdownChartType.COLUMN) },
                         modifier = Modifier
                             .weight(1f)
                             .testTag("chart_tab_column")
@@ -1075,7 +1105,7 @@ private fun StatisticsTabContent(
                     BreakdownChartTabButton(
                         title = if (isArabic) StoreStrings.CHART_TAB_COMBO_AR else StoreStrings.CHART_TAB_COMBO_EN,
                         selected = selectedChartType == BreakdownChartType.COMBO,
-                        onClick = { selectedChartType = BreakdownChartType.COMBO },
+                        onClick = { onChartTypeSelected(BreakdownChartType.COMBO) },
                         modifier = Modifier
                             .weight(1f)
                             .testTag("chart_tab_combo")
@@ -1189,29 +1219,20 @@ private fun StatisticsTabContent(
                     // Export PDF Button
                     Button(
                         onClick = {
-                            val headers = if (isArabic) listOf("البند", "القيمة", "النسبة", "العملة") else listOf("Metric", "Amount", "Percentage", "Currency")
-                            val rows = listOf(
-                                ReportPreviewRow(if (isArabic) "مبيعات الآجل" else "Debt Sales", String.format(Locale.US, "%.2f", totalDebtSales), "$debtPercent%", currency),
-                                ReportPreviewRow(if (isArabic) "المبيعات النقدية" else "Cash Sales", String.format(Locale.US, "%.2f", totalCashSales), "$cashPercent%", currency),
-                                ReportPreviewRow(if (isArabic) "تسديد كامل" else "Full Payment", String.format(Locale.US, "%.2f", fullSettlementAmount), "$fullPercent%", currency),
-                                ReportPreviewRow(if (isArabic) "تسديد جزئي" else "Partial Payment", String.format(Locale.US, "%.2f", partialSettlementAmount), "$partialPercent%", currency)
-                            )
-                            val kpis = listOf(
-                                Pair(if (isArabic) "إجمالي المبيعات" else "Total Sales", String.format(Locale.US, "%.2f %s", totalSales, currency)),
-                                Pair(if (isArabic) "المتحصلات" else "Payments", String.format(Locale.US, "%.2f %s", totalPaymentsReceived, currency)),
-                                Pair(if (isArabic) "الصافي" else "Net Balance", String.format(Locale.US, "%.2f %s", netBalance, currency))
-                            )
-                            val title = if (isArabic) "تقرير إحصائيات المبيعات والديون" else "Sales & Debt Statistics Report"
-                            val subtitle = selectedCustomer?.customerName ?: (if (isArabic) "كافة العملاء" else "All Customers")
-                            val file = ReportExporter.createCachedPdf(
+                            val title = if (analyticsReportData.scope == AnalyticsReportScope.ONE_SELECTED_CUSTOMER) {
+                                if (isArabic) "تقرير إحصائيات العميل" else "Customer Analytics Report"
+                            } else {
+                                if (isArabic) "تقرير الإحصائيات" else "Analytics Report"
+                            }
+                            val fileName = if (analyticsReportData.scope == AnalyticsReportScope.ONE_SELECTED_CUSTOMER) {
+                                "Customer_Analytics_${System.currentTimeMillis()}.pdf"
+                            } else {
+                                "Analytics_Report_${System.currentTimeMillis()}.pdf"
+                            }
+                            val file = ReportExporter.createCachedAnalyticsPdf(
                                 context = context,
-                                fileName = "Stats_${System.currentTimeMillis()}.pdf",
-                                title = title,
-                                storeName = storeInfo.storeName,
-                                subtitle = subtitle,
-                                kpis = kpis,
-                                headers = headers,
-                                rows = rows,
+                                fileName = fileName,
+                                data = analyticsReportData,
                                 isArabic = isArabic
                             )
                             ReportExporter.shareFile(context, file, "application/pdf", title)
@@ -1232,16 +1253,19 @@ private fun StatisticsTabContent(
                     // Export CSV Button
                     OutlinedButton(
                         onClick = {
-                            val headers = if (isArabic) listOf("البند", "القيمة", "النسبة", "العملة") else listOf("Metric", "Amount", "Percentage", "Currency")
-                            val rows = listOf(
-                                ReportPreviewRow(if (isArabic) "مبيعات الآجل" else "Debt Sales", String.format(Locale.US, "%.2f", totalDebtSales), "$debtPercent%", currency),
-                                ReportPreviewRow(if (isArabic) "المبيعات النقدية" else "Cash Sales", String.format(Locale.US, "%.2f", totalCashSales), "$cashPercent%", currency),
-                                ReportPreviewRow(if (isArabic) "تسديد كامل" else "Full Payment", String.format(Locale.US, "%.2f", fullSettlementAmount), "$fullPercent%", currency),
-                                ReportPreviewRow(if (isArabic) "تسديد جزئي" else "Partial Payment", String.format(Locale.US, "%.2f", partialSettlementAmount), "$partialPercent%", currency)
+                            val title = analyticsReportData.getLocalizedReportTitle(isArabic)
+                            val fileName = if (analyticsReportData.scope == AnalyticsReportScope.ONE_SELECTED_CUSTOMER) {
+                                "Customer_Analytics_${System.currentTimeMillis()}.csv"
+                            } else {
+                                "Analytics_Report_${System.currentTimeMillis()}.csv"
+                            }
+                            val file = ReportExporter.createCachedAnalyticsCsv(
+                                context = context,
+                                fileName = fileName,
+                                data = analyticsReportData,
+                                isArabic = isArabic
                             )
-                            val csv = ReportExporter.generateReportCsv(headers, rows)
-                            val file = ReportExporter.createCachedCsv(context, "Stats_${System.currentTimeMillis()}.csv", csv)
-                            ReportExporter.shareFile(context, file, "text/csv", "Statistics CSV")
+                            ReportExporter.shareFile(context, file, "text/csv", title)
                             Toast.makeText(context, if (isArabic) "تم تجهيز ملف CSV للمشاركة" else "CSV statistics ready for export", Toast.LENGTH_SHORT).show()
                         },
                         shape = RoundedCornerShape(10.dp),
@@ -1258,22 +1282,23 @@ private fun StatisticsTabContent(
                     // Share Text Button
                     OutlinedButton(
                         onClick = {
-                            val scope = selectedCustomer?.customerName ?: (if (isArabic) "كافة العملاء" else "All Customers")
-                            val shareText = buildString {
-                                appendLine("SmallStore - ${storeInfo.storeName}")
-                                appendLine(if (isArabic) "تقرير إحصائيات: $scope" else "Statistics Summary: $scope")
-                                appendLine(if (isArabic) "إجمالي المبيعات: %,.2f %s".format(Locale.US, totalSales, currency) else "Total Sales: %,.2f %s".format(Locale.US, totalSales, currency))
-                                appendLine(if (isArabic) "مبيعات الآجل: %,.2f %s (%d%%)".format(Locale.US, totalDebtSales, currency, debtPercent) else "Debt Sales: %,.2f %s (%d%%)".format(Locale.US, totalDebtSales, currency, debtPercent))
-                                appendLine(if (isArabic) "مبيعات كاش: %,.2f %s (%d%%)".format(Locale.US, totalCashSales, currency, cashPercent) else "Cash Sales: %,.2f %s (%d%%)".format(Locale.US, totalCashSales, currency, cashPercent))
-                                appendLine(if (isArabic) "تسديد كامل: %,.2f %s (%d%%)".format(Locale.US, fullSettlementAmount, currency, fullPercent) else "Full Payments: %,.2f %s (%d%%)".format(Locale.US, fullSettlementAmount, currency, fullPercent))
-                                appendLine(if (isArabic) "تسديد جزئي: %,.2f %s (%d%%)".format(Locale.US, partialSettlementAmount, currency, partialPercent) else "Partial Payments: %,.2f %s (%d%%)".format(Locale.US, partialSettlementAmount, currency, partialPercent))
-                                appendLine(if (isArabic) "صافي الديون: %,.2f %s".format(Locale.US, netBalance, currency) else "Net Outstanding: %,.2f %s".format(Locale.US, netBalance, currency))
+                            val title = analyticsReportData.getLocalizedReportTitle(isArabic)
+                            val fileName = if (analyticsReportData.scope == AnalyticsReportScope.ONE_SELECTED_CUSTOMER && analyticsReportData.selectedCustomer != null) {
+                                val safeCustName = analyticsReportData.selectedCustomer.customerName
+                                    .replace(Regex("[^a-zA-Z0-9\\u0600-\\u06FF_-]"), "_")
+                                    .take(30)
+                                "Analytics_Report_${safeCustName}_${System.currentTimeMillis()}.txt"
+                            } else {
+                                "Analytics_Report_${System.currentTimeMillis()}.txt"
                             }
-                            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(android.content.Intent.EXTRA_TEXT, shareText)
-                            }
-                            context.startActivity(android.content.Intent.createChooser(intent, "Share Statistics"))
+                            val file = ReportExporter.createCachedAnalyticsTxt(
+                                context = context,
+                                fileName = fileName,
+                                data = analyticsReportData,
+                                isArabic = isArabic
+                            )
+                            ReportExporter.shareFile(context, file, "text/plain", title)
+                            Toast.makeText(context, if (isArabic) "تم تجهيز تقرير TXT للمشاركة" else "TXT statistics ready for export", Toast.LENGTH_SHORT).show()
                         },
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
@@ -2535,7 +2560,7 @@ private fun ReportsTabContent(
             }
         }
 
-        // 5. Centralized Export Action Bar (PDF, CSV, Print, Share)
+        // 5. Centralized Export Action Bar (PDF, CSV, Share)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -2584,6 +2609,7 @@ private fun ReportsTabContent(
                                 totalCash = customerCashPurchases,
                                 totalDebt = customerDebtPurchases,
                                 totalPayments = customerPayments,
+                                itemBreakdowns = customerItemBreakdowns,
                                 isArabic = isArabic
                             )
                         } else {
@@ -2605,6 +2631,7 @@ private fun ReportsTabContent(
                 enabled = canExport,
                 shape = RoundedCornerShape(10.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = GeoPrimary),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                 modifier = Modifier
                     .weight(1f)
                     .height(44.dp)
@@ -2612,21 +2639,67 @@ private fun ReportsTabContent(
             ) {
                 Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text(text = if (isArabic) StoreStrings.EXPORT_PDF_AR else StoreStrings.EXPORT_PDF_EN, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Text(text = "PDF", fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1)
             }
 
             // CSV Export
             OutlinedButton(
                 onClick = {
                     if (canExport) {
-                        val csv = ReportExporter.generateReportCsv(tableHeaders, previewRows)
-                        val file = ReportExporter.createCachedCsv(context, "Report_${System.currentTimeMillis()}.csv", csv)
+                        val file = if (uiState.selectedReportType == ReportType.SALES_AND_ITEMS) {
+                            ReportExporter.createCachedSalesAndItemsCsv(
+                                context = context,
+                                fileName = "SalesReport_${System.currentTimeMillis()}.csv",
+                                title = reportTitle,
+                                storeName = storeInfo.storeName.ifBlank { if (isArabic) "سمول ستور" else "SmallStore" },
+                                subtitle = if (isArabic) "الفترة: $periodLabel" else "Period: $periodLabel",
+                                kpis = exportKpis,
+                                itemBreakdowns = itemBreakdowns,
+                                invoices = (cashSalesInvoices + debtSalesInvoices).sortedByDescending { it.date },
+                                isArabic = isArabic
+                            )
+                        } else if (uiState.selectedReportType == ReportType.TRANSACTIONS) {
+                            ReportExporter.createCachedTransactionsCsv(
+                                context = context,
+                                fileName = "TransactionsReport_${System.currentTimeMillis()}.csv",
+                                title = reportTitle,
+                                storeName = storeInfo.storeName.ifBlank { if (isArabic) "سمول ستور" else "SmallStore" },
+                                subtitle = if (isArabic) "الفترة: $periodLabel" else "Period: $periodLabel",
+                                kpis = exportKpis,
+                                transactions = sortedTransactions,
+                                totalCash = totalTxCash,
+                                totalDebt = totalTxDebt,
+                                totalPayments = totalTxPayments,
+                                isArabic = isArabic
+                            )
+                        } else if (uiState.selectedReportType == ReportType.COMPREHENSIVE_CUSTOMER && selectedCustomer != null) {
+                            val custReportTitle = if (isArabic) StoreStrings.REPORT_COMPREHENSIVE_CUSTOMER_AR else StoreStrings.REPORT_COMPREHENSIVE_CUSTOMER_EN
+                            ReportExporter.createCachedCustomerCsv(
+                                context = context,
+                                fileName = "CustomerReport_${System.currentTimeMillis()}.csv",
+                                title = custReportTitle,
+                                storeName = storeInfo.storeName.ifBlank { if (isArabic) "سمول ستور" else "SmallStore" },
+                                subtitle = if (isArabic) "الفترة: $periodLabel" else "Period: $periodLabel",
+                                customer = selectedCustomer,
+                                kpis = exportKpis,
+                                transactions = customerTransactions,
+                                totalCash = customerCashPurchases,
+                                totalDebt = customerDebtPurchases,
+                                totalPayments = customerPayments,
+                                itemBreakdowns = customerItemBreakdowns,
+                                isArabic = isArabic
+                            )
+                        } else {
+                            val csv = ReportExporter.generateReportCsv(tableHeaders, previewRows)
+                            ReportExporter.createCachedCsv(context, "Report_${System.currentTimeMillis()}.csv", csv)
+                        }
                         ReportExporter.shareFile(context, file, "text/csv", reportTitle)
                         Toast.makeText(context, if (isArabic) "تم تجهيز ملف CSV للمشاركة" else "CSV report ready for export", Toast.LENGTH_SHORT).show()
                     }
                 },
                 enabled = canExport,
                 shape = RoundedCornerShape(10.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                 modifier = Modifier
                     .weight(1f)
                     .height(44.dp)
@@ -2634,62 +2707,78 @@ private fun ReportsTabContent(
             ) {
                 Icon(Icons.Default.Download, contentDescription = null, tint = GeoPrimary, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text(text = "CSV", color = GeoPrimary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-            }
-
-            // Print HTML
-            OutlinedButton(
-                onClick = {
-                    if (canExport) {
-                        val html = ReportExporter.generateReportHtml(
-                            title = reportTitle,
-                            storeName = storeInfo.storeName.ifBlank { if (isArabic) "سمول ستور" else "SmallStore" },
-                            subtitle = if (isArabic) "الفترة: $periodLabel" else "Period: $periodLabel",
-                            kpis = exportKpis,
-                            headers = tableHeaders,
-                            rows = previewRows,
-                            isArabic = isArabic
-                        )
-                        ReportExporter.printHtml(context, reportTitle, html, isArabic)
-                    }
-                },
-                enabled = canExport,
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier
-                    .weight(1f)
-                    .height(44.dp)
-                    .testTag("report_print_button")
-            ) {
-                Icon(Icons.Default.Print, contentDescription = null, tint = GeoPrimary, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(text = if (isArabic) StoreStrings.PRINT_REPORT_AR else StoreStrings.PRINT_REPORT_EN, color = GeoPrimary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Text(text = "CSV", color = GeoPrimary, fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1)
             }
 
             // Share Text
             OutlinedButton(
                 onClick = {
                     if (canExport) {
-                        val shareText = buildString {
-                            appendLine("SmallStore - ${storeInfo.storeName.ifBlank { "Store" }}")
-                            appendLine(reportTitle)
-                            appendLine("Period / الفترة: $periodLabel")
-                            appendLine(tableHeaders.joinToString(" | "))
-                            previewRows.take(15).forEach { r ->
-                                appendLine("${r.col1} | ${r.col2} | ${r.col3} | ${r.col4}")
+                        val file = if (uiState.selectedReportType == ReportType.SALES_AND_ITEMS) {
+                            ReportExporter.createCachedSalesAndItemsTxt(
+                                context = context,
+                                fileName = "Sales_And_Items_Report_${System.currentTimeMillis()}.txt",
+                                title = reportTitle,
+                                storeName = storeInfo.storeName.ifBlank { if (isArabic) "سمول ستور" else "SmallStore" },
+                                subtitle = if (isArabic) "الفترة: $periodLabel" else "Period: $periodLabel",
+                                kpis = exportKpis,
+                                itemBreakdowns = itemBreakdowns,
+                                invoices = (cashSalesInvoices + debtSalesInvoices).sortedByDescending { it.date },
+                                isArabic = isArabic
+                            )
+                        } else if (uiState.selectedReportType == ReportType.TRANSACTIONS) {
+                            ReportExporter.createCachedTransactionsTxt(
+                                context = context,
+                                fileName = "Transactions_Report_${System.currentTimeMillis()}.txt",
+                                title = reportTitle,
+                                storeName = storeInfo.storeName.ifBlank { if (isArabic) "سمول ستور" else "SmallStore" },
+                                subtitle = if (isArabic) "الفترة: $periodLabel" else "Period: $periodLabel",
+                                kpis = exportKpis,
+                                transactions = sortedTransactions,
+                                totalCash = totalTxCash,
+                                totalDebt = totalTxDebt,
+                                totalPayments = totalTxPayments,
+                                isArabic = isArabic
+                            )
+                        } else if (uiState.selectedReportType == ReportType.COMPREHENSIVE_CUSTOMER && selectedCustomer != null) {
+                            val custReportTitle = if (isArabic) StoreStrings.REPORT_COMPREHENSIVE_CUSTOMER_AR else StoreStrings.REPORT_COMPREHENSIVE_CUSTOMER_EN
+                            val safeCustName = selectedCustomer.customerName.replace(Regex("[^a-zA-Z0-9\\u0600-\\u06FF_-]"), "_").take(30)
+                            ReportExporter.createCachedCustomerTxt(
+                                context = context,
+                                fileName = "Comprehensive_Customer_Report_${safeCustName}_${System.currentTimeMillis()}.txt",
+                                title = custReportTitle,
+                                storeName = storeInfo.storeName.ifBlank { if (isArabic) "سمول ستور" else "SmallStore" },
+                                subtitle = if (isArabic) "الفترة: $periodLabel" else "Period: $periodLabel",
+                                customer = selectedCustomer,
+                                kpis = exportKpis,
+                                transactions = customerTransactions,
+                                totalCash = customerCashPurchases,
+                                totalDebt = customerDebtPurchases,
+                                totalPayments = customerPayments,
+                                itemBreakdowns = customerItemBreakdowns,
+                                isArabic = isArabic
+                            )
+                        } else {
+                            val fallbackTxt = buildString {
+                                appendLine("==================================================")
+                                appendLine("${if (isArabic) "المتجر" else "Store"}: ${storeInfo.storeName.ifBlank { if (isArabic) "سمول ستور" else "SmallStore" }}")
+                                appendLine("${if (isArabic) "عنوان التقرير" else "Report Title"}: $reportTitle")
+                                appendLine("${if (isArabic) "الفترة" else "Period"}: $periodLabel")
+                                appendLine("==================================================")
+                                appendLine(tableHeaders.joinToString(" | "))
+                                previewRows.forEach { r ->
+                                    appendLine("${r.col1} | ${r.col2} | ${r.col3} | ${r.col4}")
+                                }
                             }
-                            if (previewRows.size > 15) {
-                                appendLine("... (+${previewRows.size - 15} more)")
-                            }
+                            ReportExporter.createCachedTxt(context, "Report_${System.currentTimeMillis()}.txt", fallbackTxt)
                         }
-                        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(android.content.Intent.EXTRA_TEXT, shareText)
-                        }
-                        context.startActivity(android.content.Intent.createChooser(intent, "Share Report"))
+                        ReportExporter.shareFile(context, file, "text/plain", reportTitle)
+                        Toast.makeText(context, if (isArabic) "تم تجهيز التقرير للمشاركة" else "Report ready for sharing", Toast.LENGTH_SHORT).show()
                     }
                 },
                 enabled = canExport,
                 shape = RoundedCornerShape(10.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                 modifier = Modifier
                     .weight(1f)
                     .height(44.dp)
@@ -2697,7 +2786,7 @@ private fun ReportsTabContent(
             ) {
                 Icon(Icons.Default.Share, contentDescription = null, tint = GeoPrimary, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text(text = if (isArabic) "مشاركة" else "Share", color = GeoPrimary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Text(text = if (isArabic) StoreStrings.SHARE_STATEMENT_AR else StoreStrings.SHARE_STATEMENT_EN, color = GeoPrimary, fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1)
             }
         }
 
