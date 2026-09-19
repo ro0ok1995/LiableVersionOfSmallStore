@@ -13,6 +13,8 @@ import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import com.example.model.AppCurrency
+import com.example.model.CustomerAccount
+import com.example.model.SettlementType
 import com.example.model.StoreStrings
 import com.example.model.TransactionItem
 import com.example.ui.screens.AggregatedProductLine
@@ -700,6 +702,1152 @@ object ReportExporter {
             )
         }
         return file
+    }
+
+    /**
+     * Creates a specialized Transaction PDF report file in cache directory.
+     */
+    fun createCachedTransactionsPdf(
+        context: Context,
+        fileName: String,
+        title: String,
+        storeName: String,
+        subtitle: String,
+        kpis: List<Pair<String, String>>,
+        transactions: List<TransactionItem>,
+        totalCash: Double,
+        totalDebt: Double,
+        totalPayments: Double,
+        isArabic: Boolean = true
+    ): File {
+        val file = File(context.cacheDir, fileName)
+        FileOutputStream(file).use { fos ->
+            generateTransactionsPdf(
+                title = title,
+                storeName = storeName,
+                subtitle = subtitle,
+                kpis = kpis,
+                transactions = transactions,
+                totalCash = totalCash,
+                totalDebt = totalDebt,
+                totalPayments = totalPayments,
+                outputStream = fos,
+                isArabic = isArabic
+            )
+        }
+        return file
+    }
+
+    /**
+     * Creates a specialized Comprehensive Customer PDF report file in cache directory.
+     * Guaranteed to represent ONLY ONE specific selected customer.
+     */
+    fun createCachedCustomerPdf(
+        context: Context,
+        fileName: String,
+        title: String,
+        storeName: String,
+        subtitle: String,
+        customer: CustomerAccount,
+        kpis: List<Pair<String, String>>,
+        transactions: List<TransactionItem>,
+        totalCash: Double,
+        totalDebt: Double,
+        totalPayments: Double,
+        isArabic: Boolean = true
+    ): File {
+        val file = File(context.cacheDir, fileName)
+        FileOutputStream(file).use { fos ->
+            generateCustomerPdf(
+                title = title,
+                storeName = storeName,
+                subtitle = subtitle,
+                customer = customer,
+                kpis = kpis,
+                transactions = transactions,
+                totalCash = totalCash,
+                totalDebt = totalDebt,
+                totalPayments = totalPayments,
+                outputStream = fos,
+                isArabic = isArabic
+            )
+        }
+        return file
+    }
+
+    /**
+     * Specialized PDF generator for the Comprehensive Customer Report (ONE SELECTED CUSTOMER).
+     *
+     * Order of Sections:
+     * 1. REPORT HEADER: Store name, Report title ("التقرير المخصص الشامل للعميل" / "Comprehensive Customer Report"),
+     *    Reporting period/date range, generation timestamp metadata.
+     * 2. SELECTED CUSTOMER INFORMATION: Shows ONLY this one selected customer's identity, phone number, and debt status.
+     *    Never shows customer lists, directories, or other customers.
+     * 3. CUSTOMER SUMMARY: Financial summary cards with real calculated amounts (Balance Due, Cash Purchases, Debt Purchases, Payments).
+     * 4. REPORT DETAILS ("تفاصيل التقرير" / "Report Details"): Structured 5-column transaction ledger table for this customer
+     *    (Date, Type, Description/Notes, Settlement, Amount) with semantic badges and selectable vector text.
+     * 5. FINAL TOTALS: Grand total transactions row and comprehensive balance summary card.
+     *
+     * Multi-page pagination with repeated headers, persistent customer identity banner on sub-pages,
+     * consistent page numbering ("صفحة X من Y"), true RTL/LTR, and zero UI filter tabs.
+     */
+    fun generateCustomerPdf(
+        title: String,
+        storeName: String,
+        subtitle: String,
+        customer: CustomerAccount,
+        kpis: List<Pair<String, String>>,
+        transactions: List<TransactionItem>,
+        totalCash: Double,
+        totalDebt: Double,
+        totalPayments: Double,
+        outputStream: OutputStream,
+        isArabic: Boolean = true
+    ) {
+        val pdfDocument = PdfDocument()
+        val pageWidth = 595 // A4 portrait width in points
+        val pageHeight = 842 // A4 portrait height in points
+        val margin = 32f
+        val contentWidth = pageWidth - (2 * margin) // 531f
+        val printableBottomY = pageHeight - margin - 24f // Reserve space for footer
+
+        val primaryColor = Color.parseColor("#4A3B69")
+        val darkTextColor = Color.parseColor("#1C1B1F")
+        val grayTextColor = Color.parseColor("#605D62")
+        val lightBgColor = Color.parseColor("#F5F3F7")
+        val headerBgColor = Color.parseColor("#EDE9F2")
+        val borderColor = Color.parseColor("#D9D5DC")
+        val altRowColor = Color.parseColor("#FBFBFC")
+        val greenColor = Color.parseColor("#2E7D32")
+        val amberColor = Color.parseColor("#E65100")
+        val blueColor = Color.parseColor("#1976D2")
+        val redColor = Color.parseColor("#C62828")
+
+        val paint = Paint().apply { isAntiAlias = true }
+
+        // Columns definition: Date (18%), Type (18%), Description / Notes (25%), Settlement (17%), Amount (22%)
+        val weights = floatArrayOf(0.18f, 0.18f, 0.25f, 0.17f, 0.22f)
+        val colWidths = FloatArray(weights.size) { i -> contentWidth * weights[i] }
+        val colStarts = FloatArray(weights.size)
+        val colEnds = FloatArray(weights.size)
+        if (isArabic) {
+            var curRight = margin + contentWidth
+            for (i in weights.indices) {
+                val w = colWidths[i]
+                colEnds[i] = curRight
+                colStarts[i] = curRight - w
+                curRight -= w
+            }
+        } else {
+            var curLeft = margin
+            for (i in weights.indices) {
+                val w = colWidths[i]
+                colStarts[i] = curLeft
+                colEnds[i] = curLeft + w
+                curLeft += w
+            }
+        }
+
+        fun drawCellText(
+            canvas: android.graphics.Canvas,
+            text: String,
+            colIndex: Int,
+            baselineY: Float,
+            textPaint: Paint,
+            alignEnd: Boolean = false
+        ) {
+            if (isArabic) {
+                if (alignEnd) {
+                    textPaint.textAlign = Paint.Align.LEFT
+                    canvas.drawText(text, colStarts[colIndex] + 6f, baselineY, textPaint)
+                } else {
+                    textPaint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(text, colEnds[colIndex] - 6f, baselineY, textPaint)
+                }
+            } else {
+                if (alignEnd) {
+                    textPaint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(text, colEnds[colIndex] - 6f, baselineY, textPaint)
+                } else {
+                    textPaint.textAlign = Paint.Align.LEFT
+                    canvas.drawText(text, colStarts[colIndex] + 6f, baselineY, textPaint)
+                }
+            }
+        }
+
+        fun fitText(text: String, maxWidth: Float, textPaint: Paint): String {
+            if (textPaint.measureText(text) <= maxWidth) return text
+            var truncated = text
+            while (truncated.isNotEmpty() && textPaint.measureText("$truncated...") > maxWidth) {
+                truncated = truncated.dropLast(1)
+            }
+            return if (truncated.isEmpty()) "" else "$truncated..."
+        }
+
+        val tableHeaders = if (isArabic) {
+            listOf("التاريخ", "النوع", "البيان / الوصف", "التسوية", "المبلغ")
+        } else {
+            listOf("Date", "Type", "Description / Notes", "Settlement", "Amount")
+        }
+
+        val currentDate = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.US).format(Date())
+
+        // Calculate total pages dynamically
+        fun calculateTotalPages(): Int {
+            if (transactions.isEmpty()) return 1
+            var simPage = 1
+            var simY = margin + 72f + 14f + 22f + 52f + 12f + 44f + 14f + 26f + 22f
+            for (i in transactions.indices) {
+                if (simY + 22f > printableBottomY) {
+                    simPage++
+                    simY = margin + 38f + 22f + 22f
+                } else {
+                    simY += 22f
+                }
+            }
+            if (simY + 60f > printableBottomY) {
+                simPage++
+            }
+            return simPage
+        }
+
+        val totalPages = calculateTotalPages()
+
+        data class PageContent(
+            val pageNum: Int,
+            var page: PdfDocument.Page,
+            var canvas: android.graphics.Canvas,
+            var currentY: Float
+        )
+
+        var currentPageNum = 1
+
+        fun startNewPage(): PageContent {
+            val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, currentPageNum).create()
+            val page = pdfDocument.startPage(pageInfo)
+            val canvas = page.canvas
+            var y = margin
+
+            if (currentPageNum == 1) {
+                // =====================================================================
+                // 1. REPORT HEADER
+                // =====================================================================
+                val bannerHeight = 72f
+                paint.color = primaryColor
+                paint.style = Paint.Style.FILL
+                canvas.drawRoundRect(margin, y, margin + contentWidth, y + bannerHeight, 8f, 8f, paint)
+
+                paint.color = Color.WHITE
+                paint.textSize = 17f
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                if (isArabic) {
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText("سمول ستور  |  $storeName", margin + contentWidth - 16f, y + 30f, paint)
+                } else {
+                    paint.textAlign = Paint.Align.LEFT
+                    canvas.drawText("SmallStore  |  $storeName", margin + 16f, y + 30f, paint)
+                }
+
+                paint.textSize = 12.5f
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+                if (isArabic) {
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(title, margin + contentWidth - 16f, y + 54f, paint)
+                } else {
+                    paint.textAlign = Paint.Align.LEFT
+                    canvas.drawText(title, margin + 16f, y + 54f, paint)
+                }
+                y += bannerHeight + 14f
+
+                // Meta Line: Subtitle (Date range/period) & Current date
+                paint.color = grayTextColor
+                paint.textSize = 9.5f
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+                if (isArabic) {
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(subtitle, margin + contentWidth, y + 10f, paint)
+                    paint.textAlign = Paint.Align.LEFT
+                    canvas.drawText("تاريخ الإصدار: $currentDate", margin, y + 10f, paint)
+                } else {
+                    paint.textAlign = Paint.Align.LEFT
+                    canvas.drawText(subtitle, margin, y + 10f, paint)
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText("Generated: $currentDate", margin + contentWidth, y + 10f, paint)
+                }
+                y += 22f
+
+                // =====================================================================
+                // 2. SELECTED CUSTOMER INFORMATION (ONE SELECTED CUSTOMER ONLY)
+                // =====================================================================
+                val custCardHeight = 52f
+                paint.color = lightBgColor
+                paint.style = Paint.Style.FILL
+                canvas.drawRoundRect(margin, y, margin + contentWidth, y + custCardHeight, 6f, 6f, paint)
+
+                paint.color = borderColor
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 0.8f
+                canvas.drawRoundRect(margin, y, margin + contentWidth, y + custCardHeight, 6f, 6f, paint)
+
+                paint.style = Paint.Style.FILL
+                paint.color = primaryColor
+                paint.textSize = 12f
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                val custLabel = if (isArabic) "العميل المحدد: ${customer.customerName}" else "Selected Customer: ${customer.customerName}"
+                if (isArabic) {
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(custLabel, margin + contentWidth - 14f, y + 22f, paint)
+                } else {
+                    paint.textAlign = Paint.Align.LEFT
+                    canvas.drawText(custLabel, margin + 14f, y + 22f, paint)
+                }
+
+                paint.color = grayTextColor
+                paint.textSize = 9.5f
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+                val phoneText = if (customer.phone.isNotBlank()) {
+                    if (isArabic) "رقم الهاتف: ${customer.phone}" else "Phone: ${customer.phone}"
+                } else {
+                    if (isArabic) "رقم الهاتف: غير محدد" else "Phone: Not Specified"
+                }
+                if (isArabic) {
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(phoneText, margin + contentWidth - 14f, y + 40f, paint)
+                } else {
+                    paint.textAlign = Paint.Align.LEFT
+                    canvas.drawText(phoneText, margin + 14f, y + 40f, paint)
+                }
+
+                val balanceStatusText = if (customer.balance > 0) {
+                    if (isArabic) "الرصيد المستحق: ${AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)}"
+                    else "Outstanding Balance: ${AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)}"
+                } else {
+                    if (isArabic) "الحساب مسدد بالكامل (0.00 ₪)"
+                    else "Fully Settled Account (0.00 ₪)"
+                }
+                paint.color = if (customer.balance > 0) redColor else greenColor
+                paint.textSize = 10f
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                if (isArabic) {
+                    paint.textAlign = Paint.Align.LEFT
+                    canvas.drawText(balanceStatusText, margin + 14f, y + 30f, paint)
+                } else {
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(balanceStatusText, margin + contentWidth - 14f, y + 30f, paint)
+                }
+
+                y += custCardHeight + 12f
+
+                // =====================================================================
+                // 3. CUSTOMER SUMMARY (Summary KPI Cards)
+                // =====================================================================
+                val customerKpis = listOf(
+                    (if (isArabic) "الرصيد المستحق" else "Balance Due") to AppCurrency.formatAmountWithDecimals(customer.balance, isArabic),
+                    (if (isArabic) "مشتريات كاش" else "Cash Purchases") to AppCurrency.formatAmountWithDecimals(totalCash, isArabic),
+                    (if (isArabic) "مشتريات آجل" else "Debt Purchases") to AppCurrency.formatAmountWithDecimals(totalDebt, isArabic),
+                    (if (isArabic) "إجمالي المسدد" else "Payments") to AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)
+                )
+
+                val kpiCount = customerKpis.size
+                val cardSpacing = 8f
+                val totalSpacing = cardSpacing * (kpiCount - 1)
+                val cardWidth = (contentWidth - totalSpacing) / kpiCount
+                val cardHeight = 44f
+
+                for (k in 0 until kpiCount) {
+                    val (kpiTitle, kpiVal) = customerKpis[k]
+                    val cardLeft = if (isArabic) {
+                        margin + contentWidth - (k + 1) * cardWidth - k * cardSpacing
+                    } else {
+                        margin + k * (cardWidth + cardSpacing)
+                    }
+
+                    paint.color = lightBgColor
+                    paint.style = Paint.Style.FILL
+                    canvas.drawRoundRect(cardLeft, y, cardLeft + cardWidth, y + cardHeight, 6f, 6f, paint)
+
+                    paint.color = borderColor
+                    paint.style = Paint.Style.STROKE
+                    paint.strokeWidth = 0.8f
+                    canvas.drawRoundRect(cardLeft, y, cardLeft + cardWidth, y + cardHeight, 6f, 6f, paint)
+
+                    paint.style = Paint.Style.FILL
+                    paint.color = grayTextColor
+                    paint.textSize = 8.5f
+                    paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+                    if (isArabic) {
+                        paint.textAlign = Paint.Align.RIGHT
+                        canvas.drawText(kpiTitle, cardLeft + cardWidth - 8f, y + 16f, paint)
+                    } else {
+                        paint.textAlign = Paint.Align.LEFT
+                        canvas.drawText(kpiTitle, cardLeft + 8f, y + 16f, paint)
+                    }
+
+                    paint.color = if (k == 0 && customer.balance > 0) redColor else primaryColor
+                    paint.textSize = 10.5f
+                    paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                    if (isArabic) {
+                        paint.textAlign = Paint.Align.RIGHT
+                        canvas.drawText(kpiVal, cardLeft + cardWidth - 8f, y + 34f, paint)
+                    } else {
+                        paint.textAlign = Paint.Align.LEFT
+                        canvas.drawText(kpiVal, cardLeft + 8f, y + 34f, paint)
+                    }
+                }
+                y += cardHeight + 14f
+            } else {
+                paint.color = primaryColor
+                paint.style = Paint.Style.FILL
+                canvas.drawRoundRect(margin, y, margin + contentWidth, y + 30f, 4f, 4f, paint)
+
+                paint.color = Color.WHITE
+                paint.textSize = 10f
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                val subPageTitle = if (isArabic) {
+                    "$storeName  •  ${customer.customerName}  •  كشف الحساب"
+                } else {
+                    "$storeName  •  ${customer.customerName}  •  Account Statement"
+                }
+                if (isArabic) {
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(subPageTitle, margin + contentWidth - 12f, y + 19f, paint)
+                    paint.textAlign = Paint.Align.LEFT
+                    canvas.drawText(subtitle, margin + 12f, y + 19f, paint)
+                } else {
+                    paint.textAlign = Paint.Align.LEFT
+                    canvas.drawText(subPageTitle, margin + 12f, y + 19f, paint)
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(subtitle, margin + contentWidth - 12f, y + 19f, paint)
+                }
+                y += 38f
+            }
+
+            return PageContent(currentPageNum, page, canvas, y)
+        }
+
+        var activePage = startNewPage()
+
+        fun drawFooter(canvas: android.graphics.Canvas, pageNum: Int) {
+            val footerY = pageHeight - margin
+            paint.color = borderColor
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 0.5f
+            canvas.drawLine(margin, footerY - 14f, margin + contentWidth, footerY - 14f, paint)
+
+            paint.style = Paint.Style.FILL
+            paint.color = grayTextColor
+            paint.textSize = 8f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+
+            val footerText = if (isArabic) "تم الإصدار عبر تطبيق سمول ستور  •  كشف حساب رسمي معتمد للعميل" else "Generated via SmallStore App • Verified Customer Statement"
+            val pageNumberText = if (isArabic) "صفحة $pageNum من $totalPages" else "Page $pageNum of $totalPages"
+
+            if (isArabic) {
+                paint.textAlign = Paint.Align.RIGHT
+                canvas.drawText(footerText, margin + contentWidth, footerY, paint)
+                paint.textAlign = Paint.Align.LEFT
+                canvas.drawText(pageNumberText, margin, footerY, paint)
+            } else {
+                paint.textAlign = Paint.Align.LEFT
+                canvas.drawText(footerText, margin, footerY, paint)
+                paint.textAlign = Paint.Align.RIGHT
+                canvas.drawText(pageNumberText, margin + contentWidth, footerY, paint)
+            }
+        }
+
+        fun drawTableHeader(canvas: android.graphics.Canvas, y: Float) {
+            val hHeight = 22f
+            paint.color = headerBgColor
+            paint.style = Paint.Style.FILL
+            canvas.drawRect(margin, y, margin + contentWidth, y + hHeight, paint)
+            paint.color = borderColor
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 0.8f
+            canvas.drawRect(margin, y, margin + contentWidth, y + hHeight, paint)
+
+            paint.style = Paint.Style.FILL
+            paint.color = darkTextColor
+            paint.textSize = 9f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+
+            for (i in tableHeaders.indices) {
+                drawCellText(canvas, tableHeaders[i], i, y + 15f, paint, alignEnd = (i == 4))
+            }
+        }
+
+        fun checkPageBreak(requiredHeight: Float) {
+            if (activePage.currentY + requiredHeight > printableBottomY) {
+                drawFooter(activePage.canvas, activePage.pageNum)
+                pdfDocument.finishPage(activePage.page)
+
+                currentPageNum++
+                activePage = startNewPage()
+
+                // Re-draw table header on continued page
+                drawTableHeader(activePage.canvas, activePage.currentY)
+                activePage.currentY += 22f
+            }
+        }
+
+        // =====================================================================
+        // 4. REPORT DETAILS ("تفاصيل التقرير" / "Report Details")
+        // =====================================================================
+        checkPageBreak(50f)
+        val sectionBadgeHeight = 22f
+        paint.color = lightBgColor
+        paint.style = Paint.Style.FILL
+        activePage.canvas.drawRoundRect(margin, activePage.currentY, margin + contentWidth, activePage.currentY + sectionBadgeHeight, 4f, 4f, paint)
+        paint.color = primaryColor
+        paint.textSize = 10f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        val secTitle = if (isArabic) {
+            "تفاصيل التقرير (${transactions.size} معاملة مسجلة)"
+        } else {
+            "Report Details (${transactions.size} Recorded Transactions)"
+        }
+        if (isArabic) {
+            paint.textAlign = Paint.Align.RIGHT
+            activePage.canvas.drawText(secTitle, margin + contentWidth - 10f, activePage.currentY + 15f, paint)
+        } else {
+            paint.textAlign = Paint.Align.LEFT
+            activePage.canvas.drawText(secTitle, margin + 10f, activePage.currentY + 15f, paint)
+        }
+        activePage.currentY += sectionBadgeHeight + 4f
+
+        // Table Column Header
+        drawTableHeader(activePage.canvas, activePage.currentY)
+        activePage.currentY += 22f
+
+        // Table Rows
+        if (transactions.isEmpty()) {
+            val emptyH = 26f
+            paint.color = grayTextColor
+            paint.textSize = 9f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+            paint.textAlign = Paint.Align.CENTER
+            val emptyMsg = if (isArabic) "لا توجد حركات مسجلة لهذا العميل في هذه الفترة" else "No transactions recorded for this customer in this period"
+            activePage.canvas.drawText(emptyMsg, pageWidth / 2f, activePage.currentY + 17f, paint)
+            activePage.currentY += emptyH
+        } else {
+            val rowHeight = 22f
+            transactions.forEachIndexed { idx, tx ->
+                checkPageBreak(rowHeight)
+
+                if (idx % 2 == 1) {
+                    paint.color = altRowColor
+                    paint.style = Paint.Style.FILL
+                    activePage.canvas.drawRect(margin, activePage.currentY, margin + contentWidth, activePage.currentY + rowHeight, paint)
+                }
+                paint.color = borderColor
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 0.5f
+                activePage.canvas.drawRect(margin, activePage.currentY, margin + contentWidth, activePage.currentY + rowHeight, paint)
+
+                paint.style = Paint.Style.FILL
+                paint.color = darkTextColor
+                paint.textSize = 8.5f
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+
+                // 0: Date
+                val dateStr = tx.date
+                drawCellText(activePage.canvas, dateStr, 0, activePage.currentY + 15f, paint, alignEnd = false)
+
+                // 1: Type
+                val isPayment = tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
+                val isDebt = !isPayment && (tx.isCredit || tx.activityType.contains("آجل") ||
+                    tx.activityType.contains("دين") || tx.activityType.contains("Debt") ||
+                    tx.activityType.contains("شراء بالدين"))
+
+                val typeLabel = if (isPayment) {
+                    if (isArabic) "تسديد" else "Payment"
+                } else if (isDebt) {
+                    if (isArabic) "شراء آجل" else "Credit Purchase"
+                } else {
+                    if (isArabic) "شراء كاش" else "Cash Purchase"
+                }
+                paint.color = if (isPayment) blueColor else if (isDebt) amberColor else greenColor
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                drawCellText(activePage.canvas, typeLabel, 1, activePage.currentY + 15f, paint, alignEnd = false)
+
+                // 2: Description / Notes
+                paint.color = darkTextColor
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+                val desc = tx.notes.ifBlank { tx.title.ifBlank { tx.activityType } }
+                val descDisplay = fitText(desc, colWidths[2] - 12f, paint)
+                drawCellText(activePage.canvas, descDisplay, 2, activePage.currentY + 15f, paint, alignEnd = false)
+
+                // 3: Settlement
+                val settlementStr = when (tx.settlementType) {
+                    SettlementType.FULL -> if (isArabic) "تسوية كاملة" else "Full Settlement"
+                    SettlementType.PARTIAL -> if (isArabic) "تسوية جزئية" else "Partial Settlement"
+                    null -> "-"
+                }
+                val settlementDisplay = fitText(settlementStr, colWidths[3] - 12f, paint)
+                drawCellText(activePage.canvas, settlementDisplay, 3, activePage.currentY + 15f, paint, alignEnd = false)
+
+                // 4: Amount
+                paint.color = primaryColor
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                drawCellText(activePage.canvas, AppCurrency.formatAmountWithDecimals(tx.amount, isArabic), 4, activePage.currentY + 15f, paint, alignEnd = true)
+
+                activePage.currentY += rowHeight
+            }
+
+            // =====================================================================
+            // 5. FINAL TOTALS (Totals / Balance Summary for Selected Customer)
+            // =====================================================================
+            checkPageBreak(22f)
+            val totalH = 22f
+            paint.color = headerBgColor
+            paint.style = Paint.Style.FILL
+            activePage.canvas.drawRect(margin, activePage.currentY, margin + contentWidth, activePage.currentY + totalH, paint)
+            paint.color = borderColor
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 0.8f
+            activePage.canvas.drawRect(margin, activePage.currentY, margin + contentWidth, activePage.currentY + totalH, paint)
+
+            paint.style = Paint.Style.FILL
+            paint.color = primaryColor
+            paint.textSize = 9f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+
+            val totalLbl = if (isArabic) "إجمالي العمليات المعروضة (${transactions.size})" else "Total Operations (${transactions.size})"
+            drawCellText(activePage.canvas, totalLbl, 0, activePage.currentY + 15f, paint, alignEnd = false)
+            drawCellText(activePage.canvas, AppCurrency.formatAmountWithDecimals(transactions.sumOf { it.amount }, isArabic), 4, activePage.currentY + 15f, paint, alignEnd = true)
+            activePage.currentY += totalH + 6f
+
+            // Customer Final Balance Summary Card
+            checkPageBreak(30f)
+            val breakdownH = 28f
+            paint.color = lightBgColor
+            paint.style = Paint.Style.FILL
+            activePage.canvas.drawRoundRect(margin, activePage.currentY, margin + contentWidth, activePage.currentY + breakdownH, 4f, 4f, paint)
+            paint.color = borderColor
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 0.8f
+            activePage.canvas.drawRoundRect(margin, activePage.currentY, margin + contentWidth, activePage.currentY + breakdownH, 4f, 4f, paint)
+
+            paint.style = Paint.Style.FILL
+            paint.color = darkTextColor
+            paint.textSize = 8.5f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            val balanceSummaryText = if (isArabic) {
+                "الرصيد المستحق: ${AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)}   |   مشتريات كاش: ${AppCurrency.formatAmountWithDecimals(totalCash, isArabic)}   |   مشتريات آجل: ${AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)}   |   المسدد: ${AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)}"
+            } else {
+                "Balance Due: ${AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)}   |   Cash: ${AppCurrency.formatAmountWithDecimals(totalCash, isArabic)}   |   Debt: ${AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)}   |   Payments: ${AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)}"
+            }
+            paint.textAlign = Paint.Align.CENTER
+            activePage.canvas.drawText(balanceSummaryText, pageWidth / 2f, activePage.currentY + 18f, paint)
+            activePage.currentY += breakdownH
+        }
+
+        // Finish active page
+        drawFooter(activePage.canvas, activePage.pageNum)
+        pdfDocument.finishPage(activePage.page)
+
+        outputStream.use { os ->
+            pdfDocument.writeTo(os)
+        }
+        pdfDocument.close()
+    }
+
+    /**
+     * Specialized PDF generator for the Transaction report.
+     * Contains: Header banner, KPI Summary Cards, Section Heading ("تفاصيل المعاملات" / "Transaction Details"),
+     * Structured Transactions Table with real data (Date, Customer, Type, Notes/Settlement, Amount),
+     * and Final Totals / Summary Row & Breakdown Card. Supports clean multi-page pagination with repeated table headers,
+     * consistent page numbering, and true RTL/LTR document structure without UI filter tabs.
+     */
+    fun generateTransactionsPdf(
+        title: String,
+        storeName: String,
+        subtitle: String,
+        kpis: List<Pair<String, String>>,
+        transactions: List<TransactionItem>,
+        totalCash: Double,
+        totalDebt: Double,
+        totalPayments: Double,
+        outputStream: OutputStream,
+        isArabic: Boolean = true
+    ) {
+        val pdfDocument = PdfDocument()
+        val pageWidth = 595 // A4 portrait width in points
+        val pageHeight = 842 // A4 portrait height in points
+        val margin = 32f
+        val contentWidth = pageWidth - (2 * margin) // 531f
+        val printableBottomY = pageHeight - margin - 24f // Reserve space for footer
+
+        val primaryColor = Color.parseColor("#4A3B69")
+        val darkTextColor = Color.parseColor("#1C1B1F")
+        val grayTextColor = Color.parseColor("#605D62")
+        val lightBgColor = Color.parseColor("#F5F3F7")
+        val headerBgColor = Color.parseColor("#EDE9F2")
+        val borderColor = Color.parseColor("#D9D5DC")
+        val altRowColor = Color.parseColor("#FBFBFC")
+        val greenColor = Color.parseColor("#2E7D32")
+        val amberColor = Color.parseColor("#E65100")
+        val blueColor = Color.parseColor("#1976D2")
+
+        val paint = Paint().apply { isAntiAlias = true }
+
+        // Columns definition helper: Date (18%), Customer (25%), Type (18%), Notes/Settlement (19%), Amount (20%)
+        val weights = floatArrayOf(0.18f, 0.25f, 0.18f, 0.19f, 0.20f)
+        val colWidths = FloatArray(weights.size) { i -> contentWidth * weights[i] }
+        val colStarts = FloatArray(weights.size)
+        val colEnds = FloatArray(weights.size)
+        if (isArabic) {
+            var curRight = margin + contentWidth
+            for (i in weights.indices) {
+                val w = colWidths[i]
+                colEnds[i] = curRight
+                colStarts[i] = curRight - w
+                curRight -= w
+            }
+        } else {
+            var curLeft = margin
+            for (i in weights.indices) {
+                val w = colWidths[i]
+                colStarts[i] = curLeft
+                colEnds[i] = curLeft + w
+                curLeft += w
+            }
+        }
+
+        fun drawCellText(
+            canvas: android.graphics.Canvas,
+            text: String,
+            colIndex: Int,
+            baselineY: Float,
+            textPaint: Paint,
+            alignEnd: Boolean = false
+        ) {
+            if (isArabic) {
+                if (alignEnd) {
+                    textPaint.textAlign = Paint.Align.LEFT
+                    canvas.drawText(text, colStarts[colIndex] + 6f, baselineY, textPaint)
+                } else {
+                    textPaint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(text, colEnds[colIndex] - 6f, baselineY, textPaint)
+                }
+            } else {
+                if (alignEnd) {
+                    textPaint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(text, colEnds[colIndex] - 6f, baselineY, textPaint)
+                } else {
+                    textPaint.textAlign = Paint.Align.LEFT
+                    canvas.drawText(text, colStarts[colIndex] + 6f, baselineY, textPaint)
+                }
+            }
+        }
+
+        fun fitText(text: String, maxWidth: Float, textPaint: Paint): String {
+            if (textPaint.measureText(text) <= maxWidth) return text
+            var truncated = text
+            while (truncated.isNotEmpty() && textPaint.measureText("$truncated...") > maxWidth) {
+                truncated = truncated.dropLast(1)
+            }
+            return if (truncated.isEmpty()) "" else "$truncated..."
+        }
+
+        val txHeaders = if (isArabic) {
+            listOf("التاريخ", "العميل", "نوع المعاملة", "البيان / التسوية", "المبلغ")
+        } else {
+            listOf("Date", "Customer", "Transaction Type", "Notes / Settlement", "Amount")
+        }
+
+        val currentDate = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.US).format(Date())
+
+        // Calculate total pages dynamically
+        fun calculateTotalPages(): Int {
+            if (transactions.isEmpty()) return 1
+            var simPage = 1
+            val kpiH = if (kpis.isNotEmpty()) 58f else 0f
+            var simY = margin + 72f + 14f + 22f + kpiH + 26f + 22f
+            for (i in transactions.indices) {
+                if (simY + 22f > printableBottomY) {
+                    simPage++
+                    simY = margin + 38f + 22f + 22f
+                } else {
+                    simY += 22f
+                }
+            }
+            // Check if final totals rows fit on current page
+            if (simY + 56f > printableBottomY) {
+                simPage++
+            }
+            return simPage
+        }
+
+        val totalPages = calculateTotalPages()
+
+        data class PageContent(
+            val pageNum: Int,
+            var page: PdfDocument.Page,
+            var canvas: android.graphics.Canvas,
+            var currentY: Float
+        )
+
+        var currentPageNum = 1
+
+        fun startNewPage(): PageContent {
+            val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, currentPageNum).create()
+            val page = pdfDocument.startPage(pageInfo)
+            val canvas = page.canvas
+            var y = margin
+
+            if (currentPageNum == 1) {
+                // Header Banner
+                val bannerHeight = 72f
+                paint.color = primaryColor
+                paint.style = Paint.Style.FILL
+                canvas.drawRoundRect(margin, y, margin + contentWidth, y + bannerHeight, 8f, 8f, paint)
+
+                paint.color = Color.WHITE
+                paint.textSize = 17f
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                if (isArabic) {
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText("سمول ستور  |  $storeName", margin + contentWidth - 16f, y + 30f, paint)
+                } else {
+                    paint.textAlign = Paint.Align.LEFT
+                    canvas.drawText("SmallStore  |  $storeName", margin + 16f, y + 30f, paint)
+                }
+
+                paint.textSize = 12.5f
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+                if (isArabic) {
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(title, margin + contentWidth - 16f, y + 54f, paint)
+                } else {
+                    paint.textAlign = Paint.Align.LEFT
+                    canvas.drawText(title, margin + 16f, y + 54f, paint)
+                }
+                y += bannerHeight + 14f
+
+                // Meta Line: Subtitle (Date range/period) & Current date
+                paint.color = grayTextColor
+                paint.textSize = 9.5f
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+                if (isArabic) {
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(subtitle, margin + contentWidth, y + 10f, paint)
+                    paint.textAlign = Paint.Align.LEFT
+                    canvas.drawText("تاريخ الإصدار: $currentDate", margin, y + 10f, paint)
+                } else {
+                    paint.textAlign = Paint.Align.LEFT
+                    canvas.drawText(subtitle, margin, y + 10f, paint)
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText("Generated: $currentDate", margin + contentWidth, y + 10f, paint)
+                }
+                y += 22f
+
+                // Summary KPI Cards (Existing calculated values)
+                if (kpis.isNotEmpty()) {
+                    val kpiCount = kpis.size.coerceAtMost(4)
+                    val cardSpacing = 8f
+                    val totalSpacing = cardSpacing * (kpiCount - 1)
+                    val cardWidth = (contentWidth - totalSpacing) / kpiCount
+                    val cardHeight = 44f
+
+                    for (k in 0 until kpiCount) {
+                        val (kpiTitle, kpiVal) = kpis[k]
+                        val cardLeft = if (isArabic) {
+                            margin + contentWidth - (k + 1) * cardWidth - k * cardSpacing
+                        } else {
+                            margin + k * (cardWidth + cardSpacing)
+                        }
+
+                        paint.color = lightBgColor
+                        paint.style = Paint.Style.FILL
+                        canvas.drawRoundRect(cardLeft, y, cardLeft + cardWidth, y + cardHeight, 6f, 6f, paint)
+
+                        paint.color = borderColor
+                        paint.style = Paint.Style.STROKE
+                        paint.strokeWidth = 0.8f
+                        canvas.drawRoundRect(cardLeft, y, cardLeft + cardWidth, y + cardHeight, 6f, 6f, paint)
+
+                        paint.style = Paint.Style.FILL
+                        paint.color = grayTextColor
+                        paint.textSize = 8.5f
+                        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+                        if (isArabic) {
+                            paint.textAlign = Paint.Align.RIGHT
+                            canvas.drawText(kpiTitle, cardLeft + cardWidth - 8f, y + 16f, paint)
+                        } else {
+                            paint.textAlign = Paint.Align.LEFT
+                            canvas.drawText(kpiTitle, cardLeft + 8f, y + 16f, paint)
+                        }
+
+                        paint.color = primaryColor
+                        paint.textSize = 11.5f
+                        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                        if (isArabic) {
+                            paint.textAlign = Paint.Align.RIGHT
+                            canvas.drawText(kpiVal, cardLeft + cardWidth - 8f, y + 34f, paint)
+                        } else {
+                            paint.textAlign = Paint.Align.LEFT
+                            canvas.drawText(kpiVal, cardLeft + 8f, y + 34f, paint)
+                        }
+                    }
+                    y += cardHeight + 14f
+                }
+            } else {
+                // Subsequent page header
+                paint.color = primaryColor
+                paint.style = Paint.Style.FILL
+                canvas.drawRoundRect(margin, y, margin + contentWidth, y + 30f, 4f, 4f, paint)
+
+                paint.color = Color.WHITE
+                paint.textSize = 10f
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                if (isArabic) {
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText("$storeName  •  $title", margin + contentWidth - 12f, y + 19f, paint)
+                    paint.textAlign = Paint.Align.LEFT
+                    canvas.drawText(subtitle, margin + 12f, y + 19f, paint)
+                } else {
+                    paint.textAlign = Paint.Align.LEFT
+                    canvas.drawText("$storeName  •  $title", margin + 12f, y + 19f, paint)
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(subtitle, margin + contentWidth - 12f, y + 19f, paint)
+                }
+                y += 38f
+            }
+
+            return PageContent(currentPageNum, page, canvas, y)
+        }
+
+        var activePage = startNewPage()
+
+        fun drawFooter(canvas: android.graphics.Canvas, pageNum: Int) {
+            val footerY = pageHeight - margin
+            paint.color = borderColor
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 0.5f
+            canvas.drawLine(margin, footerY - 14f, margin + contentWidth, footerY - 14f, paint)
+
+            paint.style = Paint.Style.FILL
+            paint.color = grayTextColor
+            paint.textSize = 8f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+
+            val footerText = if (isArabic) "تم الإصدار عبر تطبيق سمول ستور  •  مستند إلكتروني معتمد" else "Generated via SmallStore App • Verified Electronic Document"
+            val pageNumberText = if (isArabic) "صفحة $pageNum من $totalPages" else "Page $pageNum of $totalPages"
+
+            if (isArabic) {
+                paint.textAlign = Paint.Align.RIGHT
+                canvas.drawText(footerText, margin + contentWidth, footerY, paint)
+                paint.textAlign = Paint.Align.LEFT
+                canvas.drawText(pageNumberText, margin, footerY, paint)
+            } else {
+                paint.textAlign = Paint.Align.LEFT
+                canvas.drawText(footerText, margin, footerY, paint)
+                paint.textAlign = Paint.Align.RIGHT
+                canvas.drawText(pageNumberText, margin + contentWidth, footerY, paint)
+            }
+        }
+
+        fun drawTableHeader(canvas: android.graphics.Canvas, y: Float) {
+            val hHeight = 22f
+            paint.color = headerBgColor
+            paint.style = Paint.Style.FILL
+            canvas.drawRect(margin, y, margin + contentWidth, y + hHeight, paint)
+            paint.color = borderColor
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 0.8f
+            canvas.drawRect(margin, y, margin + contentWidth, y + hHeight, paint)
+
+            paint.style = Paint.Style.FILL
+            paint.color = darkTextColor
+            paint.textSize = 9f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+
+            for (i in txHeaders.indices) {
+                drawCellText(canvas, txHeaders[i], i, y + 15f, paint, alignEnd = (i == 4))
+            }
+        }
+
+        fun checkPageBreak(requiredHeight: Float) {
+            if (activePage.currentY + requiredHeight > printableBottomY) {
+                drawFooter(activePage.canvas, activePage.pageNum)
+                pdfDocument.finishPage(activePage.page)
+
+                currentPageNum++
+                activePage = startNewPage()
+
+                // Re-draw table header on subsequent page
+                drawTableHeader(activePage.canvas, activePage.currentY)
+                activePage.currentY += 22f
+            }
+        }
+
+        // --- SECTION 3: TRANSACTION DETAILS HEADING ---
+        checkPageBreak(50f)
+        val sectionBadgeHeight = 22f
+        paint.color = lightBgColor
+        paint.style = Paint.Style.FILL
+        activePage.canvas.drawRoundRect(margin, activePage.currentY, margin + contentWidth, activePage.currentY + sectionBadgeHeight, 4f, 4f, paint)
+        paint.color = primaryColor
+        paint.textSize = 10f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        val secTitle = if (isArabic) {
+            "تفاصيل المعاملات (${transactions.size} معاملة)"
+        } else {
+            "Transaction Details (${transactions.size} Transactions)"
+        }
+        if (isArabic) {
+            paint.textAlign = Paint.Align.RIGHT
+            activePage.canvas.drawText(secTitle, margin + contentWidth - 10f, activePage.currentY + 15f, paint)
+        } else {
+            paint.textAlign = Paint.Align.LEFT
+            activePage.canvas.drawText(secTitle, margin + 10f, activePage.currentY + 15f, paint)
+        }
+        activePage.currentY += sectionBadgeHeight + 4f
+
+        // Table Header
+        drawTableHeader(activePage.canvas, activePage.currentY)
+        activePage.currentY += 22f
+
+        // Table Rows
+        if (transactions.isEmpty()) {
+            val emptyH = 26f
+            paint.color = grayTextColor
+            paint.textSize = 9f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+            paint.textAlign = Paint.Align.CENTER
+            val emptyMsg = if (isArabic) "لا توجد معاملات متاحة في هذه الفترة" else "No transactions available for this period"
+            activePage.canvas.drawText(emptyMsg, pageWidth / 2f, activePage.currentY + 17f, paint)
+            activePage.currentY += emptyH
+        } else {
+            val rowHeight = 22f
+            transactions.forEachIndexed { idx, tx ->
+                checkPageBreak(rowHeight)
+
+                if (idx % 2 == 1) {
+                    paint.color = altRowColor
+                    paint.style = Paint.Style.FILL
+                    activePage.canvas.drawRect(margin, activePage.currentY, margin + contentWidth, activePage.currentY + rowHeight, paint)
+                }
+                paint.color = borderColor
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 0.5f
+                activePage.canvas.drawRect(margin, activePage.currentY, margin + contentWidth, activePage.currentY + rowHeight, paint)
+
+                paint.style = Paint.Style.FILL
+                paint.color = darkTextColor
+                paint.textSize = 8.5f
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+
+                // 0: Date
+                val dateStr = tx.date
+                drawCellText(activePage.canvas, dateStr, 0, activePage.currentY + 15f, paint, alignEnd = false)
+
+                // 1: Customer
+                val customerName = tx.customerName.ifBlank { if (isArabic) "عميل عام" else "General" }
+                val customerDisplay = fitText(customerName, colWidths[1] - 12f, paint)
+                drawCellText(activePage.canvas, customerDisplay, 1, activePage.currentY + 15f, paint, alignEnd = false)
+
+                // 2: Type
+                val isPayment = tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
+                val isDebt = !isPayment && (tx.isCredit || tx.activityType.contains("آجل") ||
+                    tx.activityType.contains("دين") || tx.activityType.contains("Debt") ||
+                    tx.activityType.contains("شراء بالدين"))
+
+                val typeLabel = if (isPayment) {
+                    if (isArabic) "تسديد (دفعة)" else "Payment"
+                } else if (isDebt) {
+                    if (isArabic) "شراء آجل (دين)" else "Credit Purchase"
+                } else {
+                    if (isArabic) "شراء نقدي (كاش)" else "Cash Purchase"
+                }
+                paint.color = if (isPayment) blueColor else if (isDebt) amberColor else greenColor
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                drawCellText(activePage.canvas, typeLabel, 2, activePage.currentY + 15f, paint, alignEnd = false)
+
+                // 3: Notes / Settlement
+                paint.color = darkTextColor
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+                val settlementStr = when (tx.settlementType) {
+                    SettlementType.FULL -> if (isArabic) "تسوية كاملة" else "Full Settlement"
+                    SettlementType.PARTIAL -> if (isArabic) "تسوية جزئية" else "Partial Settlement"
+                    null -> ""
+                }
+                val rawNotes = tx.notes.ifBlank { tx.title }
+                val noteText = if (settlementStr.isNotBlank() && rawNotes.isNotBlank()) {
+                    "$settlementStr - $rawNotes"
+                } else if (settlementStr.isNotBlank()) {
+                    settlementStr
+                } else if (rawNotes.isNotBlank()) {
+                    rawNotes
+                } else {
+                    "-"
+                }
+                val notesDisplay = fitText(noteText, colWidths[3] - 12f, paint)
+                drawCellText(activePage.canvas, notesDisplay, 3, activePage.currentY + 15f, paint, alignEnd = false)
+
+                // 4: Amount
+                paint.color = primaryColor
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                drawCellText(activePage.canvas, AppCurrency.formatAmountWithDecimals(tx.amount, isArabic), 4, activePage.currentY + 15f, paint, alignEnd = true)
+
+                activePage.currentY += rowHeight
+            }
+
+            // --- SECTION 4: FINAL TOTALS / SUMMARY ---
+            // Table Grand Total Row
+            checkPageBreak(22f)
+            val totalH = 22f
+            paint.color = headerBgColor
+            paint.style = Paint.Style.FILL
+            activePage.canvas.drawRect(margin, activePage.currentY, margin + contentWidth, activePage.currentY + totalH, paint)
+            paint.color = borderColor
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 0.8f
+            activePage.canvas.drawRect(margin, activePage.currentY, margin + contentWidth, activePage.currentY + totalH, paint)
+
+            paint.style = Paint.Style.FILL
+            paint.color = primaryColor
+            paint.textSize = 9f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+
+            val totalLbl = if (isArabic) "إجمالي المعاملات (${transactions.size} معاملة)" else "Transactions Total (${transactions.size} Transactions)"
+            drawCellText(activePage.canvas, totalLbl, 0, activePage.currentY + 15f, paint, alignEnd = false)
+            drawCellText(activePage.canvas, AppCurrency.formatAmountWithDecimals(transactions.sumOf { it.amount }, isArabic), 4, activePage.currentY + 15f, paint, alignEnd = true)
+            activePage.currentY += totalH + 6f
+
+            // Final Totals Breakdown Card
+            checkPageBreak(30f)
+            val breakdownH = 28f
+            paint.color = lightBgColor
+            paint.style = Paint.Style.FILL
+            activePage.canvas.drawRoundRect(margin, activePage.currentY, margin + contentWidth, activePage.currentY + breakdownH, 4f, 4f, paint)
+            paint.color = borderColor
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 0.8f
+            activePage.canvas.drawRoundRect(margin, activePage.currentY, margin + contentWidth, activePage.currentY + breakdownH, 4f, 4f, paint)
+
+            paint.style = Paint.Style.FILL
+            paint.color = darkTextColor
+            paint.textSize = 8.5f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            val breakdownSummaryText = if (isArabic) {
+                "إجمالي الكاش: ${AppCurrency.formatAmountWithDecimals(totalCash, isArabic)}   |   إجمالي الآجل: ${AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)}   |   إجمالي التسديد: ${AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)}"
+            } else {
+                "Cash Total: ${AppCurrency.formatAmountWithDecimals(totalCash, isArabic)}   |   Debt Total: ${AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)}   |   Payments Total: ${AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)}"
+            }
+            paint.textAlign = Paint.Align.CENTER
+            activePage.canvas.drawText(breakdownSummaryText, pageWidth / 2f, activePage.currentY + 18f, paint)
+            activePage.currentY += breakdownH
+        }
+
+        // Finish active page
+        drawFooter(activePage.canvas, activePage.pageNum)
+        pdfDocument.finishPage(activePage.page)
+
+        outputStream.use { os ->
+            pdfDocument.writeTo(os)
+        }
+        pdfDocument.close()
     }
 
     /**

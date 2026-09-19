@@ -2556,6 +2556,36 @@ private fun ReportsTabContent(
                                 invoices = (cashSalesInvoices + debtSalesInvoices).sortedByDescending { it.date },
                                 isArabic = isArabic
                             )
+                        } else if (uiState.selectedReportType == ReportType.TRANSACTIONS) {
+                            ReportExporter.createCachedTransactionsPdf(
+                                context = context,
+                                fileName = "TransactionsReport_${System.currentTimeMillis()}.pdf",
+                                title = reportTitle,
+                                storeName = storeInfo.storeName.ifBlank { if (isArabic) "سمول ستور" else "SmallStore" },
+                                subtitle = if (isArabic) "الفترة: $periodLabel" else "Period: $periodLabel",
+                                kpis = exportKpis,
+                                transactions = sortedTransactions,
+                                totalCash = totalTxCash,
+                                totalDebt = totalTxDebt,
+                                totalPayments = totalTxPayments,
+                                isArabic = isArabic
+                            )
+                        } else if (uiState.selectedReportType == ReportType.COMPREHENSIVE_CUSTOMER && selectedCustomer != null) {
+                            val custReportTitle = if (isArabic) StoreStrings.REPORT_COMPREHENSIVE_CUSTOMER_AR else StoreStrings.REPORT_COMPREHENSIVE_CUSTOMER_EN
+                            ReportExporter.createCachedCustomerPdf(
+                                context = context,
+                                fileName = "CustomerReport_${System.currentTimeMillis()}.pdf",
+                                title = custReportTitle,
+                                storeName = storeInfo.storeName.ifBlank { if (isArabic) "سمول ستور" else "SmallStore" },
+                                subtitle = if (isArabic) "الفترة: $periodLabel" else "Period: $periodLabel",
+                                customer = selectedCustomer,
+                                kpis = exportKpis,
+                                transactions = customerTransactions,
+                                totalCash = customerCashPurchases,
+                                totalDebt = customerDebtPurchases,
+                                totalPayments = customerPayments,
+                                isArabic = isArabic
+                            )
                         } else {
                             ReportExporter.createCachedPdf(
                                 context = context,

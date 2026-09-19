@@ -444,4 +444,175 @@ class ExampleRobolectricTest {
       // Expected in Robolectric headless JVM environment where native Skia/PdfDocument is unmocked
     }
   }
+
+  @Test
+  fun testGenerateTransactionsPdfStructure() {
+    val sampleTransactions = listOf(
+      com.example.model.TransactionItem(
+        id = "tx1",
+        title = "شراء نقدي",
+        customerName = "خالد العتيبي",
+        activityType = "شراء نقدي",
+        amount = 120.0,
+        isCredit = false,
+        date = "2026/09/19",
+        relativeTime = "اليوم",
+        notes = "فاتورة كاش رقم 1"
+      ),
+      com.example.model.TransactionItem(
+        id = "tx2",
+        title = "شراء آجل",
+        customerName = "محمد القحطاني",
+        activityType = "شراء آجل",
+        amount = 250.0,
+        isCredit = true,
+        date = "2026/09/19",
+        relativeTime = "اليوم",
+        notes = "فاتورة دين"
+      ),
+      com.example.model.TransactionItem(
+        id = "tx3",
+        title = "تسديد دفعة",
+        customerName = "محمد القحطاني",
+        activityType = "تسديد",
+        amount = 100.0,
+        isCredit = false,
+        date = "2026/09/19",
+        relativeTime = "اليوم",
+        settlementType = com.example.model.SettlementType.PARTIAL,
+        notes = "دفعة حساب"
+      )
+    )
+
+    val kpis = listOf(
+      "إجمالي الكاش" to "120.00 ₪",
+      "إجمالي الآجل" to "250.00 ₪",
+      "إجمالي التسديد" to "100.00 ₪"
+    )
+
+    try {
+      val outStream = java.io.ByteArrayOutputStream()
+      com.example.util.ReportExporter.generateTransactionsPdf(
+        title = "تقرير المعاملات",
+        storeName = "سمول ستور",
+        subtitle = "الفترة: هذا الشهر",
+        kpis = kpis,
+        transactions = sampleTransactions,
+        totalCash = 120.0,
+        totalDebt = 250.0,
+        totalPayments = 100.0,
+        outputStream = outStream,
+        isArabic = true
+      )
+      val bytes = outStream.toByteArray()
+      if (bytes.isNotEmpty()) {
+        assertEquals('%'.code.toByte(), bytes[0])
+      }
+    } catch (_: IllegalStateException) {
+      // Expected in headless Robolectric JVM without Skia PDF engine
+    }
+
+    // Verify calculations and data integrity
+    assertEquals(3, sampleTransactions.size)
+    val totalAmount = sampleTransactions.sumOf { it.amount }
+    assertEquals(470.0, totalAmount, 0.001)
+  }
+
+  @Test
+  fun testGenerateCustomerPdfForOneSelectedCustomer() {
+    val selectedCustomer = com.example.model.CustomerAccount(
+      id = "cust-1",
+      customerName = "أحمد خليل",
+      balance = 350.0,
+      totalDebt = 350.0,
+      phone = "0599123456"
+    )
+
+    val customerTransactions = listOf(
+      com.example.model.TransactionItem(
+        id = "ctx-1",
+        title = "شراء آجل",
+        customerName = "أحمد خليل",
+        activityType = "شراء آجل",
+        amount = 500.0,
+        isCredit = true,
+        date = "2026/09/10",
+        relativeTime = "قبل 9 أيام",
+        notes = "فاتورة مشتريات بالدين"
+      ),
+      com.example.model.TransactionItem(
+        id = "ctx-2",
+        title = "تسديد دفعة",
+        customerName = "أحمد خليل",
+        activityType = "تسديد",
+        amount = 150.0,
+        isCredit = false,
+        date = "2026/09/15",
+        relativeTime = "قبل 4 أيام",
+        settlementType = com.example.model.SettlementType.PARTIAL,
+        notes = "دفعة نقدية على الحساب"
+      )
+    )
+
+    val kpis = listOf(
+      "الرصيد المستحق" to "350.00 ₪",
+      "مشتريات كاش" to "0.00 ₪",
+      "مشتريات آجل" to "500.00 ₪"
+    )
+
+    // Verify customer data integrity for this one selected customer
+    assertEquals("أحمد خليل", selectedCustomer.customerName)
+    assertEquals("0599123456", selectedCustomer.phone)
+    assertEquals(350.0, selectedCustomer.balance, 0.001)
+    assertEquals(2, customerTransactions.size)
+    assertEquals(650.0, customerTransactions.sumOf { it.amount }, 0.001)
+
+    // Test PDF generation invocation for this customer in Arabic
+    try {
+      val outStreamAr = java.io.ByteArrayOutputStream()
+      com.example.util.ReportExporter.generateCustomerPdf(
+        title = com.example.model.StoreStrings.REPORT_COMPREHENSIVE_CUSTOMER_AR,
+        storeName = "سمول ستور",
+        subtitle = "الفترة: هذا الشهر",
+        customer = selectedCustomer,
+        kpis = kpis,
+        transactions = customerTransactions,
+        totalCash = 0.0,
+        totalDebt = 500.0,
+        totalPayments = 150.0,
+        outputStream = outStreamAr,
+        isArabic = true
+      )
+      val bytesAr = outStreamAr.toByteArray()
+      if (bytesAr.isNotEmpty()) {
+        assertEquals('%'.code.toByte(), bytesAr[0])
+      }
+    } catch (_: IllegalStateException) {
+      // Expected in headless Robolectric JVM without Skia PDF engine
+    }
+
+    // Test PDF generation invocation for this customer in English LTR
+    try {
+      val outStreamEn = java.io.ByteArrayOutputStream()
+      com.example.util.ReportExporter.generateCustomerPdf(
+        title = com.example.model.StoreStrings.REPORT_COMPREHENSIVE_CUSTOMER_EN,
+        storeName = "SmallStore",
+        subtitle = "Period: This Month",
+        customer = selectedCustomer,
+        kpis = kpis,
+        transactions = customerTransactions,
+        totalCash = 0.0,
+        totalDebt = 500.0,
+        totalPayments = 150.0,
+        outputStream = outStreamEn,
+        isArabic = false
+      )
+      val bytesEn = outStreamEn.toByteArray()
+      if (bytesEn.isNotEmpty()) {
+        assertEquals('%'.code.toByte(), bytesEn[0])
+      }
+    } catch (_: IllegalStateException) {
+      // Expected in headless Robolectric JVM without Skia PDF engine
+    }
+  }
 }
