@@ -2544,17 +2544,31 @@ private fun ReportsTabContent(
             Button(
                 onClick = {
                     if (canExport) {
-                        val file = ReportExporter.createCachedPdf(
-                            context = context,
-                            fileName = "Report_${System.currentTimeMillis()}.pdf",
-                            title = reportTitle,
-                            storeName = storeInfo.storeName.ifBlank { if (isArabic) "سمول ستور" else "SmallStore" },
-                            subtitle = if (isArabic) "الفترة: $periodLabel" else "Period: $periodLabel",
-                            kpis = exportKpis,
-                            headers = tableHeaders,
-                            rows = previewRows,
-                            isArabic = isArabic
-                        )
+                        val file = if (uiState.selectedReportType == ReportType.SALES_AND_ITEMS) {
+                            ReportExporter.createCachedSalesAndItemsPdf(
+                                context = context,
+                                fileName = "SalesReport_${System.currentTimeMillis()}.pdf",
+                                title = reportTitle,
+                                storeName = storeInfo.storeName.ifBlank { if (isArabic) "سمول ستور" else "SmallStore" },
+                                subtitle = if (isArabic) "الفترة: $periodLabel" else "Period: $periodLabel",
+                                kpis = exportKpis,
+                                itemBreakdowns = itemBreakdowns,
+                                invoices = (cashSalesInvoices + debtSalesInvoices).sortedByDescending { it.date },
+                                isArabic = isArabic
+                            )
+                        } else {
+                            ReportExporter.createCachedPdf(
+                                context = context,
+                                fileName = "Report_${System.currentTimeMillis()}.pdf",
+                                title = reportTitle,
+                                storeName = storeInfo.storeName.ifBlank { if (isArabic) "سمول ستور" else "SmallStore" },
+                                subtitle = if (isArabic) "الفترة: $periodLabel" else "Period: $periodLabel",
+                                kpis = exportKpis,
+                                headers = tableHeaders,
+                                rows = previewRows,
+                                isArabic = isArabic
+                            )
+                        }
                         ReportExporter.shareFile(context, file, "application/pdf", reportTitle)
                     }
                 },
