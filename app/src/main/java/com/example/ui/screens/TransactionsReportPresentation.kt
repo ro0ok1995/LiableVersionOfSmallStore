@@ -843,13 +843,13 @@ fun TransactionsReportPresentation(
                             // Col 2: Customer
                             Column(modifier = Modifier.weight(1.3f)) {
                                 Text(
-                                    text = tx.customerName.ifBlank { if (isArabic) "عميل عام" else "General" },
+                                    text = tx.customerNameSnapshot.ifBlank { if (isArabic) "عميل عام" else "General" },
                                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
                                     color = MaterialTheme.colorScheme.onSurface,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                                if (tx.title.isNotBlank() && tx.title != tx.customerName) {
+                                if (tx.title.isNotBlank() && tx.title != tx.customerNameSnapshot) {
                                     Text(
                                         text = tx.title,
                                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),

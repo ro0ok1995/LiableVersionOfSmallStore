@@ -43,6 +43,7 @@ import com.example.ui.screens.AccountsScreen
 import com.example.ui.screens.AnalysisCenterScreen
 import com.example.ui.screens.AppSettingsScreen
 import com.example.ui.screens.ArchiveScreen
+import com.example.ui.screens.BackupRestoreScreen
 import com.example.ui.screens.ContactSupportScreen
 import com.example.ui.screens.CustomerManagementScreen
 import com.example.ui.screens.ProductManagementScreen
@@ -92,7 +93,7 @@ fun SmallStoreApp(
             mainViewModel.closeDrawer()
         } else if (uiState.currentDestination == NavDestination.CUSTOMER_DETAILS) {
             mainViewModel.navigateBackFromCustomerDetails()
-        } else if (uiState.currentDestination in listOf(NavDestination.CUSTOMER_MANAGEMENT, NavDestination.PRODUCT_MANAGEMENT, NavDestination.ARCHIVE)) {
+        } else if (uiState.currentDestination in listOf(NavDestination.CUSTOMER_MANAGEMENT, NavDestination.PRODUCT_MANAGEMENT, NavDestination.ARCHIVE, NavDestination.BACKUP_RESTORE)) {
             mainViewModel.navigateTo(NavDestination.DATA_CENTER)
         } else if (uiState.currentDestination in listOf(NavDestination.PRIVACY_POLICY, NavDestination.TERMS_OF_USE, NavDestination.CONTACT_SUPPORT)) {
             mainViewModel.navigateTo(NavDestination.ABOUT)
@@ -179,6 +180,7 @@ fun SmallStoreApp(
                     NavDestination.PRIVACY_POLICY -> if (isArabic) StoreStrings.PRIVACY_POLICY_AR else StoreStrings.PRIVACY_POLICY_EN
                     NavDestination.TERMS_OF_USE -> if (isArabic) StoreStrings.TERMS_OF_USE_AR else StoreStrings.TERMS_OF_USE_EN
                     NavDestination.CONTACT_SUPPORT -> if (isArabic) StoreStrings.CONTACT_SUPPORT_AR else StoreStrings.CONTACT_SUPPORT_EN
+                    NavDestination.BACKUP_RESTORE -> if (isArabic) StoreStrings.SECTION_BACKUP_AR else StoreStrings.SECTION_BACKUP_EN
                 }
 
                 val unreadNotifs = uiState.notifications.count { !it.isRead }
@@ -237,9 +239,10 @@ fun SmallStoreApp(
                                     }
                                 }
 
-                                val displayedTxs = remember(uiState.transactions, uiState.homeSelectedCustomer) {
-                                    if (uiState.homeSelectedCustomer != null) {
-                                        uiState.transactions.filter { it.customerName.equals(uiState.homeSelectedCustomer?.customerName, ignoreCase = true) }
+                                val displayedTxs = remember(uiState.transactions, uiState.allTransactions, uiState.homeSelectedCustomer) {
+                                    val selectedCust = uiState.homeSelectedCustomer
+                                    if (selectedCust != null) {
+                                        uiState.allTransactions.filter { it.customerId == selectedCust.id }
                                     } else {
                                         uiState.transactions
                                     }
@@ -255,7 +258,7 @@ fun SmallStoreApp(
                                     transactions = displayedTxs,
                                     matchingCustomers = matching,
                                     allCustomers = uiState.customers,
-                                    allTransactions = uiState.transactions,
+                                    allTransactions = uiState.allTransactions,
                                     selectedCustomer = uiState.homeSelectedCustomer,
                                     searchQuery = uiState.homeSearchQuery,
                                     selectedPeriod = uiState.homeSelectedPeriod,
@@ -291,7 +294,7 @@ fun SmallStoreApp(
                                 AccountsScreen(
                                     accounts = filteredAccounts,
                                     allCustomers = uiState.customers,
-                                    transactions = uiState.transactions,
+                                    transactions = uiState.allTransactions,
                                     searchQuery = uiState.accountsSearchQuery,
                                     filter = uiState.accountsFilter,
                                     selectedCustomerDetails = uiState.accountsSelectedCustomerDetails,
@@ -348,7 +351,7 @@ fun SmallStoreApp(
                                 AnalysisCenterScreen(
                                     viewModel = analysisViewModel,
                                     customers = uiState.customers,
-                                    transactions = uiState.transactions,
+                                    transactions = uiState.allTransactions,
                                     storeInfo = uiState.storeInfo,
                                     products = uiState.products,
                                     transactionLines = uiState.transactionLines,
@@ -440,7 +443,6 @@ fun SmallStoreApp(
                             }
 
                             NavDestination.APP_SETTINGS -> {
-                                val context = LocalContext.current
                                 AppSettingsScreen(
                                     languageMode = uiState.languageMode,
                                     themeMode = uiState.themeMode,
@@ -453,7 +455,46 @@ fun SmallStoreApp(
                                     onLanguageChange = { mainViewModel.setLanguageMode(it) },
                                     onThemeChange = { mainViewModel.setThemeMode(it) },
                                     onDisplayModeChange = { mainViewModel.setDisplayMode(it) },
-                                    onNotificationsChange = { mainViewModel.setNotificationsEnabled(it) },
+                                    onNotificationsChange = { mainViewModel.setNotificationsEnabled(it) }
+                                )
+                            }
+
+                            NavDestination.DATA_CENTER -> {
+                                DataCenterScreen(
+                                    languageMode = uiState.languageMode,
+                                    customersCount = uiState.customers.size,
+                                    productsCount = uiState.products.size,
+                                    onBackClick = {
+                                        focusManager.clearFocus()
+                                        mainViewModel.navigateTo(NavDestination.MORE)
+                                    },
+                                    onCustomersClick = {
+                                        focusManager.clearFocus()
+                                        mainViewModel.navigateTo(NavDestination.CUSTOMER_MANAGEMENT)
+                                    },
+                                    onProductsClick = {
+                                        focusManager.clearFocus()
+                                        mainViewModel.navigateTo(NavDestination.PRODUCT_MANAGEMENT)
+                                    },
+                                    onBackupRestoreClick = {
+                                        focusManager.clearFocus()
+                                        mainViewModel.navigateTo(NavDestination.BACKUP_RESTORE)
+                                    },
+                                    onArchiveClick = {
+                                        focusManager.clearFocus()
+                                        mainViewModel.navigateTo(NavDestination.ARCHIVE)
+                                    }
+                                )
+                            }
+
+                            NavDestination.BACKUP_RESTORE -> {
+                                val context = LocalContext.current
+                                BackupRestoreScreen(
+                                    languageMode = uiState.languageMode,
+                                    onBackClick = {
+                                        focusManager.clearFocus()
+                                        mainViewModel.navigateTo(NavDestination.DATA_CENTER)
+                                    },
                                     onExportBackup = { uri ->
                                         mainViewModel.exportBackup(context, uri) { success ->
                                             val msg = if (success) {
@@ -479,30 +520,6 @@ fun SmallStoreApp(
                                         )
                                     },
                                     onResetData = { mainViewModel.resetData() }
-                                )
-                            }
-
-                            NavDestination.DATA_CENTER -> {
-                                DataCenterScreen(
-                                    languageMode = uiState.languageMode,
-                                    customersCount = uiState.customers.size,
-                                    productsCount = uiState.products.size,
-                                    onBackClick = {
-                                        focusManager.clearFocus()
-                                        mainViewModel.navigateTo(NavDestination.MORE)
-                                    },
-                                    onCustomersClick = {
-                                        focusManager.clearFocus()
-                                        mainViewModel.navigateTo(NavDestination.CUSTOMER_MANAGEMENT)
-                                    },
-                                    onProductsClick = {
-                                        focusManager.clearFocus()
-                                        mainViewModel.navigateTo(NavDestination.PRODUCT_MANAGEMENT)
-                                    },
-                                    onArchiveClick = {
-                                        focusManager.clearFocus()
-                                        mainViewModel.navigateTo(NavDestination.ARCHIVE)
-                                    }
                                 )
                             }
 
@@ -585,8 +602,9 @@ fun SmallStoreApp(
                                     onRestoreTransaction = { transaction ->
                                         mainViewModel.requestRestoreTransaction(transaction)
                                     },
-                                    onPermanentDeleteTransaction = { transaction ->
-                                        mainViewModel.deleteTransactionPermanently(transaction)
+                                    onPermanentDeleteTransaction = { _ ->
+                                        // Accounting Golden Rule: Financial records are immutable historical entries.
+                                        // Physical deletion of transactions is strictly prohibited.
                                     },
                                     activeConflict = uiState.pendingArchiveConflict,
                                     onResolveConflictSeparate = { conflict ->

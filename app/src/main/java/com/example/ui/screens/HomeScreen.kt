@@ -69,6 +69,8 @@ import com.example.model.PeriodFilter
 import com.example.model.SettlementType
 import com.example.model.StoreStrings
 import com.example.model.TransactionItem
+import com.example.model.TransactionType
+import com.example.model.typedTransactionType
 import com.example.ui.components.CustomerSearchField
 import com.example.ui.components.SimpleEmptyState
 import com.example.ui.components.StoreDebtAgingSummaryCard
@@ -125,7 +127,7 @@ fun HomeScreen(
 
     val periodTransactions = remember(transactions, selectedPeriod, selectedCustomer, customStartDate, customEndDate) {
         val base = if (selectedCustomer != null) {
-            transactions.filter { it.customerName == selectedCustomer.customerName }
+            transactions.filter { it.customerId == selectedCustomer.id }
         } else {
             transactions
         }
@@ -658,7 +660,7 @@ private fun ActivityRowCard(
     onClick: (() -> Unit)? = null
 ) {
     val isCredit = transaction.isCredit
-    val isPayment = transaction.activityType == "تسديد" || transaction.activityType == "Payment"
+    val isPayment = transaction.typedTransactionType == TransactionType.CUSTOMER_PAYMENT
     val badgeBg = if (isPayment || isCredit) MaterialTheme.colorScheme.statusGreenContainer else MaterialTheme.colorScheme.statusRedContainer
     val badgeTint = if (isPayment || isCredit) MaterialTheme.colorScheme.statusGreen else MaterialTheme.colorScheme.statusRed
     val iconVector = if (isPayment || isCredit) Icons.Default.Add else Icons.Default.Remove
@@ -696,16 +698,34 @@ private fun ActivityRowCard(
             }
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = transaction.customerName,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = transaction.customerNameSnapshot,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (transaction.isArchived) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(4.dp),
+                            modifier = Modifier.testTag("archived_badge_${transaction.id}")
+                        ) {
+                            Text(
+                                text = if (isArabic) "مؤرشف" else "Archived",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
                 Spacer(modifier = Modifier.height(2.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(

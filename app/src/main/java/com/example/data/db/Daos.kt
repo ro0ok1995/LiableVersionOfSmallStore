@@ -133,6 +133,12 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE id = :id LIMIT 1")
     suspend fun getTransactionById(id: String): TransactionEntity?
 
+    @Query("SELECT * FROM transactions WHERE customerId = :customerId ORDER BY date ASC, id ASC")
+    fun getTransactionsByCustomerId(customerId: String): Flow<List<TransactionEntity>>
+
+    @Query("SELECT * FROM transactions WHERE customerId = :customerId ORDER BY date ASC, id ASC")
+    suspend fun getTransactionsByCustomerIdSync(customerId: String): List<TransactionEntity>
+
     @Query("SELECT COUNT(*) FROM transactions")
     suspend fun getTransactionCount(): Int
 
@@ -151,9 +157,20 @@ interface TransactionDao {
     @Query("UPDATE transactions SET isArchived = 0, archivedDate = NULL WHERE id = :id")
     suspend fun unarchiveTransaction(id: String)
 
+    @Query("UPDATE transactions SET customerId = :customerId WHERE id = :transactionId")
+    suspend fun updateTransactionCustomerId(transactionId: String, customerId: String?)
+
+    @Deprecated(
+        message = "Direct deletion of financial transactions violates the Accounting Golden Rule (ledger immutability).",
+        level = DeprecationLevel.WARNING
+    )
     @Query("DELETE FROM transactions WHERE id = :id")
     suspend fun deleteTransactionById(id: String)
 
+    @Deprecated(
+        message = "Direct deletion of financial transactions violates the Accounting Golden Rule (ledger immutability).",
+        level = DeprecationLevel.WARNING
+    )
     @Delete
     suspend fun deleteTransaction(transaction: TransactionEntity)
 
@@ -187,6 +204,10 @@ interface TransactionItemLineDao {
     @Delete
     suspend fun deleteLine(line: TransactionItemLineEntity)
 
+    @Deprecated(
+        message = "Direct deletion of transaction lines violates historical audit trail preservation.",
+        level = DeprecationLevel.WARNING
+    )
     @Query("DELETE FROM transaction_item_lines WHERE transactionId = :transactionId")
     suspend fun deleteLinesForTransaction(transactionId: String)
 
@@ -241,3 +262,117 @@ interface StoreInfoDao {
     @Query("DELETE FROM store_info")
     suspend fun deleteStoreInfo()
 }
+
+@Dao
+interface CustomerConflictDao {
+    @Query("SELECT * FROM customer_identity_conflicts ORDER BY createdAt DESC, id DESC")
+    fun getAllConflicts(): Flow<List<CustomerIdentityConflictEntity>>
+
+    @Query("SELECT * FROM customer_identity_conflicts ORDER BY createdAt DESC, id DESC")
+    suspend fun getAllConflictsSync(): List<CustomerIdentityConflictEntity>
+
+    @Query("SELECT * FROM customer_identity_conflicts WHERE resolutionStatus = 'UNRESOLVED' ORDER BY createdAt DESC, id DESC")
+    fun getUnresolvedConflicts(): Flow<List<CustomerIdentityConflictEntity>>
+
+    @Query("SELECT * FROM customer_identity_conflicts WHERE resolutionStatus = 'UNRESOLVED' ORDER BY createdAt DESC, id DESC")
+    suspend fun getUnresolvedConflictsSync(): List<CustomerIdentityConflictEntity>
+
+    @Query("SELECT COUNT(*) FROM customer_identity_conflicts WHERE resolutionStatus = 'UNRESOLVED'")
+    fun getUnresolvedConflictCount(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM customer_identity_conflicts WHERE resolutionStatus = 'UNRESOLVED'")
+    suspend fun getUnresolvedConflictCountSync(): Int
+
+    @Query("SELECT * FROM customer_identity_conflicts WHERE id = :id LIMIT 1")
+    suspend fun getConflictById(id: String): CustomerIdentityConflictEntity?
+
+    @Query("SELECT * FROM customer_identity_conflicts WHERE transactionId = :transactionId LIMIT 1")
+    suspend fun getConflictByTransactionId(transactionId: String): CustomerIdentityConflictEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertConflict(conflict: CustomerIdentityConflictEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertConflicts(conflicts: List<CustomerIdentityConflictEntity>)
+
+    @Update
+    suspend fun updateConflict(conflict: CustomerIdentityConflictEntity)
+
+    @Query("""
+        UPDATE customer_identity_conflicts
+        SET resolutionStatus = 'RESOLVED',
+            resolvedCustomerId = :resolvedCustomerId,
+            resolvedAt = :resolvedAt,
+            notes = :notes
+        WHERE id = :conflictId
+    """)
+    suspend fun markResolved(
+        conflictId: String,
+        resolvedCustomerId: String,
+        resolvedAt: String,
+        notes: String? = null
+    )
+
+    @Query("""
+        UPDATE customer_identity_conflicts
+        SET resolutionStatus = 'DISMISSED',
+            resolvedAt = :resolvedAt,
+            notes = :notes
+        WHERE id = :conflictId
+    """)
+    suspend fun markDismissed(
+        conflictId: String,
+        resolvedAt: String,
+        notes: String? = null
+    )
+}
+
+@Dao
+interface SaleDao {
+    @Query("SELECT * FROM sales ORDER BY createdAt DESC, id DESC")
+    fun getAllSales(): Flow<List<Sale>>
+
+    @Query("SELECT * FROM sales ORDER BY createdAt DESC, id DESC")
+    suspend fun getAllSalesSync(): List<Sale>
+
+    @Query("SELECT * FROM sales WHERE customerId = :customerId ORDER BY transactionDate DESC, createdAt DESC")
+    fun getSalesByCustomerId(customerId: String): Flow<List<Sale>>
+
+    @Query("SELECT * FROM sales WHERE customerId = :customerId ORDER BY transactionDate DESC, createdAt DESC")
+    suspend fun getSalesByCustomerIdSync(customerId: String): List<Sale>
+
+    @Query("SELECT * FROM sales WHERE id = :id LIMIT 1")
+    suspend fun getSaleById(id: String): Sale?
+
+    @Query("SELECT * FROM sales WHERE invoiceNumber = :invoiceNumber LIMIT 1")
+    suspend fun getSaleByInvoiceNumber(invoiceNumber: String): Sale?
+
+    @Query("SELECT invoiceNumber FROM sales WHERE invoiceNumber LIKE 'INV-%' ORDER BY invoiceNumber DESC LIMIT 1")
+    suspend fun getLastInvoiceNumber(): String?
+
+    @Query("SELECT COUNT(*) FROM sales")
+    suspend fun getSaleCount(): Int
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertSale(sale: Sale)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertSaleLines(lines: List<SaleLine>)
+
+    @Query("SELECT * FROM sale_lines WHERE saleId = :saleId ORDER BY createdAt ASC, id ASC")
+    suspend fun getSaleLinesBySaleId(saleId: String): List<SaleLine>
+
+    @Query("SELECT * FROM sale_lines WHERE saleId = :saleId ORDER BY createdAt ASC, id ASC")
+    fun getSaleLinesBySaleIdFlow(saleId: String): Flow<List<SaleLine>>
+
+    @Update
+    suspend fun updateSale(sale: Sale)
+
+    @Query("DELETE FROM sales")
+    suspend fun deleteAllSales()
+
+    @Query("DELETE FROM sale_lines")
+    suspend fun deleteAllSaleLines()
+}
+
+

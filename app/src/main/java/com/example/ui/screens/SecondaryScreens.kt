@@ -307,6 +307,7 @@ fun DataCenterScreen(
     onBackClick: () -> Unit,
     onCustomersClick: (() -> Unit)? = null,
     onProductsClick: (() -> Unit)? = null,
+    onBackupRestoreClick: (() -> Unit)? = null,
     onArchiveClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -446,7 +447,55 @@ fun DataCenterScreen(
                 }
             }
 
-            // 3. Archive
+            // 3. Backup & Restore
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, GeoOutlineVariant, RoundedCornerShape(14.dp))
+                    .clickable { onBackupRestoreClick?.invoke() }
+                    .testTag("data_center_item_backup_restore")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        color = GeoPrimary.copy(alpha = 0.10f),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.size(42.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.CloudUpload, contentDescription = null, tint = GeoPrimary)
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (isArabic) StoreStrings.SECTION_BACKUP_AR else StoreStrings.SECTION_BACKUP_EN,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = if (isArabic) "إنشاء واستعادة النسخ الاحتياطية وإعادة ضبط البيانات" else "Create and restore backups, and reset application data",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            // 4. Archive
             Card(
                 shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),

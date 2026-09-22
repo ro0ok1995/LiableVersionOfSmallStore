@@ -1,5 +1,6 @@
 package com.example.model
 
+import com.example.accounting.FinancialReportCalculator
 import com.example.data.db.TransactionItemLineEntity
 import com.example.ui.components.BreakdownChartType
 import com.example.ui.screens.AggregatedProductLine
@@ -152,9 +153,9 @@ object AnalyticsExportDataPreparer {
             AnalyticsReportScope.ALL_CUSTOMERS
         }
 
-        // 2. Filter transactions by customer and period (matches StatisticsTabContent lines 850-864)
+        // 2. Filter transactions by customer and period (matches StatisticsTabContent)
         val customerFilteredTxs = if (selectedCustomer != null) {
-            transactions.filter { it.customerName.equals(selectedCustomer.customerName, ignoreCase = true) }
+            transactions.filter { it.customerId == selectedCustomer.id }
         } else {
             transactions
         }

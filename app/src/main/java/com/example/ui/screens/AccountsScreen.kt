@@ -120,7 +120,7 @@ fun AccountsScreen(
             AccountSortOption.HIGHEST_DEBT -> accounts.sortedByDescending { it.balance }
             AccountSortOption.HIGHEST_CASH -> accounts.sortedByDescending { customer ->
                 transactions.filter {
-                    it.customerName == customer.customerName && !it.isCredit &&
+                    it.customerId == customer.id && !it.isCredit &&
                     (it.activityType.contains("شراء كاش") || it.activityType.contains("Cash") || (!it.activityType.contains("تسديد") && !it.activityType.contains("Payment")))
                 }.sumOf { it.amount }
             }

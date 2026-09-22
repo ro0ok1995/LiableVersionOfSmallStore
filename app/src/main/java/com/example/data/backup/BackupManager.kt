@@ -98,7 +98,8 @@ object BackupManager {
             val obj = JSONObject().apply {
                 put("id", t.id)
                 put("title", t.title)
-                put("customerName", t.customerName)
+                put("customerNameSnapshot", t.customerNameSnapshot)
+                put("customerName", t.customerNameSnapshot) // Backward compatibility
                 put("activityType", t.activityType)
                 put("amount", t.amount)
                 put("isCredit", t.isCredit)
@@ -111,6 +112,20 @@ object BackupManager {
                 }
                 if (t.settlementType != null) {
                     put("settlementType", t.settlementType.name)
+                }
+                if (t.customerId != null) {
+                    put("customerId", t.customerId)
+                }
+                put("paidAmount", t.paidAmount)
+                put("creditAmount", t.creditAmount)
+                if (t.transactionType != null) {
+                    put("transactionType", t.transactionType.name)
+                }
+                if (t.saleType != null) {
+                    put("saleType", t.saleType.name)
+                }
+                if (t.paymentStatus != null) {
+                    put("paymentStatus", t.paymentStatus.name)
                 }
             }
             txArray.put(obj)
@@ -159,14 +174,14 @@ object BackupManager {
         val version = root.optInt("version", 1)
         val timestamp = root.optLong("backupTimestamp", System.currentTimeMillis())
 
-        val storeObj = root.getJSONObject("storeInfoAtBackupTime")
+        val storeObj = root.optJSONObject("storeInfoAtBackupTime")
         val storeInfo = StoreInfo(
-            storeName = storeObj.optString("storeName", ""),
-            ownerName = storeObj.optString("ownerName", ""),
-            phone = storeObj.optString("phone", ""),
-            address = storeObj.optString("address", ""),
-            taxNumber = storeObj.optString("taxNumber", ""),
-            crNumber = storeObj.optString("crNumber", "")
+            storeName = storeObj?.optString("storeName", "") ?: "",
+            ownerName = storeObj?.optString("ownerName", "") ?: "",
+            phone = storeObj?.optString("phone", "") ?: "",
+            address = storeObj?.optString("address", "") ?: "",
+            taxNumber = storeObj?.optString("taxNumber", "") ?: "",
+            crNumber = storeObj?.optString("crNumber", "") ?: ""
         )
 
         val customers = mutableListOf<CustomerAccount>()
@@ -229,11 +244,26 @@ object BackupManager {
                 "PARTIAL" -> SettlementType.PARTIAL
                 else -> null
             }
+            val snapshot = if (obj.has("customerNameSnapshot") && !obj.isNull("customerNameSnapshot")) {
+                obj.getString("customerNameSnapshot")
+            } else {
+                obj.optString("customerName", "")
+            }
+            val cid = if (obj.has("customerId") && !obj.isNull("customerId")) obj.getString("customerId") else null
+            val paidAmt = obj.optDouble("paidAmount", 0.0)
+            val creditAmt = obj.optDouble("creditAmount", 0.0)
+            val txTypeStr = if (obj.has("transactionType") && !obj.isNull("transactionType")) obj.getString("transactionType") else null
+            val txType = txTypeStr?.let { runCatching { com.example.model.TransactionType.valueOf(it) }.getOrNull() }
+            val sTypeStr = if (obj.has("saleType") && !obj.isNull("saleType")) obj.getString("saleType") else null
+            val sType = sTypeStr?.let { runCatching { com.example.model.SaleType.valueOf(it) }.getOrNull() }
+            val pStatusStr = if (obj.has("paymentStatus") && !obj.isNull("paymentStatus")) obj.getString("paymentStatus") else null
+            val pStatus = pStatusStr?.let { runCatching { com.example.model.PaymentStatus.valueOf(it) }.getOrNull() }
+
             transactions.add(
                 TransactionItem(
                     id = obj.getString("id"),
                     title = obj.optString("title", ""),
-                    customerName = obj.getString("customerName"),
+                    customerNameSnapshot = snapshot,
                     activityType = obj.optString("activityType", ""),
                     amount = obj.optDouble("amount", 0.0),
                     isCredit = obj.optBoolean("isCredit", false),
@@ -241,8 +271,15 @@ object BackupManager {
                     relativeTime = obj.optString("relativeTime", ""),
                     notes = obj.optString("notes", ""),
                     settlementType = settlementType,
+                    customerId = cid,
                     isArchived = obj.optBoolean("isArchived", false),
-                    archivedDate = archDate
+                    archivedDate = archDate,
+                    customerName = snapshot,
+                    transactionType = txType,
+                    saleType = sType,
+                    paymentStatus = pStatus,
+                    paidAmount = paidAmt,
+                    creditAmount = creditAmt
                 )
             )
         }

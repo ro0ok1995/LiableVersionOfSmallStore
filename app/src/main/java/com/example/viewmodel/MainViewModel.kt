@@ -7,16 +7,18 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.backup.BackupManager
 import com.example.data.backup.BackupPayload
+import com.example.data.db.Sale
+import com.example.data.db.SaleLine
 import com.example.data.db.TransactionItemLineEntity
 import com.example.data.repository.StoreRepository
 import com.example.model.AccountFilter
 import com.example.model.AppThemeMode
 import com.example.model.CartItem
 import com.example.model.CustomerAccount
+import com.example.model.CustomerConflictItem
 import com.example.model.LanguageMode
 import com.example.model.NavDestination
 import com.example.model.NotificationItem
-import com.example.model.PaymentMethodOption
 import com.example.model.PeriodFilter
 import com.example.model.ProductItem
 import com.example.model.SampleData
@@ -25,6 +27,10 @@ import com.example.model.StoreInfo
 import com.example.model.ArchiveConflict
 import com.example.model.ThemeDisplayMode
 import com.example.model.TransactionItem
+import com.example.model.TransactionType
+import com.example.model.SaleType
+import com.example.model.PaymentStatus
+import com.example.model.LegacyAccountingBridge
 import com.example.ui.components.SettlementContext
 import com.example.util.ProductImageHelper
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,11 +63,14 @@ data class MainUiState(
     val archivedCustomerIds: Set<String> = emptySet(),
     val transactions: List<TransactionItem> = emptyList(),
     val archivedTransactions: List<TransactionItem> = emptyList(),
+    val allTransactions: List<TransactionItem> = emptyList(),
     val notifications: List<NotificationItem> = emptyList(),
     val products: List<ProductItem> = emptyList(),
     val archivedProducts: List<ProductItem> = emptyList(),
     val archivedProductIds: Set<String> = emptySet(),
     val transactionLines: List<com.example.data.db.TransactionItemLineEntity> = emptyList(),
+    val unresolvedCustomerConflicts: List<CustomerConflictItem> = emptyList(),
+    val unresolvedConflictCount: Int = 0,
 
     // Archive conflict resolution state
     val pendingArchiveConflict: ArchiveConflict? = null,
@@ -150,6 +159,12 @@ class MainViewModel @JvmOverloads constructor(
         }
 
         viewModelScope.launch {
+            repository.allTransactions.collect { list ->
+                _uiState.update { it.copy(allTransactions = list) }
+            }
+        }
+
+        viewModelScope.launch {
             repository.products.collect { list ->
                 _uiState.update { it.copy(products = list) }
             }
@@ -175,6 +190,18 @@ class MainViewModel @JvmOverloads constructor(
         viewModelScope.launch {
             repository.transactionLines.collect { list ->
                 _uiState.update { it.copy(transactionLines = list) }
+            }
+        }
+
+        viewModelScope.launch {
+            repository.unresolvedCustomerConflicts.collect { list ->
+                _uiState.update { it.copy(unresolvedCustomerConflicts = list) }
+            }
+        }
+
+        viewModelScope.launch {
+            repository.unresolvedConflictCount.collect { count ->
+                _uiState.update { it.copy(unresolvedConflictCount = count) }
             }
         }
 
@@ -347,22 +374,13 @@ class MainViewModel @JvmOverloads constructor(
             customers: List<CustomerAccount>,
             transaction: TransactionItem
         ): CustomerAccount? {
-            // Use the strongest existing customer identifier available: customer's stable ID
+            // Strict customer identity by persistent ID (Phase 2):
             if (!transaction.customerId.isNullOrBlank()) {
-                val byId = customers.firstOrNull { it.id == transaction.customerId }
-                if (byId != null) return byId
+                return customers.firstOrNull { it.id == transaction.customerId }
             }
-            // Safely resolve relationship from existing architecture without incorrect duplicate matching
-            val matches = customers.filter { it.customerName == transaction.customerName }
-            return when {
-                matches.size == 1 -> matches.first()
-                matches.size > 1 -> {
-                    matches.firstOrNull { it.lastTransactionDate == transaction.date }
-                        ?: matches.firstOrNull { it.hasRecentActivity }
-                        ?: matches.first()
-                }
-                else -> null
-            }
+            // If customerId is null, do NOT guess using customerName.
+            // Return null / unresolved state.
+            return null
         }
     }
 
@@ -663,29 +681,80 @@ class MainViewModel @JvmOverloads constructor(
             )
         }
 
-        // 2. Duplicate detection: same customer, amount, date, and activity type
-        val dupMatch = activeList.firstOrNull {
-            it.customerName.trim().equals(transaction.customerName.trim(), ignoreCase = true) &&
-            Math.abs(it.amount - transaction.amount) < 0.001 &&
-            it.date.trim() == transaction.date.trim() &&
-            it.activityType.trim().equals(transaction.activityType.trim(), ignoreCase = true)
+        // 2. Duplicate detection: same customer (by persistent customerId), amount, date, and activity type
+        // Conservative behavior: If customerId is null/blank, do not guess identity by name.
+        val dupMatch = if (!transaction.customerId.isNullOrBlank()) {
+            activeList.firstOrNull {
+                it.customerId == transaction.customerId &&
+                Math.abs(it.amount - transaction.amount) < 0.001 &&
+                it.date.trim() == transaction.date.trim() &&
+                it.activityType.trim().equals(transaction.activityType.trim(), ignoreCase = true)
+            }
+        } else {
+            null
         }
         if (dupMatch != null) {
             return ArchiveConflict.TransactionConflict(
                 archivedTransaction = transaction,
                 conflictingTransaction = dupMatch,
-                descriptionAr = "توجد معاملة نشطة متطابقة لنفس العميل والمبلغ والتاريخ (${transaction.customerName} - ₪${transaction.amount} - ${transaction.date})",
-                descriptionEn = "A duplicate active transaction exists for the same customer, amount, and date (${transaction.customerName} - ₪${transaction.amount} - ${transaction.date})"
+                descriptionAr = "توجد معاملة نشطة متطابقة لنفس العميل والمبلغ والتاريخ (${transaction.customerNameSnapshot} - ₪${transaction.amount} - ${transaction.date})",
+                descriptionEn = "A duplicate active transaction exists for the same customer, amount, and date (${transaction.customerNameSnapshot} - ₪${transaction.amount} - ${transaction.date})"
             )
         }
 
         return null
     }
 
+    @Deprecated(
+        message = "Physical deletion of financial transactions is prohibited by Accounting Golden Rule.",
+        level = DeprecationLevel.WARNING
+    )
     fun deleteTransactionPermanently(transaction: TransactionItem, onComplete: (() -> Unit)? = null) {
         viewModelScope.launch {
             repository.deleteTransactionPermanently(transaction.id)
             onComplete?.invoke()
+        }
+    }
+
+    /**
+     * Phase 2.5: User-driven explicit resolution of customer identity conflicts.
+     * Links original transaction to selected persistent customerId and preserves audit trail.
+     */
+    fun resolveCustomerIdentityConflict(
+        conflictId: String,
+        resolvedCustomerId: String,
+        notes: String? = null,
+        onComplete: (() -> Unit)? = null
+    ) {
+        viewModelScope.launch {
+            val success = repository.resolveCustomerConflict(
+                conflictId = conflictId,
+                resolvedCustomerId = resolvedCustomerId,
+                notes = notes
+            )
+            if (success) {
+                onComplete?.invoke()
+            }
+        }
+    }
+
+    /**
+     * Phase 2.5: Dismiss an identity conflict (e.g. marked as anonymous walk-in).
+     * Preserves audit record in persistent conflict ledger.
+     */
+    fun dismissCustomerIdentityConflict(
+        conflictId: String,
+        notes: String? = null,
+        onComplete: (() -> Unit)? = null
+    ) {
+        viewModelScope.launch {
+            val success = repository.dismissCustomerConflict(
+                conflictId = conflictId,
+                notes = notes
+            )
+            if (success) {
+                onComplete?.invoke()
+            }
         }
     }
 
@@ -720,21 +789,9 @@ class MainViewModel @JvmOverloads constructor(
                     repository.deleteProductPermanently(conflict.archivedProduct.id)
                 }
                 is ArchiveConflict.TransactionConflict -> {
-                    val isAr = _uiState.value.languageMode == LanguageMode.ARABIC
-                    val suffix = if (isAr) "(مستعادة)" else "(Restored)"
-                    val newTitle = if (conflict.archivedTransaction.title.isNotBlank()) {
-                        "${conflict.archivedTransaction.title} $suffix"
-                    } else {
-                        if (isAr) "معاملة $suffix" else "Transaction $suffix"
-                    }
-                    val separateTransaction = conflict.archivedTransaction.copy(
-                        id = "tx_${System.currentTimeMillis()}",
-                        title = newTitle,
-                        isArchived = false,
-                        archivedDate = null
-                    )
-                    repository.addTransaction(separateTransaction)
-                    repository.deleteTransactionPermanently(conflict.archivedTransaction.id)
+                    // Accounting Golden Rule: Historical transaction records must never be deleted.
+                    // Unarchive the transaction directly preserving its immutable historical identity.
+                    repository.restoreTransaction(conflict.archivedTransaction.id)
                 }
             }
             _uiState.update { it.copy(pendingArchiveConflict = null) }
@@ -805,6 +862,7 @@ class MainViewModel @JvmOverloads constructor(
         val total = cartItems.sumOf { it.product.price * it.quantity }
         _uiState.update {
             it.copy(
+                cart = cartItems,
                 settlementTotal = total,
                 settlementContext = SettlementContext.RECORD_TRANSACTION,
                 showSettlementSheet = true
@@ -819,46 +877,41 @@ class MainViewModel @JvmOverloads constructor(
     fun completeSettlement(cashAmount: Double, debtAmount: Double, notes: String) {
         val state = _uiState.value
         val customer = state.purchasesCustomer ?: state.customers.firstOrNull() ?: return
-        if (customer.isArchived || state.customers.none { it.id == customer.id }) return
-        val total = state.settlementTotal
-        val isFullCash = debtAmount <= 0.01
+        if (customer.isArchived || (state.customers.isNotEmpty() && state.customers.none { it.id == customer.id })) return
+        val total = if (Math.abs(state.settlementTotal - (cashAmount + debtAmount)) < 0.001 && state.settlementTotal > 0.0) {
+            state.settlementTotal
+        } else {
+            cashAmount + debtAmount
+        }
         val txId = "tx_${System.currentTimeMillis()}"
 
-        val newTx = TransactionItem(
-            id = txId,
-            customerName = customer.customerName,
-            activityType = if (isFullCash) "شراء كاش" else "شراء آجل",
-            amount = total,
-            relativeTime = "الآن",
-            date = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()),
-            isCredit = !isFullCash,
-            notes = notes,
-            settlementType = if (isFullCash) SettlementType.FULL else SettlementType.PARTIAL,
-            customerId = customer.id
+        val saleType = when {
+            debtAmount <= 0.001 -> SaleType.CASH
+            cashAmount <= 0.001 -> SaleType.CREDIT
+            else -> SaleType.MIXED
+        }
+        val paymentStatus = when {
+            debtAmount <= 0.001 -> PaymentStatus.PAID
+            cashAmount <= 0.001 -> PaymentStatus.UNPAID
+            else -> PaymentStatus.PARTIAL
+        }
+        val legacyFields = LegacyAccountingBridge.toLegacyFields(
+            transactionType = TransactionType.SALE,
+            saleType = saleType,
+            paymentStatus = paymentStatus
         )
 
-        val lines = state.cart.map { cartItem ->
-            TransactionItemLineEntity(
-                transactionId = txId,
-                productId = cartItem.product.id,
-                productNameSnapshot = cartItem.product.name,
-                quantity = cartItem.quantity,
-                unitPrice = cartItem.product.price,
-                costPrice = cartItem.product.costPrice,
-                subtotal = cartItem.product.price * cartItem.quantity
-            )
-        }
-
+        val cartSnapshot = state.cart
+        val todayDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
         val updatedCustomer = customer.copy(
-            balance = customer.balance + debtAmount,
-            totalDebt = customer.totalDebt + debtAmount,
-            hasRecentActivity = true
+            hasRecentActivity = true,
+            lastTransactionDate = todayDate
         )
 
         val notif = NotificationItem(
             id = "notif_${System.currentTimeMillis()}",
             customerName = customer.customerName,
-            transactionType = if (isFullCash) "شراء كاش" else "شراء آجل",
+            transactionType = legacyFields.activityType,
             amount = total,
             timestamp = "الآن",
             isPayment = false,
@@ -876,7 +929,41 @@ class MainViewModel @JvmOverloads constructor(
         }
 
         viewModelScope.launch {
-            repository.addTransaction(newTx, lines)
+            val invoiceNumber = repository.getNextInvoiceNumber()
+            val sale = Sale(
+                id = txId,
+                invoiceNumber = invoiceNumber,
+                customerId = customer.id,
+                saleType = saleType.name,
+                totalAmount = total,
+                paidAmount = cashAmount,
+                creditAmount = debtAmount,
+                paymentStatus = paymentStatus.name,
+                transactionDate = todayDate,
+                createdAt = System.currentTimeMillis(),
+                updatedAt = System.currentTimeMillis(),
+                status = "ACTIVE"
+            )
+
+            val saleLines = cartSnapshot.mapIndexed { index, cartItem ->
+                SaleLine(
+                    id = "${txId}_line_${index + 1}",
+                    saleId = txId,
+                    productId = cartItem.product.id,
+                    productNameSnapshot = cartItem.product.name,
+                    quantity = cartItem.quantity,
+                    unitPrice = cartItem.product.price,
+                    costPriceAtSale = cartItem.product.costPrice,
+                    subtotal = cartItem.product.price * cartItem.quantity
+                )
+            }
+
+            repository.createSale(
+                sale = sale,
+                lines = saleLines,
+                customerNameSnapshot = customer.customerName,
+                notes = notes
+            )
             repository.updateCustomer(updatedCustomer)
             repository.addNotification(notif)
         }
@@ -913,28 +1000,40 @@ class MainViewModel @JvmOverloads constructor(
     fun completeQuickPayment() {
         val state = _uiState.value
         val customer = state.quickPaymentCustomer ?: return
-        if (customer.isArchived || state.customers.none { it.id == customer.id }) return
+        if (customer.isArchived || (state.customers.isNotEmpty() && state.customers.none { it.id == customer.id })) return
         val amount = state.quickPaymentAmount.toDoubleOrNull() ?: return
-        if (amount <= 0.0 || amount > (customer.balance + 0.001)) return
+        if (amount <= 0.0) return
 
         val txId = "tx_${System.currentTimeMillis()}"
+        val isFullPayment = amount >= (customer.balance - 0.001)
+        val legacyFields = LegacyAccountingBridge.toLegacyFields(
+            transactionType = TransactionType.CUSTOMER_PAYMENT,
+            paymentStatus = if (isFullPayment) PaymentStatus.PAID else PaymentStatus.PARTIAL
+        )
+
+        val todayDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
         val newTx = TransactionItem(
             id = txId,
-            customerName = customer.customerName,
-            activityType = "تسديد",
+            customerNameSnapshot = customer.customerName,
+            activityType = legacyFields.activityType,
             amount = amount,
             relativeTime = "الآن",
-            date = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()),
-            isCredit = false,
+            date = todayDate,
+            isCredit = legacyFields.isCredit,
             notes = state.quickPaymentNotes.ifBlank { "تسديد دفعة سريعة" },
-            settlementType = null,
-            customerId = customer.id
+            settlementType = legacyFields.settlementType,
+            customerId = customer.id,
+            customerName = customer.customerName,
+            transactionType = TransactionType.CUSTOMER_PAYMENT,
+            paymentStatus = if (isFullPayment) PaymentStatus.PAID else PaymentStatus.PARTIAL,
+            operationStatus = com.example.model.OperationStatus.ACTIVE,
+            paidAmount = amount,
+            creditAmount = 0.0
         )
 
         val updatedCustomer = customer.copy(
-            balance = (customer.balance - amount).coerceAtLeast(0.0),
-            totalDebt = (customer.totalDebt - amount).coerceAtLeast(0.0),
-            hasRecentActivity = true
+            hasRecentActivity = true,
+            lastTransactionDate = todayDate
         )
 
         val newNotif = NotificationItem(

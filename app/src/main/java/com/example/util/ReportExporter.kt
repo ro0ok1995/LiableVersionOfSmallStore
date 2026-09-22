@@ -35,7 +35,8 @@ data class StatementRow(
     val isPayment: Boolean,
     val isCreditDebt: Boolean = false,
     val amount: Double,
-    val runningBalance: Double
+    val runningBalance: Double,
+    val isArchived: Boolean = false
 )
 
 data class ReportPreviewRow(
@@ -2024,7 +2025,7 @@ object ReportExporter {
                 drawCellText(activePage.canvas, dateStr, 0, activePage.currentY + 15f, paint, alignEnd = false)
 
                 // 1: Customer
-                val customerName = tx.customerName.ifBlank { if (isArabic) "عميل عام" else "General" }
+                val customerName = tx.customerNameSnapshot.ifBlank { if (isArabic) "عميل عام" else "General" }
                 val customerDisplay = fitText(customerName, colWidths[1] - 12f, paint)
                 drawCellText(activePage.canvas, customerDisplay, 1, activePage.currentY + 15f, paint, alignEnd = false)
 
@@ -2600,7 +2601,8 @@ object ReportExporter {
 
                 val dateDesc = inv.title.ifBlank { inv.notes.ifBlank { inv.date } }
                 drawCellText(activePage.canvas, "${inv.date} - $dateDesc", invColStarts, invColEnds, 0, activePage.currentY + 15f, paint, alignEnd = false)
-                drawCellText(activePage.canvas, inv.customerName, invColStarts, invColEnds, 1, activePage.currentY + 15f, paint, alignEnd = false)
+                val custDisplay = inv.customerNameSnapshot.ifBlank { if (isArabic) "عميل عام" else "General" }
+                drawCellText(activePage.canvas, custDisplay, invColStarts, invColEnds, 1, activePage.currentY + 15f, paint, alignEnd = false)
 
                 val isCash = !inv.isCredit && (
                     inv.activityType.contains("كاش") ||
@@ -2884,9 +2886,10 @@ object ReportExporter {
                      !inv.activityType.contains("دين"))
                 )
                 val typeLabel = if (isCash) (if (isArabic) "كاش" else "Cash") else (if (isArabic) "آجل" else "Debt")
+                val custDisplay = inv.customerNameSnapshot.ifBlank { if (isArabic) "عميل عام" else "General" }
                 sb.append(csvRow(
                     dateDesc,
-                    inv.customerName,
+                    custDisplay,
                     typeLabel,
                     AppCurrency.formatAmountWithDecimals(inv.amount, isArabic)
                 ))
@@ -2968,7 +2971,7 @@ object ReportExporter {
             sb.append(csvRow(if (isArabic) "لا توجد معاملات متاحة في هذه الفترة" else "No transactions available for this period", "", "", "", ""))
         } else {
             for (tx in transactions) {
-                val customerName = tx.customerName.ifBlank { if (isArabic) "عميل عام" else "General" }
+                val customerName = tx.customerNameSnapshot.ifBlank { if (isArabic) "عميل عام" else "General" }
                 val isPayment = tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
                 val isDebt = !isPayment && (tx.isCredit || tx.activityType.contains("آجل") ||
                     tx.activityType.contains("دين") || tx.activityType.contains("Debt") ||
@@ -3416,8 +3419,9 @@ object ReportExporter {
                      !inv.activityType.contains("دين"))
                 )
                 val typeLabel = if (isCash) (if (isArabic) "كاش" else "Cash") else (if (isArabic) "آجل" else "Debt")
+                val custDisplay = inv.customerNameSnapshot.ifBlank { if (isArabic) "عميل عام" else "General" }
                 sb.appendLine("#${idx + 1} | $dateDesc")
-                sb.appendLine("   ${if (isArabic) "العميل" else "Customer"}: ${inv.customerName}")
+                sb.appendLine("   ${if (isArabic) "العميل" else "Customer"}: $custDisplay")
                 sb.appendLine("   ${if (isArabic) "طريقة الدفع" else "Payment Method"}: $typeLabel")
                 sb.appendLine("   ${if (isArabic) "المبلغ" else "Amount"}: ${AppCurrency.formatAmountWithDecimals(inv.amount, isArabic)}")
                 sb.appendLine(sepSingle)
@@ -3489,7 +3493,7 @@ object ReportExporter {
             sb.appendLine(if (isArabic) "لا توجد معاملات متاحة في هذه الفترة" else "No transactions available for this period")
         } else {
             transactions.forEachIndexed { idx, tx ->
-                val customerName = tx.customerName.ifBlank { if (isArabic) "عميل عام" else "General" }
+                val customerName = tx.customerNameSnapshot.ifBlank { if (isArabic) "عميل عام" else "General" }
                 val isPayment = tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
                 val isDebt = !isPayment && (tx.isCredit || tx.activityType.contains("آجل") ||
                     tx.activityType.contains("دين") || tx.activityType.contains("Debt") ||

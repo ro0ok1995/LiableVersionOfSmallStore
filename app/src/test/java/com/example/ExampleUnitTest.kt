@@ -77,24 +77,32 @@ class ExampleUnitTest {
 
   @Test
   fun testQuickPaymentDebtReduction() {
-    val initialCustomer = CustomerAccount(
-      id = "cust_1",
+    val custId = "cust_1"
+    val saleTx = com.example.model.TransactionItem(
+      id = "tx_sale",
       customerName = "طارق الحسين",
-      balance = 100.0,
-      totalDebt = 100.0,
-      phone = "0501112233"
+      activityType = "شراء بالدين",
+      amount = 100.0,
+      isCredit = true,
+      date = "2026-09-20",
+      relativeTime = "الآن",
+      customerId = custId
+    )
+    val paymentTx = com.example.model.TransactionItem(
+      id = "tx_pay",
+      customerName = "طارق الحسين",
+      activityType = "تسديد",
+      amount = 50.0,
+      isCredit = false,
+      date = "2026-09-20",
+      relativeTime = "الآن",
+      customerId = custId
     )
 
-    val paymentAmount = 50.0
-    val updatedCustomer = initialCustomer.copy(
-      balance = (initialCustomer.balance - paymentAmount).coerceAtLeast(0.0),
-      totalDebt = (initialCustomer.totalDebt - paymentAmount).coerceAtLeast(0.0),
-      hasRecentActivity = true
-    )
-
-    assertEquals(50.0, updatedCustomer.balance, 0.001)
-    assertEquals(50.0, updatedCustomer.totalDebt, 0.001)
-    assertTrue(updatedCustomer.hasRecentActivity)
+    val summary = com.example.accounting.CustomerLedgerCalculator.calculateCustomerBalance(custId, listOf(saleTx, paymentTx))
+    assertEquals(50.0, summary.balance, 0.001)
+    assertEquals(100.0, summary.totalCreditSales, 0.001)
+    assertEquals(50.0, summary.totalPayments, 0.001)
   }
 
   @Test
@@ -225,10 +233,10 @@ class ExampleUnitTest {
 
     val transactions = listOf(
       // c1: 10 days old (0-30 bucket) 200, 45 days old (31-60 bucket) 100
-      com.example.model.TransactionItem("t1", "شراء آجل", "عميل أ", "شراء آجل", 200.0, true, "2026-09-02", "منذ 10 أيام", "مشتريات"),
-      com.example.model.TransactionItem("t2", "شراء آجل", "عميل أ", "شراء آجل", 100.0, true, "2026-07-29", "منذ 45 يوم", "مشتريات"),
+      com.example.model.TransactionItem("t1", "شراء آجل", "عميل أ", "شراء آجل", 200.0, true, "2026-09-02", "منذ 10 أيام", "مشتريات", customerId = "c1"),
+      com.example.model.TransactionItem("t2", "شراء آجل", "عميل أ", "شراء آجل", 100.0, true, "2026-07-29", "منذ 45 يوم", "مشتريات", customerId = "c1"),
       // c2: 100 days old (90+ bucket) 150
-      com.example.model.TransactionItem("t3", "شراء آجل", "عميل ب", "شراء آجل", 150.0, true, "2026-06-04", "منذ 100 يوم", "مشتريات")
+      com.example.model.TransactionItem("t3", "شراء آجل", "عميل ب", "شراء آجل", 150.0, true, "2026-06-04", "منذ 100 يوم", "مشتريات", customerId = "c2")
     )
 
     val summary = com.example.viewmodel.DebtAgingUtils.calculateStoreDebtAgingSummary(
@@ -251,9 +259,9 @@ class ExampleUnitTest {
     val vm = com.example.viewmodel.AnalysisCenterViewModel()
     val cust = CustomerAccount(id = "c1", customerName = "علي أحمد", balance = 200.0, totalDebt = 200.0, phone = "0550000000")
     val txs = listOf(
-      com.example.model.TransactionItem("tx1", "شراء نقدي", "علي أحمد", "كاش", 50.0, false, "2026-09-01", "اليوم", "بيبسي"),
-      com.example.model.TransactionItem("tx2", "شراء آجل", "علي أحمد", "آجل", 250.0, true, "2026-09-02", "اليوم", "أرز وسكر"),
-      com.example.model.TransactionItem("tx3", "تسديد دفعة", "علي أحمد", "تسديد", 50.0, false, "2026-09-03", "اليوم", "دفعة نقدية")
+      com.example.model.TransactionItem("tx1", "شراء نقدي", "علي أحمد", "كاش", 50.0, false, "2026-09-01", "اليوم", "بيبسي", customerId = "c1"),
+      com.example.model.TransactionItem("tx2", "شراء آجل", "علي أحمد", "آجل", 250.0, true, "2026-09-02", "اليوم", "أرز وسكر", customerId = "c1"),
+      com.example.model.TransactionItem("tx3", "تسديد دفعة", "علي أحمد", "تسديد", 50.0, false, "2026-09-03", "اليوم", "دفعة نقدية", customerId = "c1")
     )
 
     // Filter ALL
@@ -406,7 +414,8 @@ class ExampleUnitTest {
     assertEquals("c101", resolvedCust1?.id)
     assertEquals("0501111111", resolvedCust1?.phone)
 
-    // Verify fallback when transaction has no customerId: uses safe resolution
+    // Verify behavior when transaction has no customerId:
+    // With duplicate customer names ("محمد علي"), resolving must return null rather than guessing by date or activity
     val txWithoutId = com.example.model.TransactionItem(
       id = "tx_test_3",
       title = "شراء آجل",
@@ -419,8 +428,30 @@ class ExampleUnitTest {
       customerId = null
     )
     val resolvedFallback = com.example.viewmodel.MainViewModel.resolveCustomerForTransaction(allCustomers, txWithoutId)
-    // Matches cust1 whose lastTransactionDate is 2026-09-10
-    assertEquals("c101", resolvedFallback?.id)
+    // Under Phase 2 deterministic rules, never guess customer identity when ambiguous duplicate names exist
+    org.junit.Assert.assertNull(resolvedFallback)
+
+    // Under Phase 2.2: customerId == null is NEVER silently assigned to a customer by name, even if name is unique
+    val uniqueCust = com.example.model.CustomerAccount(
+      id = "c103",
+      customerName = "سالم القرني",
+      balance = 50.0,
+      totalDebt = 50.0,
+      phone = "0503333333"
+    )
+    val txUnambiguous = com.example.model.TransactionItem(
+      id = "tx_test_4",
+      title = "شراء آجل",
+      customerName = "سالم القرني",
+      activityType = "شراء آجل",
+      amount = 50.0,
+      isCredit = true,
+      date = "2026-09-10",
+      relativeTime = "اليوم",
+      customerId = null
+    )
+    val resolvedUnambiguous = com.example.viewmodel.MainViewModel.resolveCustomerForTransaction(listOf(uniqueCust), txUnambiguous)
+    org.junit.Assert.assertNull(resolvedUnambiguous)
   }
 
   @Test

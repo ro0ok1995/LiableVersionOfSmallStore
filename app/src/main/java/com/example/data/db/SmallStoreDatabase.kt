@@ -14,9 +14,12 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TransactionEntity::class,
         TransactionItemLineEntity::class,
         NotificationEntity::class,
-        StoreInfoEntity::class
+        StoreInfoEntity::class,
+        CustomerIdentityConflictEntity::class,
+        Sale::class,
+        SaleLine::class
     ],
-    version = 3,
+    version = 8,
     exportSchema = false
 )
 abstract class SmallStoreDatabase : RoomDatabase() {
@@ -26,6 +29,8 @@ abstract class SmallStoreDatabase : RoomDatabase() {
     abstract fun transactionItemLineDao(): TransactionItemLineDao
     abstract fun notificationDao(): NotificationDao
     abstract fun storeInfoDao(): StoreInfoDao
+    abstract fun customerConflictDao(): CustomerConflictDao
+    abstract fun saleDao(): SaleDao
 
     companion object {
         @Volatile
@@ -62,7 +67,16 @@ abstract class SmallStoreDatabase : RoomDatabase() {
                     SmallStoreDatabase::class.java,
                     "smallstore_database"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_1_3)
+                    .addMigrations(
+                        MIGRATION_1_2,
+                        MIGRATION_2_3,
+                        MIGRATION_1_3,
+                        MIGRATION_3_4,
+                        MIGRATION_4_5,
+                        MIGRATION_5_6,
+                        MIGRATION_6_7,
+                        MIGRATION_7_8
+                    )
                     .build()
                 INSTANCE = instance
                 instance

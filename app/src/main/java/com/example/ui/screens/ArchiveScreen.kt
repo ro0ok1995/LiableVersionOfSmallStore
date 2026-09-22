@@ -193,22 +193,31 @@ fun ArchiveScreen(
             TransactionItem(
                 id = "arch_sample_tx1",
                 title = if (isArabic) "فاتورة مبيعات آجل" else "Credit Sale Invoice",
-                customerName = if (isArabic) "أحمد المنصور" else "Ahmed Al-Mansour",
+                customerNameSnapshot = if (isArabic) "أحمد المنصور" else "Ahmed Al-Mansour",
                 activityType = if (isArabic) "شراء آجل" else "Credit Purchase",
                 amount = 280.00,
                 isCredit = true,
                 date = "2026-09-05",
-                relativeTime = if (isArabic) "منذ 10 أيام" else "10 days ago"
+                relativeTime = if (isArabic) "منذ 10 أيام" else "10 days ago",
+                transactionType = com.example.model.TransactionType.SALE,
+                saleType = com.example.model.SaleType.CREDIT,
+                paymentStatus = com.example.model.PaymentStatus.UNPAID,
+                paidAmount = 0.0,
+                creditAmount = 280.00
             ),
             TransactionItem(
                 id = "arch_sample_tx2",
                 title = if (isArabic) "سداد دفعة نقدية" else "Cash Payment Receipt",
-                customerName = if (isArabic) "فهد السبيعي" else "Fahad Al-Subaie",
+                customerNameSnapshot = if (isArabic) "فهد السبيعي" else "Fahad Al-Subaie",
                 activityType = if (isArabic) "تسديد دفعة" else "Payment",
                 amount = 150.00,
                 isCredit = false,
                 date = "2026-08-30",
-                relativeTime = if (isArabic) "منذ 16 يوماً" else "16 days ago"
+                relativeTime = if (isArabic) "منذ 16 يوماً" else "16 days ago",
+                transactionType = com.example.model.TransactionType.CUSTOMER_PAYMENT,
+                paymentStatus = com.example.model.PaymentStatus.PAID,
+                paidAmount = 150.00,
+                creditAmount = 0.0
             )
         )
     }
@@ -609,9 +618,6 @@ fun ArchiveScreen(
                                     isArabic = isArabic,
                                     onRestoreClick = {
                                         pendingRestoreTarget = PendingRestoreTarget.Transaction(transaction)
-                                    },
-                                    onDeletePermanentlyClick = {
-                                        pendingDeleteTarget = PendingDeleteTarget.Transaction(transaction)
                                     }
                                 )
                             }
@@ -727,7 +733,9 @@ fun ArchiveScreen(
                         when (currentTarget) {
                             is PendingDeleteTarget.Customer -> onPermanentDeleteCustomer(currentTarget.customer)
                             is PendingDeleteTarget.Product -> onPermanentDeleteProduct(currentTarget.product)
-                            is PendingDeleteTarget.Transaction -> onPermanentDeleteTransaction(currentTarget.transaction)
+                            is PendingDeleteTarget.Transaction -> {
+                                // Accounting Golden Rule: Financial records are immutable and cannot be physically deleted.
+                            }
                         }
                         coroutineScope.launch {
                             snackbarHostState.showSnackbar(
@@ -1411,7 +1419,6 @@ private fun ArchivedTransactionCard(
     transaction: TransactionItem,
     isArabic: Boolean,
     onRestoreClick: () -> Unit,
-    onDeletePermanentlyClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -1440,7 +1447,7 @@ private fun ArchivedTransactionCard(
                     )
                     Spacer(modifier = Modifier.height(3.dp))
                     Text(
-                        text = "${if (isArabic) "العميل: " else "Customer: "}${transaction.customerName}",
+                        text = "${if (isArabic) "العميل: " else "Customer: "}${transaction.customerNameSnapshot}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1549,7 +1556,7 @@ private fun ArchivedTransactionCard(
             HorizontalDivider(color = GeoOutlineVariant, thickness = 0.8.dp)
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Action Buttons: Restore & Delete Permanently
+            // Action Buttons: Restore only (Financial transactions cannot be permanently deleted)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
@@ -1575,33 +1582,6 @@ private fun ArchivedTransactionCard(
                         text = if (isArabic) StoreStrings.RESTORE_ACTION_AR else StoreStrings.RESTORE_ACTION_EN,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                // Delete Permanently Button
-                OutlinedButton(
-                    onClick = onDeletePermanentlyClick,
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    ),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    modifier = Modifier.testTag("delete_permanently_transaction_${transaction.id}")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.DeleteForever,
-                        contentDescription = null,
-                        modifier = Modifier.size(15.dp),
-                        tint = MaterialTheme.colorScheme.error
-                    )
-                    Spacer(modifier = Modifier.width(5.dp))
-                    Text(
-                        text = if (isArabic) StoreStrings.DELETE_PERMANENTLY_AR else StoreStrings.DELETE_PERMANENTLY_EN,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.error
                     )
                 }
             }

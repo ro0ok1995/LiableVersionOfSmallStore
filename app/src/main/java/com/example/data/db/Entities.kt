@@ -15,7 +15,9 @@ import com.example.model.TransactionItem
 data class CustomerEntity(
     @PrimaryKey val id: String,
     val customerName: String,
+    @Deprecated("Legacy stored balance column. Source of truth is persistent Customer Ledger.")
     val balance: Double,
+    @Deprecated("Legacy stored debt column. Source of truth is persistent Customer Ledger.")
     val totalDebt: Double,
     val phone: String,
     val lastTransactionDate: String,
@@ -37,11 +39,25 @@ data class ProductEntity(
     val archivedDate: String? = null
 )
 
-@Entity(tableName = "transactions")
+@Entity(
+    tableName = "transactions",
+    foreignKeys = [
+        ForeignKey(
+            entity = CustomerEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["customerId"],
+            onDelete = ForeignKey.RESTRICT
+        )
+    ],
+    indices = [
+        Index("customerId"),
+        Index(value = ["customerId", "transactionDate"])
+    ]
+)
 data class TransactionEntity(
     @PrimaryKey val id: String,
     val title: String = "",
-    val customerName: String,
+    val customerNameSnapshot: String, // ONLY historical display name captured at the time of transaction
     val activityType: String,
     val amount: Double,
     val isCredit: Boolean,
@@ -49,9 +65,91 @@ data class TransactionEntity(
     val relativeTime: String,
     val notes: String = "",
     val settlementType: String? = null,
+    val customerId: String? = null, // Relational customer identity (Source of Truth)
     val isArchived: Boolean = false,
-    val archivedDate: String? = null
-)
+    val archivedDate: String? = null,
+    @Deprecated(
+        message = "Legacy customerName column preserved for backward compatibility. Use customerNameSnapshot for presentation and customerId for identity.",
+        replaceWith = ReplaceWith("customerNameSnapshot")
+    )
+    val customerName: String = customerNameSnapshot,
+    val transactionDate: String = date,
+    val paidAmount: Double = 0.0,
+    val creditAmount: Double = 0.0
+) {
+    @androidx.room.Ignore
+    @Deprecated("Legacy constructor for backward compatibility. Use customerNameSnapshot.")
+    constructor(
+        id: String,
+        title: String = "",
+        activityType: String = "",
+        amount: Double = 0.0,
+        isCredit: Boolean = false,
+        date: String = "",
+        relativeTime: String = "",
+        customerName: String = "",
+        notes: String = "",
+        settlementType: String? = null,
+        customerId: String? = null,
+        isArchived: Boolean = false,
+        archivedDate: String? = null
+    ) : this(
+        id = id,
+        title = title,
+        customerNameSnapshot = customerName,
+        activityType = activityType,
+        amount = amount,
+        isCredit = isCredit,
+        date = date,
+        relativeTime = relativeTime,
+        notes = notes,
+        settlementType = settlementType,
+        customerId = customerId,
+        isArchived = isArchived,
+        archivedDate = archivedDate,
+        customerName = customerName,
+        transactionDate = date,
+        paidAmount = 0.0,
+        creditAmount = 0.0
+    )
+
+    @androidx.room.Ignore
+    constructor(
+        id: String,
+        title: String = "",
+        customerNameSnapshot: String = "",
+        activityType: String = "",
+        amount: Double = 0.0,
+        isCredit: Boolean = false,
+        date: String = "",
+        relativeTime: String = "",
+        notes: String = "",
+        settlementType: String? = null,
+        customerId: String? = null,
+        isArchived: Boolean = false,
+        archivedDate: String? = null,
+        customerName: String = customerNameSnapshot,
+        transactionDate: String = date
+    ) : this(
+        id = id,
+        title = title,
+        customerNameSnapshot = customerNameSnapshot,
+        activityType = activityType,
+        amount = amount,
+        isCredit = isCredit,
+        date = date,
+        relativeTime = relativeTime,
+        notes = notes,
+        settlementType = settlementType,
+        customerId = customerId,
+        isArchived = isArchived,
+        archivedDate = archivedDate,
+        customerName = customerName,
+        transactionDate = transactionDate,
+        paidAmount = 0.0,
+        creditAmount = 0.0
+    )
+}
 
 @Entity(
     tableName = "transaction_item_lines",
@@ -152,35 +250,50 @@ fun ProductItem.toEntity(): ProductEntity = ProductEntity(
     archivedDate = archivedDate
 )
 
-fun TransactionEntity.toModel(): TransactionItem = TransactionItem(
-    id = id,
-    title = title,
-    customerName = customerName,
-    activityType = activityType,
-    amount = amount,
-    isCredit = isCredit,
-    date = date,
-    relativeTime = relativeTime,
-    notes = notes,
-    settlementType = settlementType?.let { runCatching { SettlementType.valueOf(it) }.getOrNull() },
-    isArchived = isArchived,
-    archivedDate = archivedDate
-)
+fun TransactionEntity.toModel(): TransactionItem {
+    val snapshot = customerNameSnapshot.ifBlank { customerName }
+    return TransactionItem(
+        id = id,
+        title = title,
+        customerNameSnapshot = snapshot,
+        activityType = activityType,
+        amount = amount,
+        isCredit = isCredit,
+        date = date,
+        relativeTime = relativeTime,
+        notes = notes,
+        settlementType = settlementType?.let { runCatching { SettlementType.valueOf(it) }.getOrNull() },
+        customerId = customerId,
+        isArchived = isArchived,
+        archivedDate = archivedDate,
+        customerName = snapshot,
+        paidAmount = paidAmount,
+        creditAmount = creditAmount
+    )
+}
 
-fun TransactionItem.toEntity(): TransactionEntity = TransactionEntity(
-    id = id,
-    title = title,
-    customerName = customerName,
-    activityType = activityType,
-    amount = amount,
-    isCredit = isCredit,
-    date = date,
-    relativeTime = relativeTime,
-    notes = notes,
-    settlementType = settlementType?.name,
-    isArchived = isArchived,
-    archivedDate = archivedDate
-)
+fun TransactionItem.toEntity(): TransactionEntity {
+    val snapshot = customerNameSnapshot.ifBlank { customerName }
+    return TransactionEntity(
+        id = id,
+        title = title,
+        customerNameSnapshot = snapshot,
+        activityType = activityType,
+        amount = amount,
+        isCredit = isCredit,
+        date = date,
+        relativeTime = relativeTime,
+        notes = notes,
+        settlementType = settlementType?.name,
+        customerId = customerId,
+        isArchived = isArchived,
+        archivedDate = archivedDate,
+        customerName = snapshot,
+        transactionDate = date,
+        paidAmount = paidAmount,
+        creditAmount = creditAmount
+    )
+}
 
 fun NotificationEntity.toModel(): NotificationItem = NotificationItem(
     id = id,

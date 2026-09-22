@@ -860,7 +860,7 @@ private fun StatisticsTabContent(
 ) {
     val filteredTransactions = remember(transactions, selectedCustomer, activePeriod, customStartDate, customEndDate) {
         var list = if (selectedCustomer != null) {
-            transactions.filter { it.customerName.equals(selectedCustomer.customerName, ignoreCase = true) }
+            transactions.filter { it.customerId == selectedCustomer.id }
         } else {
             transactions
         }
@@ -1111,7 +1111,26 @@ private fun StatisticsTabContent(
                             .testTag("chart_tab_combo")
                     )
                 }
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Informational note directly below the chart type selector
+                Text(
+                    text = if (isArabic) {
+                        "💡 الرسم البياني المحدد حاليًا هو الذي سيتم تضمينه في تقرير PDF."
+                    } else {
+                        "💡 The currently selected chart will be included in the PDF report."
+                    },
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Normal
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp)
+                        .testTag("chart_pdf_note")
+                )
+                Spacer(modifier = Modifier.height(12.dp))
 
                 when (selectedChartType) {
                     BreakdownChartType.DONUT -> {
@@ -1464,7 +1483,7 @@ private fun AccountStatementTabContent(
     // Scoped transactions reflecting CURRENT statement scope (selected customer or shop-wide), filtered by active period
     val scopedTransactions = remember(allTransactions, uiState.selectedCustomer, activePeriod, customStartDate, customEndDate) {
         val custFiltered = if (uiState.selectedCustomer != null) {
-            allTransactions.filter { it.customerName.equals(uiState.selectedCustomer.customerName, ignoreCase = true) }
+            allTransactions.filter { it.customerId == uiState.selectedCustomer.id }
         } else {
             allTransactions
         }
@@ -1821,13 +1840,30 @@ private fun StatementRowCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = row.customerName,
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = row.customerName,
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (row.isArchived) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = RoundedCornerShape(4.dp),
+                                modifier = Modifier.testTag("archived_badge_${row.id}")
+                            ) {
+                                Text(
+                                    text = if (isArabic) "مؤرشف" else "Archived",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
                     Text(
                         text = "${row.date} • ${row.description}",
                         style = MaterialTheme.typography.labelSmall,
@@ -2008,11 +2044,13 @@ private fun ReportsTabContent(
         periodTransactions.filter { it.activityType.contains("تسديد") || it.activityType.contains("Payment") }.sumOf { it.amount }
     }
 
-    // 4. COMPREHENSIVE_CUSTOMER calculations
+    // 4. COMPREHENSIVE_CUSTOMER calculations (Phase 2: Persistent customer identity)
     val selectedCustomer = uiState.selectedCustomer
     val customerTransactions = remember(periodTransactions, selectedCustomer) {
         if (selectedCustomer == null) emptyList()
-        else periodTransactions.filter { it.customerName.equals(selectedCustomer.customerName, ignoreCase = true) }.sortedByDescending { it.date }
+        else periodTransactions.filter { tx ->
+            tx.customerId == selectedCustomer.id
+        }.sortedByDescending { it.date }
     }
     val customerCashPurchases = remember(customerTransactions) {
         customerTransactions.filter { !it.isCredit && (it.activityType.contains("كاش") || it.activityType.contains("Cash") || (!it.activityType.contains("تسديد") && !it.activityType.contains("Payment") && !it.activityType.contains("آجل") && !it.activityType.contains("دين") && !it.activityType.contains("Debt"))) }.sumOf { it.amount }

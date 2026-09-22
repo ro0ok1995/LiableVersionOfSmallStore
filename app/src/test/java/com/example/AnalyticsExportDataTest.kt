@@ -29,15 +29,15 @@ class AnalyticsExportDataTest {
 
     private val sampleTransactions = listOf(
         // c1: Debt sale 500
-        TransactionItem("tx1", "شراء آجل", "أحمد محمد", "آجل", 500.0, true, "2026-09-01", "اليوم", "سكر وطحين", settlementType = null),
+        TransactionItem("tx1", "شراء آجل", "أحمد محمد", "آجل", 500.0, true, "2026-09-01", "اليوم", "سكر وطحين", settlementType = null, customerId = "c1"),
         // c1: Cash sale 150
-        TransactionItem("tx2", "شراء نقدي", "أحمد محمد", "كاش", 150.0, false, "2026-09-02", "اليوم", "شاي وعصير", settlementType = null),
+        TransactionItem("tx2", "شراء نقدي", "أحمد محمد", "كاش", 150.0, false, "2026-09-02", "اليوم", "شاي وعصير", settlementType = null, customerId = "c1"),
         // c1: Partial payment 200
-        TransactionItem("tx3", "تسديد جزئي", "أحمد محمد", "تسديد", 200.0, false, "2026-09-03", "اليوم", "دفعة جزئية", settlementType = SettlementType.PARTIAL),
+        TransactionItem("tx3", "تسديد جزئي", "أحمد محمد", "تسديد", 200.0, false, "2026-09-03", "اليوم", "دفعة جزئية", settlementType = SettlementType.PARTIAL, customerId = "c1"),
         // c2: Debt sale 200
-        TransactionItem("tx4", "شراء آجل", "خالد عمر", "آجل", 200.0, true, "2026-09-04", "اليوم", "زيت وأرز", settlementType = null),
+        TransactionItem("tx4", "شراء آجل", "خالد عمر", "آجل", 200.0, true, "2026-09-04", "اليوم", "زيت وأرز", settlementType = null, customerId = "c2"),
         // c2: Full payment 100
-        TransactionItem("tx5", "تسديد كامل", "خالد عمر", "تسديد", 100.0, false, "2026-09-05", "اليوم", "تسديد كامل الحساب", settlementType = SettlementType.FULL)
+        TransactionItem("tx5", "تسديد كامل", "خالد عمر", "تسديد", 100.0, false, "2026-09-05", "اليوم", "تسديد كامل الحساب", settlementType = SettlementType.FULL, customerId = "c2")
     )
 
     private val sampleLines = listOf(
