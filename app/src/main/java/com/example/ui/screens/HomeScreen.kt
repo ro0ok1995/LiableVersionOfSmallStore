@@ -71,6 +71,7 @@ import com.example.model.StoreStrings
 import com.example.model.TransactionItem
 import com.example.model.TransactionType
 import com.example.model.typedTransactionType
+import com.example.accounting.FinancialReportCalculator
 import com.example.ui.components.CustomerSearchField
 import com.example.ui.components.SimpleEmptyState
 import com.example.ui.components.StoreDebtAgingSummaryCard
@@ -270,17 +271,11 @@ fun HomeScreen(
             Spacer(modifier = Modifier.height(12.dp))
 
             // 4. METRICS CARD
-            val cashSalesAmount = remember(periodTransactions) {
-                periodTransactions
-                    .filter { !it.isCredit && (it.activityType.contains("شراء كاش") || it.activityType.contains("Cash") || (!it.activityType.contains("تسديد") && !it.activityType.contains("Payment"))) }
-                    .sumOf { it.amount }
+            val homeBreakdown = remember(periodTransactions) {
+                FinancialReportCalculator.calculate(periodTransactions)
             }
-            // ASSUMPTION: If settlementType is null on historical settlements, default to SettlementType.FULL.
-            val fullSettlementAmount = remember(periodTransactions) {
-                periodTransactions
-                    .filter { (it.activityType.contains("تسديد") || it.activityType.contains("Payment")) && (it.settlementType == SettlementType.FULL || it.settlementType == null) }
-                    .sumOf { it.amount }
-            }
+            val cashSalesAmount = homeBreakdown.cashSales
+            val fullSettlementAmount = homeBreakdown.fullSettlementAmount
             val debtAmount = if (selectedCustomer != null) selectedCustomer.balance else totalDebt
             val totalActivity = debtAmount + cashSalesAmount + fullSettlementAmount
             val debtPercent = if (totalActivity > 0) ((debtAmount / totalActivity) * 100).roundToInt() else 0

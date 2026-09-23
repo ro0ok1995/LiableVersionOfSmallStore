@@ -11,6 +11,8 @@ import com.example.model.SettlementType
 import com.example.model.TransactionItem
 import com.example.model.toAnalyticsChartType
 import com.example.model.toBreakdownChartType
+import com.example.model.SaleType
+import com.example.model.TransactionType
 import com.example.ui.components.BreakdownChartType
 import com.example.viewmodel.AnalysisCenterViewModel
 import org.junit.Assert.assertEquals
@@ -206,5 +208,120 @@ class AnalyticsExportDataTest {
         // On 2026-09-02, only tx2 exists
         assertEquals(1, dataToday.metrics.transactionCount)
         assertEquals("tx2", dataToday.transactions[0].id)
+    }
+
+    @Test
+    fun testMixedSaleAccountingSplittingInAnalytics() {
+        val mixedTx = TransactionItem(
+            id = "tx_mixed",
+            title = "بيع مختلط",
+            customerName = "أحمد محمد",
+            activityType = "شراء مختلط",
+            amount = 100.0,
+            isCredit = true,
+            date = "2026-09-10",
+            relativeTime = "10:00",
+            notes = "دفعة كاش وباقي آجل",
+            settlementType = null,
+            customerId = "c1",
+            paidAmount = 60.0,
+            creditAmount = 40.0,
+            transactionType = TransactionType.SALE,
+            saleType = SaleType.MIXED
+        )
+
+        val data = AnalyticsExportDataPreparer.prepareAnalyticsData(
+            transactions = listOf(mixedTx),
+            allCustomers = sampleCustomers,
+            selectedCustomer = null,
+            activePeriod = PeriodFilter.ALL
+        )
+
+        // Total sales: 100.0
+        assertEquals(100.0, data.metrics.totalSales, 0.001)
+        // Cash sales: 60.0
+        assertEquals(60.0, data.metrics.totalCashSales, 0.001)
+        // Debt sales: 40.0 (NOT 100.0!)
+        assertEquals(40.0, data.metrics.totalDebtSales, 0.001)
+        // Net Outstanding: 40.0
+        assertEquals(40.0, data.metrics.netOutstandingBalance, 0.001)
+
+        // Verify chart data categories
+        val cashCategory = data.chartData.first { it.categoryKey == "CASH" }
+        assertEquals(60.0, cashCategory.amount, 0.001)
+        val debtCategory = data.chartData.first { it.categoryKey == "DEBT" }
+        assertEquals(40.0, debtCategory.amount, 0.001)
+    }
+
+    @Test
+    fun testAnalyticsWithoutDisplayStringHeuristics() {
+        // Transactions with unusual or arbitrary strings in activityType, relying purely on typed enums
+        val customTxs: List<TransactionItem> = listOf(
+            TransactionItem(
+                id = "tx_c",
+                title = "Order 1",
+                customerName = "خالد عمر",
+                activityType = "ARBITRARY_LABEL_ABC",
+                amount = 250.0,
+                isCredit = false,
+                date = "2026-09-10",
+                relativeTime = "11:00",
+                notes = "",
+                settlementType = null,
+                customerId = "c2",
+                paidAmount = 250.0,
+                creditAmount = 0.0,
+                transactionType = TransactionType.SALE,
+                saleType = SaleType.CASH
+            ),
+            TransactionItem(
+                id = "tx_d",
+                title = "Order 2",
+                customerName = "خالد عمر",
+                activityType = "RANDOM_CUSTOM_STR",
+                amount = 150.0,
+                isCredit = true,
+                date = "2026-09-11",
+                relativeTime = "12:00",
+                notes = "",
+                settlementType = null,
+                customerId = "c2",
+                paidAmount = 0.0,
+                creditAmount = 150.0,
+                transactionType = TransactionType.SALE,
+                saleType = SaleType.CREDIT
+            ),
+            TransactionItem(
+                id = "tx_p",
+                title = "Payment 1",
+                customerName = "خالد عمر",
+                activityType = "CUSTOM_PAYMENT_CODE",
+                amount = 50.0,
+                isCredit = false,
+                date = "2026-09-12",
+                relativeTime = "13:00",
+                notes = "",
+                settlementType = SettlementType.PARTIAL,
+                customerId = "c2",
+                paidAmount = 50.0,
+                creditAmount = 0.0,
+                transactionType = TransactionType.CUSTOMER_PAYMENT,
+                saleType = null
+            )
+        )
+
+        val data = AnalyticsExportDataPreparer.prepareAnalyticsData(
+            transactions = customTxs,
+            allCustomers = sampleCustomers,
+            selectedCustomer = null,
+            activePeriod = PeriodFilter.ALL
+        )
+
+        assertEquals(400.0, data.metrics.totalSales, 0.001)
+        assertEquals(250.0, data.metrics.totalCashSales, 0.001)
+        assertEquals(150.0, data.metrics.totalDebtSales, 0.001)
+        assertEquals(50.0, data.metrics.totalPaymentsReceived, 0.001)
+        assertEquals(50.0, data.metrics.partialSettlementAmount, 0.001)
+        assertEquals(100.0, data.metrics.netOutstandingBalance, 0.001) // 150 debt - 50 payment
     }
 }

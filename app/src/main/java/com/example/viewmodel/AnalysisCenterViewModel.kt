@@ -2,6 +2,7 @@ package com.example.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.accounting.CustomerLedgerCalculator
 import com.example.data.db.TransactionItemLineEntity
 import com.example.model.AnalyticsExportDataPreparer
 import com.example.model.AnalyticsReportData
@@ -122,37 +123,43 @@ object DebtAgingUtils {
         today: LocalDate = LocalDate.now(),
         isArabic: Boolean = false
     ): CustomerDebtAgingResult {
-        val outstandingDebt = if (customer.totalDebt > 0) customer.totalDebt else customer.balance.coerceAtLeast(0.0)
-
-        // Find customer's debt/credit transactions by persistent customerId (Phase 2):
-        val customerDebtTxs = allTransactions.filter { tx ->
-            tx.customerId == customer.id &&
-            (tx.isCredit || tx.activityType.contains("آجل") || tx.activityType.contains("دين") || tx.activityType.contains("Debt") || tx.activityType.contains("شراء بالدين"))
-        }.sortedByDescending { it.date }
-
-        val details = customerDebtTxs.map { tx ->
-            val days = computeDaysOld(tx.date, today)
-            TransactionAgingDetail(
-                transactionId = tx.id,
-                date = tx.date,
-                amount = tx.amount,
-                daysOld = days,
-                bucketLabel = getBucketLabel(days, isArabic)
-            )
+        // Authoritative ledger calculation (CustomerLedgerCalculator source of truth):
+        val hasCustomerTransactions = allTransactions.any { it.customerId == customer.id }
+        val ledgerSummary = if (hasCustomerTransactions) {
+            CustomerLedgerCalculator.calculateCustomerBalance(customer.id, allTransactions)
+        } else {
+            null
         }
 
-        if (outstandingDebt <= 0.0) {
+        // Net authoritative customer balance (never use cumulative historical customer.totalDebt):
+        val currentBalance = ledgerSummary?.balance ?: customer.balance
+        // Active outstanding receivable obligation (balance > 0 means customer owes store):
+        val outstandingDebt = currentBalance.coerceAtLeast(0.0)
+
+        // Convert customer transactions to typed ledger entries:
+        val customerEntries = if (hasCustomerTransactions) {
+            CustomerLedgerCalculator.toLedgerEntries(customer.id, allTransactions)
+        } else {
+            emptyList()
+        }
+
+        // Candidate receivable entries: active operations that created receivable debit:
+        val candidateEntries = customerEntries.filter { entry ->
+            entry.operationStatus != OperationStatus.REVERSED && entry.debit > 0.0001
+        }.sortedByDescending { it.date }
+
+        if (outstandingDebt <= 0.0001) {
             return CustomerDebtAgingResult(
                 customerId = customer.id,
                 customerName = customer.customerName,
                 phone = customer.phone,
-                currentBalance = customer.balance,
+                currentBalance = currentBalance,
                 currentDebt = 0.0,
                 bucket0To30 = 0.0,
                 bucket31To60 = 0.0,
                 bucket61To90 = 0.0,
                 bucket90Plus = 0.0,
-                individualTransactions = details
+                individualTransactions = emptyList()
             )
         }
 
@@ -162,22 +169,34 @@ object DebtAgingUtils {
         var b31To60 = 0.0
         var b61To90 = 0.0
         var b90Plus = 0.0
+        val activeDetails = mutableListOf<TransactionAgingDetail>()
 
-        for (txDetail in details) {
-            if (remainingDebt <= 0.0) break
-            val alloc = minOf(remainingDebt, txDetail.amount)
-            remainingDebt -= alloc
+        for (entry in candidateEntries) {
+            if (remainingDebt <= 0.0001) break
+            val alloc = minOf(remainingDebt, entry.debit)
+            remainingDebt = (remainingDebt - alloc).coerceAtLeast(0.0)
+            val days = computeDaysOld(entry.date, today)
+            val bucketLabel = getBucketLabel(days, isArabic)
             when {
-                txDetail.daysOld in 0..30 -> b0To30 += alloc
-                txDetail.daysOld in 31..60 -> b31To60 += alloc
-                txDetail.daysOld in 61..90 -> b61To90 += alloc
+                days in 0..30 -> b0To30 += alloc
+                days in 31..60 -> b31To60 += alloc
+                days in 61..90 -> b61To90 += alloc
                 else -> b90Plus += alloc
             }
+            activeDetails.add(
+                TransactionAgingDetail(
+                    transactionId = entry.transactionId,
+                    date = entry.date,
+                    amount = alloc,
+                    daysOld = days,
+                    bucketLabel = bucketLabel
+                )
+            )
         }
 
         // Any leftover debt not covered by recorded debt transactions (e.g. initial debt balance)
         // is placed in 90+ days bucket
-        if (remainingDebt > 0.0) {
+        if (remainingDebt > 0.0001) {
             b90Plus += remainingDebt
         }
 
@@ -185,13 +204,13 @@ object DebtAgingUtils {
             customerId = customer.id,
             customerName = customer.customerName,
             phone = customer.phone,
-            currentBalance = customer.balance,
+            currentBalance = currentBalance,
             currentDebt = outstandingDebt,
             bucket0To30 = b0To30,
             bucket31To60 = b31To60,
             bucket61To90 = b61To90,
             bucket90Plus = b90Plus,
-            individualTransactions = details
+            individualTransactions = activeDetails
         )
     }
 

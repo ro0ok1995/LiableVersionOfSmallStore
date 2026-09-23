@@ -53,6 +53,10 @@ import com.example.model.AppCurrency
 import com.example.model.StoreInfo
 import com.example.model.StoreStrings
 import com.example.model.TransactionItem
+import com.example.model.TransactionType
+import com.example.model.SaleType
+import com.example.model.typedSaleType
+import com.example.model.typedTransactionType
 import com.example.ui.theme.GeoOutlineVariant
 import com.example.ui.theme.GeoPrimary
 import com.example.ui.theme.StatusAmber
@@ -105,17 +109,23 @@ fun TransactionsReportPresentation(
 ) {
     var filterMode by remember { mutableStateOf(TxFilterMode.ALL) }
 
-    // Categorization counts & stats
+    // Categorization counts & stats using typed enums with backward-compatible fallback
     val cashTxList = remember(sortedTransactions) {
         sortedTransactions.filter { tx ->
-            !tx.isCredit && (tx.activityType.contains("كاش") || tx.activityType.contains("Cash") ||
+            val saleType = tx.typedSaleType
+            val txType = tx.typedTransactionType
+            (txType == TransactionType.SALE && (saleType == SaleType.CASH || (!tx.isCredit && tx.creditAmount == 0.0))) ||
+            (!tx.isCredit && (tx.activityType.contains("كاش") || tx.activityType.contains("Cash") ||
                 (!tx.activityType.contains("تسديد") && !tx.activityType.contains("Payment") &&
-                    !tx.activityType.contains("آجل") && !tx.activityType.contains("دين") && !tx.activityType.contains("Debt")))
+                    !tx.activityType.contains("آجل") && !tx.activityType.contains("دين") && !tx.activityType.contains("Debt"))))
         }
     }
 
     val debtTxList = remember(sortedTransactions) {
         sortedTransactions.filter { tx ->
+            val saleType = tx.typedSaleType
+            val txType = tx.typedTransactionType
+            (txType == TransactionType.SALE && (saleType == SaleType.CREDIT || saleType == SaleType.MIXED || tx.creditAmount > 0.0)) ||
             tx.isCredit || tx.activityType.contains("آجل") || tx.activityType.contains("دين") ||
                 tx.activityType.contains("Debt") || tx.activityType.contains("شراء بالدين")
         }
@@ -123,6 +133,7 @@ fun TransactionsReportPresentation(
 
     val paymentsTxList = remember(sortedTransactions) {
         sortedTransactions.filter { tx ->
+            tx.typedTransactionType == TransactionType.CUSTOMER_PAYMENT ||
             tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
         }
     }
@@ -795,13 +806,19 @@ fun TransactionsReportPresentation(
                     // Full detailed transactions list
                     displayedTransactions.forEachIndexed { idx, tx ->
                         val isEven = idx % 2 == 1
-                        val isPayment = tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
-                        val isDebt = !isPayment && (tx.isCredit || tx.activityType.contains("آجل") ||
+                        val txType = tx.typedTransactionType
+                        val saleType = tx.typedSaleType
+                        val isPayment = txType == TransactionType.CUSTOMER_PAYMENT ||
+                            tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
+                        val isDebt = !isPayment && (saleType == SaleType.CREDIT || saleType == SaleType.MIXED ||
+                            tx.isCredit || tx.activityType.contains("آجل") ||
                             tx.activityType.contains("دين") || tx.activityType.contains("Debt") ||
                             tx.activityType.contains("شراء بالدين"))
 
                         val typeLabel = if (isPayment) {
                             if (isArabic) "تسديد (دفعة)" else "Payment"
+                        } else if (txType == TransactionType.SALE && saleType == SaleType.MIXED) {
+                            if (isArabic) "شراء مختلط" else "Mixed Purchase"
                         } else if (isDebt) {
                             if (isArabic) "شراء آجل (دين)" else "Credit Purchase"
                         } else {

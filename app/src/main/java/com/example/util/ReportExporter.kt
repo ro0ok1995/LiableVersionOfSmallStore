@@ -12,12 +12,21 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.core.content.FileProvider
+import com.example.accounting.CustomerLedgerCalculator
+import com.example.accounting.FinancialReportCalculator
 import com.example.model.AnalyticsReportData
 import com.example.model.AppCurrency
 import com.example.model.CustomerAccount
+import com.example.model.OperationStatus
 import com.example.model.SettlementType
 import com.example.model.StoreStrings
 import com.example.model.TransactionItem
+import com.example.model.TransactionType
+import com.example.model.SaleType
+import com.example.model.epochTimestampMillis
+import com.example.model.typedOperationStatus
+import com.example.model.typedSaleType
+import com.example.model.typedTransactionType
 import com.example.ui.screens.AggregatedProductLine
 import java.io.File
 import java.io.FileOutputStream
@@ -47,6 +56,68 @@ data class ReportPreviewRow(
 )
 
 object ReportExporter {
+    fun isPaymentTransaction(tx: TransactionItem): Boolean {
+        if ((tx.operationStatus ?: tx.typedOperationStatus) == OperationStatus.REVERSED) return false
+        val type = tx.transactionType ?: tx.typedTransactionType
+        return type == TransactionType.CUSTOMER_PAYMENT || type == TransactionType.SALE_RETURN
+    }
+
+    fun isDebtTransaction(tx: TransactionItem): Boolean {
+        if ((tx.operationStatus ?: tx.typedOperationStatus) == OperationStatus.REVERSED) return false
+        if (isPaymentTransaction(tx)) return false
+        val saleType = tx.saleType ?: tx.typedSaleType
+        val type = tx.transactionType ?: tx.typedTransactionType
+        return saleType == SaleType.CREDIT || saleType == SaleType.MIXED ||
+            (type == TransactionType.SALE && (tx.creditAmount > 0.0 || tx.isCredit)) ||
+            (type == null && (tx.creditAmount > 0.0 || tx.isCredit))
+    }
+
+    fun getInvoiceTypeLabel(inv: TransactionItem, isArabic: Boolean): String {
+        if (inv.typedOperationStatus == OperationStatus.REVERSED || inv.typedTransactionType == TransactionType.REVERSAL) {
+            return if (isArabic) "ملغاة" else "Reversed"
+        }
+        val saleType = inv.saleType ?: inv.typedSaleType
+        return when (saleType) {
+            SaleType.CASH -> if (isArabic) "كاش" else "Cash"
+            SaleType.CREDIT -> if (isArabic) "آجل" else "Debt"
+            SaleType.MIXED -> if (isArabic) "مختلط" else "Mixed"
+            null -> {
+                val isCash = !inv.isCredit && inv.creditAmount <= 0.0
+                if (isCash) (if (isArabic) "كاش" else "Cash") else (if (isArabic) "آجل" else "Debt")
+            }
+        }
+    }
+
+    fun getTransactionTypeLabel(tx: TransactionItem, isArabic: Boolean, shortLabel: Boolean = false): String {
+        if (tx.typedOperationStatus == OperationStatus.REVERSED || tx.typedTransactionType == TransactionType.REVERSAL) {
+            return if (isArabic) (if (shortLabel) "إلغاء" else "إلغاء معاملة") else "Reversal"
+        }
+        val type = tx.transactionType ?: tx.typedTransactionType
+        val saleType = tx.saleType ?: tx.typedSaleType
+        return when (type) {
+            TransactionType.CUSTOMER_PAYMENT -> if (isArabic) (if (shortLabel) "تسديد" else "تسديد (دفعة)") else "Payment"
+            TransactionType.SALE -> when (saleType) {
+                SaleType.CASH -> if (isArabic) (if (shortLabel) "شراء كاش" else "شراء نقدي (كاش)") else "Cash Purchase"
+                SaleType.CREDIT -> if (isArabic) (if (shortLabel) "شراء آجل" else "شراء آجل (دين)") else "Credit Purchase"
+                SaleType.MIXED -> if (isArabic) "شراء مختلط" else "Mixed Purchase"
+                null -> if (tx.isCredit || tx.creditAmount > 0.0) (if (isArabic) (if (shortLabel) "شراء آجل" else "شراء آجل (دين)") else "Credit Purchase") else (if (isArabic) (if (shortLabel) "شراء كاش" else "شراء نقدي (كاش)") else "Cash Purchase")
+            }
+            TransactionType.SALE_RETURN -> if (isArabic) "مرتجع مبيعات" else "Sale Return"
+            TransactionType.CUSTOMER_REFUND -> if (isArabic) "استرداد نقدي" else "Customer Refund"
+            TransactionType.BALANCE_ADJUSTMENT -> if (isArabic) (if (shortLabel) "تعديل رصيد" else "تعديل رصيد") else "Balance Adjustment"
+            TransactionType.REVERSAL -> if (isArabic) (if (shortLabel) "إلغاء" else "إلغاء معاملة") else "Reversal"
+            TransactionType.OPENING_BALANCE -> if (isArabic) "رصيد افتتاحي" else "Opening Balance"
+            else -> {
+                if (isPaymentTransaction(tx)) {
+                    if (isArabic) (if (shortLabel) "تسديد" else "تسديد (دفعة)") else "Payment"
+                } else if (isDebtTransaction(tx)) {
+                    if (isArabic) (if (shortLabel) "شراء آجل" else "شراء آجل (دين)") else "Credit Purchase"
+                } else {
+                    if (isArabic) (if (shortLabel) "شراء كاش" else "شراء نقدي (كاش)") else "Cash Purchase"
+                }
+            }
+        }
+    }
     /**
      * Formats statement rows into standard CSV with UTF-8 BOM so spreadsheet apps display Arabic correctly.
      */
@@ -122,6 +193,73 @@ object ReportExporter {
             sb.append("Transactions Count: ${rows.size}\n")
         }
         return sb.toString()
+    }
+
+    /**
+     * Constructs chronological statement rows with running balances adhering strictly to pure domain
+     * accounting rules from CustomerLedgerCalculator / FinancialReportCalculator.
+     */
+    fun buildStatementRows(
+        customer: CustomerAccount?,
+        transactions: List<TransactionItem>,
+        openingBalance: Double = 0.0,
+        includeOpeningBalanceRow: Boolean = true,
+        periodStartDate: String? = null,
+        isArabic: Boolean = true
+    ): List<StatementRow> {
+        val sortedList = transactions.sortedWith(
+            compareBy<TransactionItem> { it.epochTimestampMillis }
+                .thenBy { it.id }
+        )
+
+        var running = openingBalance
+        val rows = ArrayList<StatementRow>()
+
+        if (includeOpeningBalanceRow && Math.abs(openingBalance) > 0.0001) {
+            rows.add(
+                StatementRow(
+                    id = "opening_balance",
+                    date = periodStartDate ?: "",
+                    customerName = customer?.customerName ?: "",
+                    description = if (isArabic) "رصيد افتتاحي مرحل" else "Opening Balance",
+                    type = if (isArabic) "رصيد افتتاحي" else "Opening Balance",
+                    isPayment = false,
+                    isCreditDebt = openingBalance > 0.0,
+                    amount = Math.abs(openingBalance),
+                    runningBalance = openingBalance,
+                    isArchived = false
+                )
+            )
+        }
+
+        for (tx in sortedList) {
+            val decomp = FinancialReportCalculator.decomposeTransaction(tx)
+            val isPayment = decomp.customerPayments > 0.0 || tx.typedTransactionType == TransactionType.SALE_RETURN
+            val isDebtPurchase = decomp.creditSales > 0.0
+
+            val impact = decomp.receivableChange
+            running += impact
+
+            val typeDesc = getTransactionTypeLabel(tx, isArabic)
+            val noteDesc = tx.notes.ifBlank { tx.title.ifBlank { tx.activityType } }
+
+            rows.add(
+                StatementRow(
+                    id = tx.id,
+                    date = tx.date,
+                    customerName = tx.customerNameSnapshot.ifBlank { customer?.customerName ?: "" },
+                    description = noteDesc,
+                    type = typeDesc,
+                    isPayment = isPayment,
+                    isCreditDebt = isDebtPurchase,
+                    amount = tx.amount,
+                    runningBalance = running,
+                    isArchived = tx.isArchived || decomp.isReversed
+                )
+            )
+        }
+
+        return rows
     }
 
     /**
@@ -717,9 +855,9 @@ object ReportExporter {
         subtitle: String,
         kpis: List<Pair<String, String>>,
         transactions: List<TransactionItem>,
-        totalCash: Double,
-        totalDebt: Double,
-        totalPayments: Double,
+        totalCash: Double = -1.0,
+        totalDebt: Double = -1.0,
+        totalPayments: Double = -1.0,
         isArabic: Boolean = true
     ): File {
         val file = File(context.cacheDir, fileName)
@@ -753,9 +891,9 @@ object ReportExporter {
         customer: CustomerAccount,
         kpis: List<Pair<String, String>>,
         transactions: List<TransactionItem>,
-        totalCash: Double,
-        totalDebt: Double,
-        totalPayments: Double,
+        totalCash: Double = -1.0,
+        totalDebt: Double = -1.0,
+        totalPayments: Double = -1.0,
         itemBreakdowns: List<AggregatedProductLine> = emptyList(),
         isArabic: Boolean = true
     ): File {
@@ -873,13 +1011,21 @@ object ReportExporter {
         customer: CustomerAccount,
         kpis: List<Pair<String, String>>,
         transactions: List<TransactionItem>,
-        totalCash: Double,
-        totalDebt: Double,
-        totalPayments: Double,
+        totalCash: Double = -1.0,
+        totalDebt: Double = -1.0,
+        totalPayments: Double = -1.0,
         itemBreakdowns: List<AggregatedProductLine> = emptyList(),
         outputStream: OutputStream,
         isArabic: Boolean = true
     ) {
+        val customerDomainTotals = FinancialReportCalculator.calculateCustomerTotals(customer.id, transactions)
+        val resolvedCash = if (totalCash >= 0.0) totalCash else customerDomainTotals.cashSales
+        val resolvedDebt = if (totalDebt >= 0.0) totalDebt else customerDomainTotals.creditSales
+        val resolvedPayments = if (totalPayments >= 0.0) totalPayments else customerDomainTotals.customerPayments
+
+        val activeCustTransactions = transactions.filter { (it.operationStatus ?: it.typedOperationStatus) != OperationStatus.REVERSED }
+        val activeCustTotalAmount = activeCustTransactions.sumOf { it.amount }
+
         val pdfDocument = PdfDocument()
         val pageWidth = 595 // A4 portrait width in points
         val pageHeight = 842 // A4 portrait height in points
@@ -1217,9 +1363,9 @@ object ReportExporter {
                 // =====================================================================
                 val customerKpis = listOf(
                     (if (isArabic) "الرصيد المستحق" else "Balance Due") to AppCurrency.formatAmountWithDecimals(customer.balance, isArabic),
-                    (if (isArabic) "مشتريات كاش" else "Cash Purchases") to AppCurrency.formatAmountWithDecimals(totalCash, isArabic),
-                    (if (isArabic) "مشتريات آجل" else "Debt Purchases") to AppCurrency.formatAmountWithDecimals(totalDebt, isArabic),
-                    (if (isArabic) "إجمالي المسدد" else "Payments") to AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)
+                    (if (isArabic) "مشتريات كاش" else "Cash Purchases") to AppCurrency.formatAmountWithDecimals(resolvedCash, isArabic),
+                    (if (isArabic) "مشتريات آجل" else "Debt Purchases") to AppCurrency.formatAmountWithDecimals(resolvedDebt, isArabic),
+                    (if (isArabic) "إجمالي المسدد" else "Payments") to AppCurrency.formatAmountWithDecimals(resolvedPayments, isArabic)
                 )
 
                 val kpiCount = customerKpis.size
@@ -1535,18 +1681,9 @@ object ReportExporter {
                 drawCellText(activePage.canvas, dateStr, 0, activePage.currentY + 15f, paint, alignEnd = false)
 
                 // 1: Type
-                val isPayment = tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
-                val isDebt = !isPayment && (tx.isCredit || tx.activityType.contains("آجل") ||
-                    tx.activityType.contains("دين") || tx.activityType.contains("Debt") ||
-                    tx.activityType.contains("شراء بالدين"))
-
-                val typeLabel = if (isPayment) {
-                    if (isArabic) "تسديد" else "Payment"
-                } else if (isDebt) {
-                    if (isArabic) "شراء آجل" else "Credit Purchase"
-                } else {
-                    if (isArabic) "شراء كاش" else "Cash Purchase"
-                }
+                val isPayment = isPaymentTransaction(tx)
+                val isDebt = isDebtTransaction(tx)
+                val typeLabel = getTransactionTypeLabel(tx, isArabic, shortLabel = true)
                 paint.color = if (isPayment) blueColor else if (isDebt) amberColor else greenColor
                 paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                 drawCellText(activePage.canvas, typeLabel, 1, activePage.currentY + 15f, paint, alignEnd = false)
@@ -1595,7 +1732,7 @@ object ReportExporter {
 
             val totalLbl = if (isArabic) "إجمالي العمليات المعروضة (${transactions.size})" else "Total Operations (${transactions.size})"
             drawCellText(activePage.canvas, totalLbl, 0, activePage.currentY + 15f, paint, alignEnd = false)
-            drawCellText(activePage.canvas, AppCurrency.formatAmountWithDecimals(transactions.sumOf { it.amount }, isArabic), 4, activePage.currentY + 15f, paint, alignEnd = true)
+            drawCellText(activePage.canvas, AppCurrency.formatAmountWithDecimals(activeCustTotalAmount, isArabic), 4, activePage.currentY + 15f, paint, alignEnd = true)
             activePage.currentY += totalH + 6f
 
             // Customer Final Balance Summary Card
@@ -1614,9 +1751,9 @@ object ReportExporter {
             paint.textSize = 8.5f
             paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             val balanceSummaryText = if (isArabic) {
-                "الرصيد المستحق: ${AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)}   |   مشتريات كاش: ${AppCurrency.formatAmountWithDecimals(totalCash, isArabic)}   |   مشتريات آجل: ${AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)}   |   المسدد: ${AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)}"
+                "الرصيد المستحق: ${AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)}   |   مشتريات كاش: ${AppCurrency.formatAmountWithDecimals(resolvedCash, isArabic)}   |   مشتريات آجل: ${AppCurrency.formatAmountWithDecimals(resolvedDebt, isArabic)}   |   المسدد: ${AppCurrency.formatAmountWithDecimals(resolvedPayments, isArabic)}"
             } else {
-                "Balance Due: ${AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)}   |   Cash: ${AppCurrency.formatAmountWithDecimals(totalCash, isArabic)}   |   Debt: ${AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)}   |   Payments: ${AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)}"
+                "Balance Due: ${AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)}   |   Cash: ${AppCurrency.formatAmountWithDecimals(resolvedCash, isArabic)}   |   Debt: ${AppCurrency.formatAmountWithDecimals(resolvedDebt, isArabic)}   |   Payments: ${AppCurrency.formatAmountWithDecimals(resolvedPayments, isArabic)}"
             }
             paint.textAlign = Paint.Align.CENTER
             activePage.canvas.drawText(balanceSummaryText, pageWidth / 2f, activePage.currentY + 18f, paint)
@@ -1646,12 +1783,20 @@ object ReportExporter {
         subtitle: String,
         kpis: List<Pair<String, String>>,
         transactions: List<TransactionItem>,
-        totalCash: Double,
-        totalDebt: Double,
-        totalPayments: Double,
+        totalCash: Double = -1.0,
+        totalDebt: Double = -1.0,
+        totalPayments: Double = -1.0,
         outputStream: OutputStream,
         isArabic: Boolean = true
     ) {
+        val domainTotals = FinancialReportCalculator.calculate(transactions)
+        val resolvedCash = if (totalCash >= 0.0) totalCash else domainTotals.cashSales
+        val resolvedDebt = if (totalDebt >= 0.0) totalDebt else domainTotals.creditSales
+        val resolvedPayments = if (totalPayments >= 0.0) totalPayments else domainTotals.customerPayments
+
+        val activeTransactions = transactions.filter { (it.operationStatus ?: it.typedOperationStatus) != OperationStatus.REVERSED }
+        val activeTransactionsTotal = activeTransactions.sumOf { it.amount }
+
         val pdfDocument = PdfDocument()
         val pageWidth = 595 // A4 portrait width in points
         val pageHeight = 842 // A4 portrait height in points
@@ -2030,18 +2175,9 @@ object ReportExporter {
                 drawCellText(activePage.canvas, customerDisplay, 1, activePage.currentY + 15f, paint, alignEnd = false)
 
                 // 2: Type
-                val isPayment = tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
-                val isDebt = !isPayment && (tx.isCredit || tx.activityType.contains("آجل") ||
-                    tx.activityType.contains("دين") || tx.activityType.contains("Debt") ||
-                    tx.activityType.contains("شراء بالدين"))
-
-                val typeLabel = if (isPayment) {
-                    if (isArabic) "تسديد (دفعة)" else "Payment"
-                } else if (isDebt) {
-                    if (isArabic) "شراء آجل (دين)" else "Credit Purchase"
-                } else {
-                    if (isArabic) "شراء نقدي (كاش)" else "Cash Purchase"
-                }
+                val isPayment = isPaymentTransaction(tx)
+                val isDebt = isDebtTransaction(tx)
+                val typeLabel = getTransactionTypeLabel(tx, isArabic)
                 paint.color = if (isPayment) blueColor else if (isDebt) amberColor else greenColor
                 paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                 drawCellText(activePage.canvas, typeLabel, 2, activePage.currentY + 15f, paint, alignEnd = false)
@@ -2094,7 +2230,7 @@ object ReportExporter {
 
             val totalLbl = if (isArabic) "إجمالي المعاملات (${transactions.size} معاملة)" else "Transactions Total (${transactions.size} Transactions)"
             drawCellText(activePage.canvas, totalLbl, 0, activePage.currentY + 15f, paint, alignEnd = false)
-            drawCellText(activePage.canvas, AppCurrency.formatAmountWithDecimals(transactions.sumOf { it.amount }, isArabic), 4, activePage.currentY + 15f, paint, alignEnd = true)
+            drawCellText(activePage.canvas, AppCurrency.formatAmountWithDecimals(activeTransactionsTotal, isArabic), 4, activePage.currentY + 15f, paint, alignEnd = true)
             activePage.currentY += totalH + 6f
 
             // Final Totals Breakdown Card
@@ -2113,9 +2249,9 @@ object ReportExporter {
             paint.textSize = 8.5f
             paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             val breakdownSummaryText = if (isArabic) {
-                "إجمالي الكاش: ${AppCurrency.formatAmountWithDecimals(totalCash, isArabic)}   |   إجمالي الآجل: ${AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)}   |   إجمالي التسديد: ${AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)}"
+                "إجمالي الكاش: ${AppCurrency.formatAmountWithDecimals(resolvedCash, isArabic)}   |   إجمالي الآجل: ${AppCurrency.formatAmountWithDecimals(resolvedDebt, isArabic)}   |   إجمالي التسديد: ${AppCurrency.formatAmountWithDecimals(resolvedPayments, isArabic)}"
             } else {
-                "Cash Total: ${AppCurrency.formatAmountWithDecimals(totalCash, isArabic)}   |   Debt Total: ${AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)}   |   Payments Total: ${AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)}"
+                "Cash Total: ${AppCurrency.formatAmountWithDecimals(resolvedCash, isArabic)}   |   Debt Total: ${AppCurrency.formatAmountWithDecimals(resolvedDebt, isArabic)}   |   Payments Total: ${AppCurrency.formatAmountWithDecimals(resolvedPayments, isArabic)}"
             }
             paint.textAlign = Paint.Align.CENTER
             activePage.canvas.drawText(breakdownSummaryText, pageWidth / 2f, activePage.currentY + 18f, paint)
@@ -2244,7 +2380,8 @@ object ReportExporter {
         val totalItemsProfit = itemBreakdowns.sumOf { it.profitMargin }
 
         // Calculate grand totals for invoices table
-        val totalInvoicesAmount = invoices.sumOf { it.amount }
+        val activeInvoices = invoices.filter { (it.operationStatus ?: it.typedOperationStatus) != OperationStatus.REVERSED }
+        val totalInvoicesAmount = activeInvoices.sumOf { it.amount }
 
         // Flow-based layout across multiple pages
         data class PageContent(
@@ -2604,15 +2741,8 @@ object ReportExporter {
                 val custDisplay = inv.customerNameSnapshot.ifBlank { if (isArabic) "عميل عام" else "General" }
                 drawCellText(activePage.canvas, custDisplay, invColStarts, invColEnds, 1, activePage.currentY + 15f, paint, alignEnd = false)
 
-                val isCash = !inv.isCredit && (
-                    inv.activityType.contains("كاش") ||
-                    inv.activityType.contains("Cash") ||
-                    (!inv.activityType.contains("تسديد") &&
-                     !inv.activityType.contains("Payment") &&
-                     !inv.activityType.contains("آجل") &&
-                     !inv.activityType.contains("دين"))
-                )
-                val typeLabel = if (isCash) (if (isArabic) "كاش" else "Cash") else (if (isArabic) "آجل" else "Debt")
+                val typeLabel = getInvoiceTypeLabel(inv, isArabic)
+                val isCash = inv.typedSaleType == SaleType.CASH || (!inv.isCredit && inv.creditAmount == 0.0)
                 paint.color = if (isCash) greenColor else amberColor
                 paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                 drawCellText(activePage.canvas, typeLabel, invColStarts, invColEnds, 2, activePage.currentY + 15f, paint, alignEnd = false)
@@ -2715,9 +2845,9 @@ object ReportExporter {
         subtitle: String,
         kpis: List<Pair<String, String>>,
         transactions: List<TransactionItem>,
-        totalCash: Double,
-        totalDebt: Double,
-        totalPayments: Double,
+        totalCash: Double = -1.0,
+        totalDebt: Double = -1.0,
+        totalPayments: Double = -1.0,
         isArabic: Boolean = true
     ): File {
         val csv = generateTransactionsCsv(
@@ -2747,9 +2877,9 @@ object ReportExporter {
         customer: CustomerAccount,
         kpis: List<Pair<String, String>>,
         transactions: List<TransactionItem>,
-        totalCash: Double,
-        totalDebt: Double,
-        totalPayments: Double,
+        totalCash: Double = -1.0,
+        totalDebt: Double = -1.0,
+        totalPayments: Double = -1.0,
         itemBreakdowns: List<AggregatedProductLine> = emptyList(),
         isArabic: Boolean = true
     ): File {
@@ -2807,9 +2937,10 @@ object ReportExporter {
                 sb.append(csvRow(k, v))
             }
         } else {
-            val totalSalesVal = itemBreakdowns.sumOf { it.totalSales }
-            val cashVal = invoices.filter { !it.isCredit }.sumOf { it.amount }
-            val debtVal = invoices.filter { it.isCredit }.sumOf { it.amount }
+            val totals = FinancialReportCalculator.calculate(invoices)
+            val totalSalesVal = if (itemBreakdowns.isNotEmpty()) itemBreakdowns.sumOf { it.totalSales } else totals.totalSales
+            val cashVal = totals.cashSales
+            val debtVal = totals.creditSales
             sb.append(csvRow(if (isArabic) "إجمالي المبيعات" else "Total Sales", AppCurrency.formatAmountWithDecimals(totalSalesVal, isArabic)))
             sb.append(csvRow(if (isArabic) "مبيعات كاش" else "Cash Sales", AppCurrency.formatAmountWithDecimals(cashVal, isArabic)))
             sb.append(csvRow(if (isArabic) "مبيعات آجل" else "Debt Sales", AppCurrency.formatAmountWithDecimals(debtVal, isArabic)))
@@ -2870,22 +3001,15 @@ object ReportExporter {
         }
         sb.append(csvRow(invHeaders))
 
-        val totalInvoicesAmount = invoices.sumOf { it.amount }
+        val activeInvoices = invoices.filter { (it.operationStatus ?: it.typedOperationStatus) != OperationStatus.REVERSED }
+        val totalInvoicesAmount = activeInvoices.sumOf { it.amount }
 
         if (invoices.isEmpty()) {
             sb.append(csvRow(if (isArabic) "لا توجد فواتير مبيعات لهذه الفترة" else "No sales invoices for this period", "", "", ""))
         } else {
             for (inv in invoices) {
                 val dateDesc = "${inv.date} - ${inv.title.ifBlank { inv.notes.ifBlank { inv.date } }}"
-                val isCash = !inv.isCredit && (
-                    inv.activityType.contains("كاش") ||
-                    inv.activityType.contains("Cash") ||
-                    (!inv.activityType.contains("تسديد") &&
-                     !inv.activityType.contains("Payment") &&
-                     !inv.activityType.contains("آجل") &&
-                     !inv.activityType.contains("دين"))
-                )
-                val typeLabel = if (isCash) (if (isArabic) "كاش" else "Cash") else (if (isArabic) "آجل" else "Debt")
+                val typeLabel = getInvoiceTypeLabel(inv, isArabic)
                 val custDisplay = inv.customerNameSnapshot.ifBlank { if (isArabic) "عميل عام" else "General" }
                 sb.append(csvRow(
                     dateDesc,
@@ -2917,11 +3041,19 @@ object ReportExporter {
         subtitle: String,
         kpis: List<Pair<String, String>>,
         transactions: List<TransactionItem>,
-        totalCash: Double,
-        totalDebt: Double,
-        totalPayments: Double,
+        totalCash: Double = -1.0,
+        totalDebt: Double = -1.0,
+        totalPayments: Double = -1.0,
         isArabic: Boolean = true
     ): String {
+        val domainTotals = FinancialReportCalculator.calculate(transactions)
+        val resolvedCash = if (totalCash >= 0.0) totalCash else domainTotals.cashSales
+        val resolvedDebt = if (totalDebt >= 0.0) totalDebt else domainTotals.creditSales
+        val resolvedPayments = if (totalPayments >= 0.0) totalPayments else domainTotals.customerPayments
+
+        val activeTransactions = transactions.filter { (it.operationStatus ?: it.typedOperationStatus) != OperationStatus.REVERSED }
+        val activeTransactionsTotal = activeTransactions.sumOf { it.amount }
+
         val sb = StringBuilder()
         sb.append("\uFEFF") // UTF-8 BOM
         val currentDate = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.US).format(Date())
@@ -2947,9 +3079,9 @@ object ReportExporter {
                 sb.append(csvRow(k, v))
             }
         } else {
-            sb.append(csvRow(if (isArabic) "إجمالي الكاش" else "Cash Sum", AppCurrency.formatAmountWithDecimals(totalCash, isArabic)))
-            sb.append(csvRow(if (isArabic) "إجمالي الآجل" else "Debt Sum", AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)))
-            sb.append(csvRow(if (isArabic) "إجمالي التسديد" else "Payments", AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)))
+            sb.append(csvRow(if (isArabic) "إجمالي الكاش" else "Cash Sum", AppCurrency.formatAmountWithDecimals(resolvedCash, isArabic)))
+            sb.append(csvRow(if (isArabic) "إجمالي الآجل" else "Debt Sum", AppCurrency.formatAmountWithDecimals(resolvedDebt, isArabic)))
+            sb.append(csvRow(if (isArabic) "إجمالي التسديد" else "Payments", AppCurrency.formatAmountWithDecimals(resolvedPayments, isArabic)))
         }
         sb.append("\n")
 
@@ -2972,18 +3104,7 @@ object ReportExporter {
         } else {
             for (tx in transactions) {
                 val customerName = tx.customerNameSnapshot.ifBlank { if (isArabic) "عميل عام" else "General" }
-                val isPayment = tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
-                val isDebt = !isPayment && (tx.isCredit || tx.activityType.contains("آجل") ||
-                    tx.activityType.contains("دين") || tx.activityType.contains("Debt") ||
-                    tx.activityType.contains("شراء بالدين"))
-
-                val typeLabel = if (isPayment) {
-                    if (isArabic) "تسديد (دفعة)" else "Payment"
-                } else if (isDebt) {
-                    if (isArabic) "شراء آجل (دين)" else "Credit Purchase"
-                } else {
-                    if (isArabic) "شراء نقدي (كاش)" else "Cash Purchase"
-                }
+                val typeLabel = getTransactionTypeLabel(tx, isArabic)
 
                 val settlementStr = when (tx.settlementType) {
                     SettlementType.FULL -> if (isArabic) "تسوية كاملة" else "Full Settlement"
@@ -3017,16 +3138,16 @@ object ReportExporter {
                 "",
                 "",
                 "",
-                AppCurrency.formatAmountWithDecimals(transactions.sumOf { it.amount }, isArabic)
+                AppCurrency.formatAmountWithDecimals(activeTransactionsTotal, isArabic)
             ))
 
             // Final Totals Breakdown
             sb.append("\n")
             val breakdownTitle = if (isArabic) "ملخص الإجماليات النهائي" else "Final Totals Breakdown"
             sb.append(csvRow(breakdownTitle))
-            sb.append(csvRow(if (isArabic) "إجمالي الكاش" else "Cash Total", AppCurrency.formatAmountWithDecimals(totalCash, isArabic)))
-            sb.append(csvRow(if (isArabic) "إجمالي الآجل" else "Debt Total", AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)))
-            sb.append(csvRow(if (isArabic) "إجمالي التسديد" else "Payments Total", AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)))
+            sb.append(csvRow(if (isArabic) "إجمالي الكاش" else "Cash Total", AppCurrency.formatAmountWithDecimals(resolvedCash, isArabic)))
+            sb.append(csvRow(if (isArabic) "إجمالي الآجل" else "Debt Total", AppCurrency.formatAmountWithDecimals(resolvedDebt, isArabic)))
+            sb.append(csvRow(if (isArabic) "إجمالي التسديد" else "Payments Total", AppCurrency.formatAmountWithDecimals(resolvedPayments, isArabic)))
         }
 
         return sb.toString()
@@ -3045,12 +3166,20 @@ object ReportExporter {
         customer: CustomerAccount,
         kpis: List<Pair<String, String>>,
         transactions: List<TransactionItem>,
-        totalCash: Double,
-        totalDebt: Double,
-        totalPayments: Double,
+        totalCash: Double = -1.0,
+        totalDebt: Double = -1.0,
+        totalPayments: Double = -1.0,
         itemBreakdowns: List<AggregatedProductLine>,
         isArabic: Boolean = true
     ): String {
+        val customerDomainTotals = FinancialReportCalculator.calculateCustomerTotals(customer.id, transactions)
+        val resolvedCash = if (totalCash >= 0.0) totalCash else customerDomainTotals.cashSales
+        val resolvedDebt = if (totalDebt >= 0.0) totalDebt else customerDomainTotals.creditSales
+        val resolvedPayments = if (totalPayments >= 0.0) totalPayments else customerDomainTotals.customerPayments
+
+        val activeCustTransactions = transactions.filter { (it.operationStatus ?: it.typedOperationStatus) != OperationStatus.REVERSED }
+        val activeCustTotalAmount = activeCustTransactions.sumOf { it.amount }
+
         val sb = StringBuilder()
         sb.append("\uFEFF") // UTF-8 BOM
         val currentDate = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.US).format(Date())
@@ -3088,9 +3217,9 @@ object ReportExporter {
         val summarySecTitle = if (isArabic) "ملخص حساب العميل" else "Customer Account Summary"
         sb.append(csvRow(summarySecTitle))
         sb.append(csvRow(if (isArabic) "الرصيد المستحق" else "Outstanding Balance", AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)))
-        sb.append(csvRow(if (isArabic) "مشتريات كاش" else "Cash Purchases", AppCurrency.formatAmountWithDecimals(totalCash, isArabic)))
-        sb.append(csvRow(if (isArabic) "مشتريات آجل" else "Credit Purchases", AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)))
-        sb.append(csvRow(if (isArabic) "إجمالي المسدد" else "Total Payments", AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)))
+        sb.append(csvRow(if (isArabic) "مشتريات كاش" else "Cash Purchases", AppCurrency.formatAmountWithDecimals(resolvedCash, isArabic)))
+        sb.append(csvRow(if (isArabic) "مشتريات آجل" else "Credit Purchases", AppCurrency.formatAmountWithDecimals(resolvedDebt, isArabic)))
+        sb.append(csvRow(if (isArabic) "إجمالي المسدد" else "Total Payments", AppCurrency.formatAmountWithDecimals(resolvedPayments, isArabic)))
         sb.append("\n")
 
         // SECTION 4: MOST ORDERED PRODUCTS FOR THIS CUSTOMER
@@ -3147,19 +3276,7 @@ object ReportExporter {
             sb.append(csvRow(if (isArabic) "لا توجد معاملات مسجلة لهذا العميل في هذه الفترة" else "No transactions recorded for this customer in this period", "", "", "", ""))
         } else {
             for (tx in transactions) {
-                val isPayment = tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
-                val isDebt = !isPayment && (tx.isCredit || tx.activityType.contains("آجل") ||
-                    tx.activityType.contains("دين") || tx.activityType.contains("Debt") ||
-                    tx.activityType.contains("شراء بالدين"))
-
-                val typeLabel = if (isPayment) {
-                    if (isArabic) "تسديد" else "Payment"
-                } else if (isDebt) {
-                    if (isArabic) "شراء آجل" else "Credit Purchase"
-                } else {
-                    if (isArabic) "شراء كاش" else "Cash Purchase"
-                }
-
+                val typeLabel = getTransactionTypeLabel(tx, isArabic, shortLabel = true)
                 val desc = tx.notes.ifBlank { tx.title.ifBlank { tx.activityType } }
 
                 val settlementStr = when (tx.settlementType) {
@@ -3184,7 +3301,7 @@ object ReportExporter {
                 "",
                 "",
                 "",
-                AppCurrency.formatAmountWithDecimals(transactions.sumOf { it.amount }, isArabic)
+                AppCurrency.formatAmountWithDecimals(activeCustTotalAmount, isArabic)
             ))
 
             // Balance Summary Row
@@ -3192,9 +3309,9 @@ object ReportExporter {
             val finalBalanceTitle = if (isArabic) "الرصيد والحساب النهائي للعميل" else "Final Customer Balance & Totals"
             sb.append(csvRow(finalBalanceTitle))
             sb.append(csvRow(if (isArabic) "الرصيد المستحق" else "Balance Due", AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)))
-            sb.append(csvRow(if (isArabic) "مشتريات كاش" else "Cash Purchases", AppCurrency.formatAmountWithDecimals(totalCash, isArabic)))
-            sb.append(csvRow(if (isArabic) "مشتريات آجل" else "Debt Purchases", AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)))
-            sb.append(csvRow(if (isArabic) "إجمالي المسدد" else "Total Payments", AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)))
+            sb.append(csvRow(if (isArabic) "مشتريات كاش" else "Cash Purchases", AppCurrency.formatAmountWithDecimals(resolvedCash, isArabic)))
+            sb.append(csvRow(if (isArabic) "مشتريات آجل" else "Debt Purchases", AppCurrency.formatAmountWithDecimals(resolvedDebt, isArabic)))
+            sb.append(csvRow(if (isArabic) "إجمالي المسدد" else "Total Payments", AppCurrency.formatAmountWithDecimals(resolvedPayments, isArabic)))
         }
 
         return sb.toString()
@@ -3261,9 +3378,9 @@ object ReportExporter {
         subtitle: String,
         kpis: List<Pair<String, String>>,
         transactions: List<TransactionItem>,
-        totalCash: Double,
-        totalDebt: Double,
-        totalPayments: Double,
+        totalCash: Double = -1.0,
+        totalDebt: Double = -1.0,
+        totalPayments: Double = -1.0,
         isArabic: Boolean = true
     ): File {
         val txt = generateTransactionsTxt(
@@ -3293,9 +3410,9 @@ object ReportExporter {
         customer: CustomerAccount,
         kpis: List<Pair<String, String>>,
         transactions: List<TransactionItem>,
-        totalCash: Double,
-        totalDebt: Double,
-        totalPayments: Double,
+        totalCash: Double = -1.0,
+        totalDebt: Double = -1.0,
+        totalPayments: Double = -1.0,
         itemBreakdowns: List<AggregatedProductLine> = emptyList(),
         isArabic: Boolean = true
     ): File {
@@ -3352,9 +3469,10 @@ object ReportExporter {
                 sb.appendLine("$k: $v")
             }
         } else {
-            val totalSalesVal = itemBreakdowns.sumOf { it.totalSales }
-            val cashVal = invoices.filter { !it.isCredit }.sumOf { it.amount }
-            val debtVal = invoices.filter { it.isCredit }.sumOf { it.amount }
+            val totals = FinancialReportCalculator.calculate(invoices)
+            val totalSalesVal = if (itemBreakdowns.isNotEmpty()) itemBreakdowns.sumOf { it.totalSales } else totals.totalSales
+            val cashVal = totals.cashSales
+            val debtVal = totals.creditSales
             sb.appendLine("${if (isArabic) "إجمالي المبيعات" else "Total Sales"}: ${AppCurrency.formatAmountWithDecimals(totalSalesVal, isArabic)}")
             sb.appendLine("${if (isArabic) "مبيعات كاش" else "Cash Sales"}: ${AppCurrency.formatAmountWithDecimals(cashVal, isArabic)}")
             sb.appendLine("${if (isArabic) "مبيعات آجل" else "Credit Sales"}: ${AppCurrency.formatAmountWithDecimals(debtVal, isArabic)}")
@@ -3403,22 +3521,15 @@ object ReportExporter {
         sb.appendLine(invSecTitle)
         sb.appendLine(sepDouble)
 
-        val totalInvoicesAmount = invoices.sumOf { it.amount }
+        val activeInvoices = invoices.filter { (it.operationStatus ?: it.typedOperationStatus) != OperationStatus.REVERSED }
+        val totalInvoicesAmount = activeInvoices.sumOf { it.amount }
 
         if (invoices.isEmpty()) {
             sb.appendLine(if (isArabic) "لا توجد فواتير مبيعات لهذه الفترة" else "No sales invoices for this period")
         } else {
             invoices.forEachIndexed { idx, inv ->
                 val dateDesc = "${inv.date} - ${inv.title.ifBlank { inv.notes.ifBlank { if (isArabic) "فاتورة مبيعات" else "Sales Invoice" } }}"
-                val isCash = !inv.isCredit && (
-                    inv.activityType.contains("كاش") ||
-                    inv.activityType.contains("Cash") ||
-                    (!inv.activityType.contains("تسديد") &&
-                     !inv.activityType.contains("Payment") &&
-                     !inv.activityType.contains("آجل") &&
-                     !inv.activityType.contains("دين"))
-                )
-                val typeLabel = if (isCash) (if (isArabic) "كاش" else "Cash") else (if (isArabic) "آجل" else "Debt")
+                val typeLabel = getInvoiceTypeLabel(inv, isArabic)
                 val custDisplay = inv.customerNameSnapshot.ifBlank { if (isArabic) "عميل عام" else "General" }
                 sb.appendLine("#${idx + 1} | $dateDesc")
                 sb.appendLine("   ${if (isArabic) "العميل" else "Customer"}: $custDisplay")
@@ -3444,11 +3555,19 @@ object ReportExporter {
         subtitle: String,
         kpis: List<Pair<String, String>>,
         transactions: List<TransactionItem>,
-        totalCash: Double,
-        totalDebt: Double,
-        totalPayments: Double,
+        totalCash: Double = -1.0,
+        totalDebt: Double = -1.0,
+        totalPayments: Double = -1.0,
         isArabic: Boolean = true
     ): String {
+        val domainTotals = FinancialReportCalculator.calculate(transactions)
+        val resolvedCash = if (totalCash >= 0.0) totalCash else domainTotals.cashSales
+        val resolvedDebt = if (totalDebt >= 0.0) totalDebt else domainTotals.creditSales
+        val resolvedPayments = if (totalPayments >= 0.0) totalPayments else domainTotals.customerPayments
+
+        val activeTransactions = transactions.filter { (it.operationStatus ?: it.typedOperationStatus) != OperationStatus.REVERSED }
+        val activeTransactionsTotal = activeTransactions.sumOf { it.amount }
+
         val sb = StringBuilder()
         val sepDouble = "=================================================="
         val sepSingle = "--------------------------------------------------"
@@ -3473,9 +3592,9 @@ object ReportExporter {
                 sb.appendLine("$k: $v")
             }
         } else {
-            sb.appendLine("${if (isArabic) "إجمالي الكاش" else "Cash Sum"}: ${AppCurrency.formatAmountWithDecimals(totalCash, isArabic)}")
-            sb.appendLine("${if (isArabic) "إجمالي الآجل" else "Debt Sum"}: ${AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)}")
-            sb.appendLine("${if (isArabic) "إجمالي التسديد" else "Payments"}: ${AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)}")
+            sb.appendLine("${if (isArabic) "إجمالي الكاش" else "Cash Sum"}: ${AppCurrency.formatAmountWithDecimals(resolvedCash, isArabic)}")
+            sb.appendLine("${if (isArabic) "إجمالي الآجل" else "Debt Sum"}: ${AppCurrency.formatAmountWithDecimals(resolvedDebt, isArabic)}")
+            sb.appendLine("${if (isArabic) "إجمالي التسديد" else "Payments"}: ${AppCurrency.formatAmountWithDecimals(resolvedPayments, isArabic)}")
         }
         sb.appendLine()
 
@@ -3494,18 +3613,7 @@ object ReportExporter {
         } else {
             transactions.forEachIndexed { idx, tx ->
                 val customerName = tx.customerNameSnapshot.ifBlank { if (isArabic) "عميل عام" else "General" }
-                val isPayment = tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
-                val isDebt = !isPayment && (tx.isCredit || tx.activityType.contains("آجل") ||
-                    tx.activityType.contains("دين") || tx.activityType.contains("Debt") ||
-                    tx.activityType.contains("شراء بالدين"))
-
-                val typeLabel = if (isPayment) {
-                    if (isArabic) "تسديد (دفعة)" else "Payment"
-                } else if (isDebt) {
-                    if (isArabic) "شراء آجل (دين)" else "Credit Purchase"
-                } else {
-                    if (isArabic) "شراء نقدي (كاش)" else "Cash Purchase"
-                }
+                val typeLabel = getTransactionTypeLabel(tx, isArabic)
 
                 val settlementStr = when (tx.settlementType) {
                     SettlementType.FULL -> if (isArabic) "تسوية كاملة" else "Full Settlement"
@@ -3531,16 +3639,16 @@ object ReportExporter {
             }
 
             sb.appendLine("${if (isArabic) "إجمالي المعاملات" else "Total Transactions"}: ${transactions.size} ${if (isArabic) "معاملة" else "Transactions"}")
-            sb.appendLine("${if (isArabic) "إجمالي مبالغ العمليات" else "Total Operations Amount"}: ${AppCurrency.formatAmountWithDecimals(transactions.sumOf { it.amount }, isArabic)}")
+            sb.appendLine("${if (isArabic) "إجمالي مبالغ العمليات" else "Total Operations Amount"}: ${AppCurrency.formatAmountWithDecimals(activeTransactionsTotal, isArabic)}")
             sb.appendLine()
 
             // Final Breakdown
             sb.appendLine(sepDouble)
             sb.appendLine(if (isArabic) "ملخص الإجماليات النهائي" else "FINAL TOTALS BREAKDOWN")
             sb.appendLine(sepDouble)
-            sb.appendLine("${if (isArabic) "إجمالي الكاش" else "Cash Total"}: ${AppCurrency.formatAmountWithDecimals(totalCash, isArabic)}")
-            sb.appendLine("${if (isArabic) "إجمالي الآجل" else "Debt Total"}: ${AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)}")
-            sb.appendLine("${if (isArabic) "إجمالي التسديد" else "Payments Total"}: ${AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)}")
+            sb.appendLine("${if (isArabic) "إجمالي الكاش" else "Cash Total"}: ${AppCurrency.formatAmountWithDecimals(resolvedCash, isArabic)}")
+            sb.appendLine("${if (isArabic) "إجمالي الآجل" else "Debt Total"}: ${AppCurrency.formatAmountWithDecimals(resolvedDebt, isArabic)}")
+            sb.appendLine("${if (isArabic) "إجمالي التسديد" else "Payments Total"}: ${AppCurrency.formatAmountWithDecimals(resolvedPayments, isArabic)}")
         }
         sb.appendLine(sepDouble)
 
@@ -3560,12 +3668,20 @@ object ReportExporter {
         customer: CustomerAccount,
         kpis: List<Pair<String, String>>,
         transactions: List<TransactionItem>,
-        totalCash: Double,
-        totalDebt: Double,
-        totalPayments: Double,
+        totalCash: Double = -1.0,
+        totalDebt: Double = -1.0,
+        totalPayments: Double = -1.0,
         itemBreakdowns: List<AggregatedProductLine>,
         isArabic: Boolean = true
     ): String {
+        val customerDomainTotals = FinancialReportCalculator.calculateCustomerTotals(customer.id, transactions)
+        val resolvedCash = if (totalCash >= 0.0) totalCash else customerDomainTotals.cashSales
+        val resolvedDebt = if (totalDebt >= 0.0) totalDebt else customerDomainTotals.creditSales
+        val resolvedPayments = if (totalPayments >= 0.0) totalPayments else customerDomainTotals.customerPayments
+
+        val activeCustTransactions = transactions.filter { (it.operationStatus ?: it.typedOperationStatus) != OperationStatus.REVERSED }
+        val activeCustTotalAmount = activeCustTransactions.sumOf { it.amount }
+
         val sb = StringBuilder()
         val sepDouble = "=================================================="
         val sepSingle = "--------------------------------------------------"
@@ -3603,9 +3719,9 @@ object ReportExporter {
         sb.appendLine(if (isArabic) "ملخص حساب العميل" else "CUSTOMER SUMMARY")
         sb.appendLine(sepDouble)
         sb.appendLine("${if (isArabic) "الرصيد المستحق" else "Outstanding Balance"}: ${AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)}")
-        sb.appendLine("${if (isArabic) "مشتريات كاش" else "Cash Purchases"}: ${AppCurrency.formatAmountWithDecimals(totalCash, isArabic)}")
-        sb.appendLine("${if (isArabic) "مشتريات آجل" else "Credit Purchases"}: ${AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)}")
-        sb.appendLine("${if (isArabic) "إجمالي المسدد" else "Total Payments"}: ${AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)}")
+        sb.appendLine("${if (isArabic) "مشتريات كاش" else "Cash Purchases"}: ${AppCurrency.formatAmountWithDecimals(resolvedCash, isArabic)}")
+        sb.appendLine("${if (isArabic) "مشتريات آجل" else "Credit Purchases"}: ${AppCurrency.formatAmountWithDecimals(resolvedDebt, isArabic)}")
+        sb.appendLine("${if (isArabic) "إجمالي المسدد" else "Total Payments"}: ${AppCurrency.formatAmountWithDecimals(resolvedPayments, isArabic)}")
         sb.appendLine()
 
         // 4. Most Ordered Products for This Customer
@@ -3648,19 +3764,7 @@ object ReportExporter {
             sb.appendLine(if (isArabic) "لا توجد معاملات مسجلة لهذا العميل في هذه الفترة" else "No transactions recorded for this customer in this period")
         } else {
             transactions.forEachIndexed { idx, tx ->
-                val isPayment = tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
-                val isDebt = !isPayment && (tx.isCredit || tx.activityType.contains("آجل") ||
-                    tx.activityType.contains("دين") || tx.activityType.contains("Debt") ||
-                    tx.activityType.contains("شراء بالدين"))
-
-                val typeLabel = if (isPayment) {
-                    if (isArabic) "تسديد" else "Payment"
-                } else if (isDebt) {
-                    if (isArabic) "شراء آجل" else "Credit Purchase"
-                } else {
-                    if (isArabic) "شراء كاش" else "Cash Purchase"
-                }
-
+                val typeLabel = getTransactionTypeLabel(tx, isArabic, shortLabel = true)
                 val desc = tx.notes.ifBlank { tx.title.ifBlank { tx.activityType } }
 
                 val settlementStr = when (tx.settlementType) {
@@ -3678,7 +3782,7 @@ object ReportExporter {
             }
 
             sb.appendLine("${if (isArabic) "إجمالي العمليات المعروضة" else "Total Operations"}: ${transactions.size}")
-            sb.appendLine("${if (isArabic) "إجمالي مبالغ العمليات" else "Total Amount"}: ${AppCurrency.formatAmountWithDecimals(transactions.sumOf { it.amount }, isArabic)}")
+            sb.appendLine("${if (isArabic) "إجمالي مبالغ العمليات" else "Total Amount"}: ${AppCurrency.formatAmountWithDecimals(activeCustTotalAmount, isArabic)}")
             sb.appendLine()
 
             // Final Balance & Totals
@@ -3686,9 +3790,9 @@ object ReportExporter {
             sb.appendLine(if (isArabic) "الرصيد والحساب النهائي للعميل" else "FINAL CUSTOMER BALANCE & TOTALS")
             sb.appendLine(sepDouble)
             sb.appendLine("${if (isArabic) "الرصيد المستحق" else "Outstanding Balance"}: ${AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)}")
-            sb.appendLine("${if (isArabic) "مشتريات كاش" else "Cash Purchases"}: ${AppCurrency.formatAmountWithDecimals(totalCash, isArabic)}")
-            sb.appendLine("${if (isArabic) "مشتريات آجل" else "Debt Purchases"}: ${AppCurrency.formatAmountWithDecimals(totalDebt, isArabic)}")
-            sb.appendLine("${if (isArabic) "إجمالي المسدد" else "Total Payments"}: ${AppCurrency.formatAmountWithDecimals(totalPayments, isArabic)}")
+            sb.appendLine("${if (isArabic) "مشتريات كاش" else "Cash Purchases"}: ${AppCurrency.formatAmountWithDecimals(resolvedCash, isArabic)}")
+            sb.appendLine("${if (isArabic) "مشتريات آجل" else "Debt Purchases"}: ${AppCurrency.formatAmountWithDecimals(resolvedDebt, isArabic)}")
+            sb.appendLine("${if (isArabic) "إجمالي المسدد" else "Total Payments"}: ${AppCurrency.formatAmountWithDecimals(resolvedPayments, isArabic)}")
         }
         sb.appendLine(sepDouble)
 

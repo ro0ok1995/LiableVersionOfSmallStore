@@ -72,6 +72,7 @@ import com.example.model.LanguageMode
 import com.example.model.SettlementType
 import com.example.model.StoreStrings
 import com.example.model.TransactionItem
+import com.example.accounting.FinancialReportCalculator
 import com.example.ui.components.CustomerSearchField
 import com.example.ui.theme.GeoOutline
 import com.example.ui.theme.GeoOutlineVariant
@@ -114,15 +115,18 @@ fun AccountsScreen(
         else pool.filter { it.customerName.lowercase().contains(q) || it.phone.contains(q) }
     }
 
-    val sortedAccounts = remember(accounts, sortOption, transactions) {
+    val customerCashTotals = remember(transactions) {
+        transactions.groupBy { it.customerId }.mapValues { (_, txs) ->
+            FinancialReportCalculator.calculate(txs).cashSales
+        }
+    }
+
+    val sortedAccounts = remember(accounts, sortOption, customerCashTotals) {
         when (sortOption) {
             AccountSortOption.DEFAULT -> accounts
             AccountSortOption.HIGHEST_DEBT -> accounts.sortedByDescending { it.balance }
             AccountSortOption.HIGHEST_CASH -> accounts.sortedByDescending { customer ->
-                transactions.filter {
-                    it.customerId == customer.id && !it.isCredit &&
-                    (it.activityType.contains("شراء كاش") || it.activityType.contains("Cash") || (!it.activityType.contains("تسديد") && !it.activityType.contains("Payment")))
-                }.sumOf { it.amount }
+                customerCashTotals[customer.id] ?: 0.0
             }
         }
     }

@@ -88,6 +88,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.AnalyticsExportDataPreparer
+import com.example.accounting.FinancialReportCalculator
+import com.example.model.TransactionType
+import com.example.model.SaleType
+import com.example.model.typedSaleType
+import com.example.model.typedTransactionType
 import com.example.model.AnalyticsReportData
 import com.example.model.AnalyticsReportScope
 import com.example.model.AppCurrency
@@ -874,26 +879,13 @@ private fun StatisticsTabContent(
         }
     }
 
-    val totalCashSales = remember(filteredTransactions) {
-        filteredTransactions
-            .filter { !it.isCredit && (it.activityType.contains("كاش") || it.activityType.contains("Cash") || (!it.activityType.contains("تسديد") && !it.activityType.contains("Payment"))) }
-            .sumOf { it.amount }
+    val statisticsBreakdown = remember(filteredTransactions) {
+        FinancialReportCalculator.calculate(filteredTransactions)
     }
-    val totalDebtSales = remember(filteredTransactions) {
-        filteredTransactions
-            .filter { it.isCredit || it.activityType.contains("آجل") || it.activityType.contains("دين") }
-            .sumOf { it.amount }
-    }
-    val fullSettlementAmount = remember(filteredTransactions) {
-        filteredTransactions
-            .filter { (it.activityType.contains("تسديد") || it.activityType.contains("Payment")) && (it.settlementType == SettlementType.FULL || it.settlementType == null) }
-            .sumOf { it.amount }
-    }
-    val partialSettlementAmount = remember(filteredTransactions) {
-        filteredTransactions
-            .filter { (it.activityType.contains("تسديد") || it.activityType.contains("Payment")) && it.settlementType == SettlementType.PARTIAL }
-            .sumOf { it.amount }
-    }
+    val totalCashSales = statisticsBreakdown.cashSales
+    val totalDebtSales = statisticsBreakdown.creditSales
+    val fullSettlementAmount = statisticsBreakdown.fullSettlementAmount
+    val partialSettlementAmount = statisticsBreakdown.partialSettlementAmount
     val totalPaymentsReceived = fullSettlementAmount + partialSettlementAmount
     val totalSales = totalCashSales + totalDebtSales
     val netBalance = totalDebtSales - totalPaymentsReceived
@@ -1995,20 +1987,32 @@ private fun ReportsTabContent(
     val sum90Plus = storeAgingSummary.sum90Plus
 
     // 2. SALES_AND_ITEMS calculations
+    val salesBreakdown = remember(periodTransactions) {
+        FinancialReportCalculator.calculate(periodTransactions)
+    }
     val cashSalesInvoices = remember(periodTransactions) {
         periodTransactions.filter { tx ->
-            !tx.isCredit && (tx.activityType.contains("كاش") || tx.activityType.contains("Cash") || (!tx.activityType.contains("تسديد") && !tx.activityType.contains("Payment") && !tx.activityType.contains("آجل") && !tx.activityType.contains("دين") && !tx.activityType.contains("Debt")))
+            val saleType = tx.typedSaleType
+            val txType = tx.typedTransactionType
+            (txType == TransactionType.SALE && (saleType == SaleType.CASH || saleType == SaleType.MIXED || tx.paidAmount > 0.0 || (!tx.isCredit && tx.creditAmount == 0.0))) ||
+            (!tx.isCredit && (tx.activityType.contains("كاش") || tx.activityType.contains("Cash") || (!tx.activityType.contains("تسديد") && !tx.activityType.contains("Payment") && !tx.activityType.contains("آجل") && !tx.activityType.contains("دين") && !tx.activityType.contains("Debt"))))
         }
     }
     val debtSalesInvoices = remember(periodTransactions) {
         periodTransactions.filter { tx ->
-            tx.isCredit || tx.activityType.contains("آجل") || tx.activityType.contains("دين") || tx.activityType.contains("Debt") || tx.activityType.contains("شراء بالدين")
+            val saleType = tx.typedSaleType
+            val txType = tx.typedTransactionType
+            (txType == TransactionType.SALE && (saleType == SaleType.CREDIT || saleType == SaleType.MIXED || tx.creditAmount > 0.0 || tx.isCredit)) ||
+            (tx.isCredit || tx.activityType.contains("آجل") || tx.activityType.contains("دين") || tx.activityType.contains("Debt") || tx.activityType.contains("شراء بالدين"))
         }
     }
-    val totalCashSalesAmount = remember(cashSalesInvoices) { cashSalesInvoices.sumOf { it.amount } }
-    val totalDebtSalesAmount = remember(debtSalesInvoices) { debtSalesInvoices.sumOf { it.amount } }
-    val totalSalesAmount = remember(totalCashSalesAmount, totalDebtSalesAmount) { totalCashSalesAmount + totalDebtSalesAmount }
-    val totalInvoicesCount = remember(cashSalesInvoices, debtSalesInvoices) { cashSalesInvoices.size + debtSalesInvoices.size }
+    val totalCashSalesAmount = salesBreakdown.cashSales
+    val totalDebtSalesAmount = salesBreakdown.creditSales
+    val totalSalesAmount = salesBreakdown.totalSales
+    val totalInvoicesCount = remember(periodTransactions, cashSalesInvoices, debtSalesInvoices) {
+        val sales = periodTransactions.filter { it.typedTransactionType == TransactionType.SALE }
+        if (sales.isNotEmpty()) sales.size else (cashSalesInvoices + debtSalesInvoices).distinctBy { it.id }.size
+    }
 
     val itemBreakdowns = remember(periodTransactions, transactionLines) {
         val periodTxIds = periodTransactions.map { it.id }.toSet()
@@ -2034,15 +2038,9 @@ private fun ReportsTabContent(
 
     // 3. TRANSACTIONS calculations
     val sortedTransactions = remember(periodTransactions) { periodTransactions.sortedByDescending { it.date } }
-    val totalTxCash = remember(periodTransactions) {
-        periodTransactions.filter { !it.isCredit && (it.activityType.contains("كاش") || it.activityType.contains("Cash") || (!it.activityType.contains("تسديد") && !it.activityType.contains("Payment") && !it.activityType.contains("آجل") && !it.activityType.contains("دين") && !it.activityType.contains("Debt"))) }.sumOf { it.amount }
-    }
-    val totalTxDebt = remember(periodTransactions) {
-        periodTransactions.filter { it.isCredit || it.activityType.contains("آجل") || it.activityType.contains("دين") || it.activityType.contains("Debt") || it.activityType.contains("شراء بالدين") }.sumOf { it.amount }
-    }
-    val totalTxPayments = remember(periodTransactions) {
-        periodTransactions.filter { it.activityType.contains("تسديد") || it.activityType.contains("Payment") }.sumOf { it.amount }
-    }
+    val totalTxCash = salesBreakdown.cashSales
+    val totalTxDebt = salesBreakdown.creditSales
+    val totalTxPayments = salesBreakdown.customerPayments
 
     // 4. COMPREHENSIVE_CUSTOMER calculations (Phase 2: Persistent customer identity)
     val selectedCustomer = uiState.selectedCustomer
@@ -2052,15 +2050,12 @@ private fun ReportsTabContent(
             tx.customerId == selectedCustomer.id
         }.sortedByDescending { it.date }
     }
-    val customerCashPurchases = remember(customerTransactions) {
-        customerTransactions.filter { !it.isCredit && (it.activityType.contains("كاش") || it.activityType.contains("Cash") || (!it.activityType.contains("تسديد") && !it.activityType.contains("Payment") && !it.activityType.contains("آجل") && !it.activityType.contains("دين") && !it.activityType.contains("Debt"))) }.sumOf { it.amount }
+    val customerBreakdown = remember(customerTransactions) {
+        FinancialReportCalculator.calculate(customerTransactions)
     }
-    val customerDebtPurchases = remember(customerTransactions) {
-        customerTransactions.filter { it.isCredit || it.activityType.contains("آجل") || it.activityType.contains("دين") || it.activityType.contains("Debt") || it.activityType.contains("شراء بالدين") }.sumOf { it.amount }
-    }
-    val customerPayments = remember(customerTransactions) {
-        customerTransactions.filter { it.activityType.contains("تسديد") || it.activityType.contains("Payment") }.sumOf { it.amount }
-    }
+    val customerCashPurchases = customerBreakdown.cashSales
+    val customerDebtPurchases = customerBreakdown.creditSales
+    val customerPayments = customerBreakdown.customerPayments
     val singleCustomerAging = remember(selectedCustomer, allTransactions, isArabic) {
         if (selectedCustomer == null) null
         else DebtAgingUtils.calculateCustomerAging(selectedCustomer, allTransactions, isArabic = isArabic)
@@ -2162,12 +2157,27 @@ private fun ReportsTabContent(
             }
             ReportType.TRANSACTIONS -> {
                 sortedTransactions.map { tx ->
-                    val typeLabel = if (tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")) {
-                        if (isArabic) "تسديد (دفعة)" else "Payment"
-                    } else if (tx.isCredit || tx.activityType.contains("آجل") || tx.activityType.contains("دين") || tx.activityType.contains("Debt") || tx.activityType.contains("شراء بالدين")) {
-                        if (isArabic) "شراء آجل (دين)" else "Debt Purchase"
-                    } else {
-                        if (isArabic) "شراء نقدي (كاش)" else "Cash Purchase"
+                    val txType = tx.typedTransactionType
+                    val saleType = tx.typedSaleType
+                    val typeLabel = when (txType) {
+                        TransactionType.CUSTOMER_PAYMENT -> if (isArabic) "تسديد (دفعة)" else "Payment"
+                        TransactionType.SALE -> when (saleType) {
+                            SaleType.CASH -> if (isArabic) "شراء نقدي (كاش)" else "Cash Purchase"
+                            SaleType.CREDIT -> if (isArabic) "شراء آجل (دين)" else "Debt Purchase"
+                            SaleType.MIXED -> if (isArabic) "شراء مختلط" else "Mixed Purchase"
+                            null -> if (tx.isCredit) (if (isArabic) "شراء آجل (دين)" else "Debt Purchase") else (if (isArabic) "شراء نقدي (كاش)" else "Cash Purchase")
+                        }
+                        TransactionType.SALE_RETURN -> if (isArabic) "مرتجع مبيعات" else "Sale Return"
+                        TransactionType.CUSTOMER_REFUND -> if (isArabic) "استرداد نقدي" else "Customer Refund"
+                        TransactionType.BALANCE_ADJUSTMENT -> if (isArabic) "تعديل رصيد" else "Balance Adjustment"
+                        TransactionType.REVERSAL -> if (isArabic) "إلغاء معاملة" else "Reversal"
+                        else -> if (tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")) {
+                            if (isArabic) "تسديد (دفعة)" else "Payment"
+                        } else if (tx.isCredit || tx.activityType.contains("آجل") || tx.activityType.contains("دين") || tx.activityType.contains("Debt") || tx.activityType.contains("شراء بالدين")) {
+                            if (isArabic) "شراء آجل (دين)" else "Debt Purchase"
+                        } else {
+                            if (isArabic) "شراء نقدي (كاش)" else "Cash Purchase"
+                        }
                     }
                     ReportPreviewRow(
                         col1 = tx.date,
@@ -2181,12 +2191,27 @@ private fun ReportsTabContent(
                 if (selectedCustomer == null) emptyList()
                 else customerTransactions.map { tx ->
                     val desc = tx.notes.ifBlank { tx.activityType }
-                    val typeLabel = if (tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")) {
-                        if (isArabic) "تسديد" else "Payment"
-                    } else if (tx.isCredit || tx.activityType.contains("آجل") || tx.activityType.contains("دين") || tx.activityType.contains("Debt") || tx.activityType.contains("شراء بالدين")) {
-                        if (isArabic) "شراء آجل" else "Debt"
-                    } else {
-                        if (isArabic) "شراء كاش" else "Cash"
+                    val txType = tx.typedTransactionType
+                    val saleType = tx.typedSaleType
+                    val typeLabel = when (txType) {
+                        TransactionType.CUSTOMER_PAYMENT -> if (isArabic) "تسديد" else "Payment"
+                        TransactionType.SALE -> when (saleType) {
+                            SaleType.CASH -> if (isArabic) "شراء كاش" else "Cash"
+                            SaleType.CREDIT -> if (isArabic) "شراء آجل" else "Debt"
+                            SaleType.MIXED -> if (isArabic) "شراء مختلط" else "Mixed"
+                            null -> if (tx.isCredit) (if (isArabic) "شراء آجل" else "Debt") else (if (isArabic) "شراء كاش" else "Cash")
+                        }
+                        TransactionType.SALE_RETURN -> if (isArabic) "مرتجع" else "Return"
+                        TransactionType.CUSTOMER_REFUND -> if (isArabic) "استرداد" else "Refund"
+                        TransactionType.BALANCE_ADJUSTMENT -> if (isArabic) "تعديل رصيد" else "Adjustment"
+                        TransactionType.REVERSAL -> if (isArabic) "إلغاء" else "Reversal"
+                        else -> if (tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")) {
+                            if (isArabic) "تسديد" else "Payment"
+                        } else if (tx.isCredit || tx.activityType.contains("آجل") || tx.activityType.contains("دين") || tx.activityType.contains("Debt") || tx.activityType.contains("شراء بالدين")) {
+                            if (isArabic) "شراء آجل" else "Debt"
+                        } else {
+                            if (isArabic) "شراء كاش" else "Cash"
+                        }
                     }
                     ReportPreviewRow(
                         col1 = tx.date,
@@ -2616,7 +2641,7 @@ private fun ReportsTabContent(
                                 subtitle = if (isArabic) "الفترة: $periodLabel" else "Period: $periodLabel",
                                 kpis = exportKpis,
                                 itemBreakdowns = itemBreakdowns,
-                                invoices = (cashSalesInvoices + debtSalesInvoices).sortedByDescending { it.date },
+                                invoices = (cashSalesInvoices + debtSalesInvoices).distinctBy { it.id }.sortedByDescending { it.date },
                                 isArabic = isArabic
                             )
                         } else if (uiState.selectedReportType == ReportType.TRANSACTIONS) {
@@ -2693,7 +2718,7 @@ private fun ReportsTabContent(
                                 subtitle = if (isArabic) "الفترة: $periodLabel" else "Period: $periodLabel",
                                 kpis = exportKpis,
                                 itemBreakdowns = itemBreakdowns,
-                                invoices = (cashSalesInvoices + debtSalesInvoices).sortedByDescending { it.date },
+                                invoices = (cashSalesInvoices + debtSalesInvoices).distinctBy { it.id }.sortedByDescending { it.date },
                                 isArabic = isArabic
                             )
                         } else if (uiState.selectedReportType == ReportType.TRANSACTIONS) {
@@ -2761,7 +2786,7 @@ private fun ReportsTabContent(
                                 subtitle = if (isArabic) "الفترة: $periodLabel" else "Period: $periodLabel",
                                 kpis = exportKpis,
                                 itemBreakdowns = itemBreakdowns,
-                                invoices = (cashSalesInvoices + debtSalesInvoices).sortedByDescending { it.date },
+                                invoices = (cashSalesInvoices + debtSalesInvoices).distinctBy { it.id }.sortedByDescending { it.date },
                                 isArabic = isArabic
                             )
                         } else if (uiState.selectedReportType == ReportType.TRANSACTIONS) {

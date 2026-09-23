@@ -169,22 +169,12 @@ object AnalyticsExportDataPreparer {
             )
         }
 
-        // 3. Exact calculations matching StatisticsTabContent lines 866-896
-        val totalCashSales = filteredTransactions
-            .filter { !it.isCredit && (it.activityType.contains("كاش") || it.activityType.contains("Cash") || (!it.activityType.contains("تسديد") && !it.activityType.contains("Payment"))) }
-            .sumOf { it.amount }
-
-        val totalDebtSales = filteredTransactions
-            .filter { it.isCredit || it.activityType.contains("آجل") || it.activityType.contains("دين") }
-            .sumOf { it.amount }
-
-        val fullSettlementAmount = filteredTransactions
-            .filter { (it.activityType.contains("تسديد") || it.activityType.contains("Payment")) && (it.settlementType == SettlementType.FULL || it.settlementType == null) }
-            .sumOf { it.amount }
-
-        val partialSettlementAmount = filteredTransactions
-            .filter { (it.activityType.contains("تسديد") || it.activityType.contains("Payment")) && it.settlementType == SettlementType.PARTIAL }
-            .sumOf { it.amount }
+        // 3. Exact calculations using unified FinancialReportCalculator
+        val breakdown = FinancialReportCalculator.calculate(filteredTransactions)
+        val totalCashSales = breakdown.cashSales
+        val totalDebtSales = breakdown.creditSales
+        val fullSettlementAmount = breakdown.fullSettlementAmount
+        val partialSettlementAmount = breakdown.partialSettlementAmount
 
         val totalPaymentsReceived = fullSettlementAmount + partialSettlementAmount
         val totalSales = totalCashSales + totalDebtSales
