@@ -83,6 +83,7 @@ import coil.request.ImageRequest
 import com.example.model.AppCurrency
 import com.example.model.LanguageMode
 import com.example.model.ProductItem
+import com.example.accounting.ProductStockSummary
 import com.example.ui.theme.GeoOutline
 import com.example.ui.theme.GeoOutlineVariant
 import com.example.ui.theme.GeoPrimary
@@ -111,6 +112,8 @@ fun ProductManagementScreen(
     onUpdateProduct: (ProductItem) -> Unit,
     onArchiveProduct: (String) -> Unit,
     onUnarchiveProduct: (String) -> Unit,
+    productStockMap: Map<String, ProductStockSummary> = emptyMap(),
+    onRecordStockAdjustment: ((productId: String, delta: Int, reason: String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
@@ -123,6 +126,7 @@ fun ProductManagementScreen(
     var showAddDialog by remember { mutableStateOf(false) }
     var productToEdit by remember { mutableStateOf<ProductItem?>(null) }
     var productToArchive by remember { mutableStateOf<ProductItem?>(null) }
+    var productToAdjust by remember { mutableStateOf<ProductItem?>(null) }
 
     val activeProducts = remember(products, archivedProductIds) {
         products.filter { it.id !in archivedProductIds }
@@ -458,13 +462,16 @@ fun ProductManagementScreen(
                     key = { it.id }
                 ) { product ->
                     val isArchived = product.id in archivedProductIds
+                    val stockSummary = productStockMap[product.id]
                     ProductCardItem(
                         product = product,
                         isArchived = isArchived,
                         isArabic = isArabic,
+                        stockSummary = stockSummary,
                         onEditClick = { productToEdit = product },
                         onArchiveClick = { productToArchive = product },
-                        onRestoreClick = { onUnarchiveProduct(product.id) }
+                        onRestoreClick = { onUnarchiveProduct(product.id) },
+                        onAdjustStockClick = { productToAdjust = product }
                     )
                 }
                 item {
@@ -576,6 +583,90 @@ fun ProductManagementScreen(
             shape = RoundedCornerShape(16.dp)
         )
     }
+
+    // Physical Inventory Adjustment Dialog
+    if (productToAdjust != null) {
+        val currentStock = productStockMap[productToAdjust!!.id]?.quantityOnHand ?: 0
+        var deltaText by remember { mutableStateOf("") }
+        var isAddition by remember { mutableStateOf(true) }
+        var reasonText by remember { mutableStateOf("") }
+        var errorMsg by remember { mutableStateOf<String?>(null) }
+
+        AlertDialog(
+            onDismissRequest = { productToAdjust = null },
+            title = {
+                Text(
+                    text = if (isArabic) "تسوية مخزون: ${productToAdjust!!.name}" else "Inventory Adjustment: ${productToAdjust!!.name}",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = if (isArabic) "المخزون المحسوب حالياً: $currentStock" else "Current Ledger Stock: $currentStock",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = isAddition,
+                            onClick = { isAddition = true },
+                            label = { Text(if (isArabic) "زيادة (+)" else "Add (+)") }
+                        )
+                        FilterChip(
+                            selected = !isAddition,
+                            onClick = { isAddition = false },
+                            label = { Text(if (isArabic) "عجز / خصم (-)" else "Reduce (-)") }
+                        )
+                    }
+                    OutlinedTextField(
+                        value = deltaText,
+                        onValueChange = { deltaText = it; errorMsg = null },
+                        label = { Text(if (isArabic) "الكمية" else "Quantity") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("input_adjust_stock_qty")
+                    )
+                    OutlinedTextField(
+                        value = reasonText,
+                        onValueChange = { reasonText = it; errorMsg = null },
+                        label = { Text(if (isArabic) "السبب / البيان" else "Reason") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("input_adjust_stock_reason")
+                    )
+                    if (errorMsg != null) {
+                        Text(errorMsg!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val qty = deltaText.toIntOrNull() ?: 0
+                        if (qty <= 0) {
+                            errorMsg = if (isArabic) "يرجى إدخال كمية صحيحة أكبر من صفر" else "Please enter a valid quantity > 0"
+                            return@Button
+                        }
+                        if (reasonText.isBlank()) {
+                            errorMsg = if (isArabic) "السبب مطلوب" else "Reason is required"
+                            return@Button
+                        }
+                        val signedDelta = if (isAddition) qty else -qty
+                        onRecordStockAdjustment?.invoke(productToAdjust!!.id, signedDelta, reasonText.trim())
+                        productToAdjust = null
+                    },
+                    modifier = Modifier.testTag("btn_confirm_adjust_stock")
+                ) {
+                    Text(if (isArabic) "تأكيد التسوية" else "Confirm Adjustment")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { productToAdjust = null }) {
+                    Text(if (isArabic) "إلغاء" else "Cancel")
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -583,9 +674,11 @@ private fun ProductCardItem(
     product: ProductItem,
     isArchived: Boolean,
     isArabic: Boolean,
+    stockSummary: ProductStockSummary? = null,
     onEditClick: () -> Unit,
     onArchiveClick: () -> Unit,
     onRestoreClick: () -> Unit,
+    onAdjustStockClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -733,8 +826,34 @@ private fun ProductCardItem(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Status Badge
-                if (isArchived) {
+                // Status & Stock Badges
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val stockQty = stockSummary?.quantityOnHand ?: 0
+                    Surface(
+                        color = if (stockQty > 0) StatusGreenBg else StatusAmberBg,
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier
+                            .border(
+                                1.dp,
+                                if (stockQty > 0) StatusGreen.copy(alpha = 0.3f) else StatusAmber.copy(alpha = 0.3f),
+                                RoundedCornerShape(6.dp)
+                            )
+                            .clickable(enabled = onAdjustStockClick != null) { onAdjustStockClick?.invoke() }
+                            .testTag("stock_badge_${product.id}")
+                    ) {
+                        Text(
+                            text = if (isArabic) "المخزون: $stockQty" else "Stock: $stockQty",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (stockQty > 0) StatusGreen else StatusAmber,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+
+                    if (isArchived) {
                     Surface(
                         color = StatusAmberBg,
                         shape = RoundedCornerShape(6.dp),
@@ -782,6 +901,7 @@ private fun ProductCardItem(
                             )
                         }
                     }
+                }
                 }
 
                 // Action Buttons

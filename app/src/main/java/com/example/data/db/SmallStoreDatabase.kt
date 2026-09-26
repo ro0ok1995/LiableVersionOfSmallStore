@@ -17,9 +17,26 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         StoreInfoEntity::class,
         CustomerIdentityConflictEntity::class,
         Sale::class,
-        SaleLine::class
+        SaleLine::class,
+        FinancialAccount::class,
+        PaymentMethod::class,
+        CustomerPayment::class,
+        OpeningBalance::class,
+        Adjustment::class,
+        Reversal::class,
+        SaleReturn::class,
+        SaleReturnLine::class,
+        Refund::class,
+        Supplier::class,
+        Purchase::class,
+        PurchaseLine::class,
+        SupplierPayment::class,
+        PurchaseReturn::class,
+        ExpenseCategory::class,
+        Expense::class,
+        PurchaseReturnLine::class
     ],
-    version = 8,
+    version = 16,
     exportSchema = false
 )
 abstract class SmallStoreDatabase : RoomDatabase() {
@@ -31,6 +48,23 @@ abstract class SmallStoreDatabase : RoomDatabase() {
     abstract fun storeInfoDao(): StoreInfoDao
     abstract fun customerConflictDao(): CustomerConflictDao
     abstract fun saleDao(): SaleDao
+    abstract fun financialAccountDao(): FinancialAccountDao
+    abstract fun paymentMethodDao(): PaymentMethodDao
+    abstract fun customerPaymentDao(): CustomerPaymentDao
+    abstract fun openingBalanceDao(): OpeningBalanceDao
+    abstract fun adjustmentDao(): AdjustmentDao
+    abstract fun reversalDao(): ReversalDao
+    abstract fun saleReturnDao(): SaleReturnDao
+    abstract fun saleReturnLineDao(): SaleReturnLineDao
+    abstract fun refundDao(): RefundDao
+    abstract fun supplierDao(): SupplierDao
+    abstract fun purchaseDao(): PurchaseDao
+    abstract fun purchaseLineDao(): PurchaseLineDao
+    abstract fun supplierPaymentDao(): SupplierPaymentDao
+    abstract fun purchaseReturnDao(): PurchaseReturnDao
+    abstract fun purchaseReturnLineDao(): PurchaseReturnLineDao
+    abstract fun expenseCategoryDao(): ExpenseCategoryDao
+    abstract fun expenseDao(): ExpenseDao
 
     companion object {
         @Volatile
@@ -75,7 +109,15 @@ abstract class SmallStoreDatabase : RoomDatabase() {
                         MIGRATION_4_5,
                         MIGRATION_5_6,
                         MIGRATION_6_7,
-                        MIGRATION_7_8
+                        MIGRATION_7_8,
+                        MIGRATION_8_9,
+                        MIGRATION_9_10,
+                        MIGRATION_10_11,
+                        MIGRATION_11_12,
+                        MIGRATION_12_13,
+                        MIGRATION_13_14,
+                        MIGRATION_14_15,
+                        MIGRATION_15_16
                     )
                     .build()
                 INSTANCE = instance

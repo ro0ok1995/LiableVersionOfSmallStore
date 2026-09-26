@@ -6,10 +6,12 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.example.model.CustomerAccount
 import com.example.model.NotificationItem
+import com.example.model.OperationStatus
 import com.example.model.ProductItem
 import com.example.model.SettlementType
 import com.example.model.StoreInfo
 import com.example.model.TransactionItem
+import com.example.model.typedOperationStatus
 
 @Entity(tableName = "customers")
 data class CustomerEntity(
@@ -75,7 +77,8 @@ data class TransactionEntity(
     val customerName: String = customerNameSnapshot,
     val transactionDate: String = date,
     val paidAmount: Double = 0.0,
-    val creditAmount: Double = 0.0
+    val creditAmount: Double = 0.0,
+    val operationStatus: String = "ACTIVE"
 ) {
     @androidx.room.Ignore
     @Deprecated("Legacy constructor for backward compatibility. Use customerNameSnapshot.")
@@ -252,6 +255,7 @@ fun ProductItem.toEntity(): ProductEntity = ProductEntity(
 
 fun TransactionEntity.toModel(): TransactionItem {
     val snapshot = customerNameSnapshot.ifBlank { customerName }
+    val opStatus = if (operationStatus == "REVERSED") OperationStatus.REVERSED else OperationStatus.ACTIVE
     return TransactionItem(
         id = id,
         title = title,
@@ -268,7 +272,8 @@ fun TransactionEntity.toModel(): TransactionItem {
         archivedDate = archivedDate,
         customerName = snapshot,
         paidAmount = paidAmount,
-        creditAmount = creditAmount
+        creditAmount = creditAmount,
+        operationStatus = opStatus
     )
 }
 
@@ -291,7 +296,8 @@ fun TransactionItem.toEntity(): TransactionEntity {
         customerName = snapshot,
         transactionDate = date,
         paidAmount = paidAmount,
-        creditAmount = creditAmount
+        creditAmount = creditAmount,
+        operationStatus = (operationStatus ?: typedOperationStatus).name
     )
 }
 

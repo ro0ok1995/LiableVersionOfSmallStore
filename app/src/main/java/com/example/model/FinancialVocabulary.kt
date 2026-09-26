@@ -109,6 +109,16 @@ enum class PaymentMethodType {
 }
 
 // -----------------------------------------------------------------------------
+// 5b. ENTITY TYPE (Opening Balances & Accounting Entities)
+// -----------------------------------------------------------------------------
+enum class EntityType {
+    CUSTOMER,
+    SUPPLIER,
+    FINANCIAL_ACCOUNT,
+    PRODUCT
+}
+
+// -----------------------------------------------------------------------------
 // 6. FINANCIAL IDENTITY & REAL TIMESTAMP CONTRACT
 // -----------------------------------------------------------------------------
 /**

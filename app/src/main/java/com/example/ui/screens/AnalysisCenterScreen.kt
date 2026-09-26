@@ -1855,6 +1855,21 @@ private fun StatementRowCard(
                                 )
                             }
                         }
+                        if (row.isReversed) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(4.dp),
+                                modifier = Modifier.testTag("reversed_badge_${row.id}")
+                            ) {
+                                Text(
+                                    text = if (isArabic) "ملغي" else "Reversed",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
                     }
                     Text(
                         text = "${row.date} • ${row.description}",

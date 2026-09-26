@@ -1,6 +1,11 @@
 package com.example.accounting
 
+import com.example.data.db.Adjustment
+import com.example.data.db.CustomerPayment
+import com.example.data.db.OpeningBalance
+import com.example.data.db.Refund
 import com.example.data.db.Sale
+import com.example.data.db.SaleReturn
 import com.example.model.OperationStatus
 import com.example.model.SaleType
 import com.example.model.TransactionItem
@@ -240,8 +245,176 @@ object CustomerLedgerCalculator {
     /**
      * Calculates customer balance summary directly from a list of [Sale] entities.
      */
-    fun calculateCustomerBalanceFromSales(customerId: String, sales: List<Sale>): CustomerBalanceSummary {
-        val entries = sales.mapNotNull { saleToLedgerEntry(customerId, it) }
+     fun calculateCustomerBalanceFromSales(customerId: String, sales: List<Sale>): CustomerBalanceSummary {
+         val entries = sales.mapNotNull { saleToLedgerEntry(customerId, it) }
+         return calculateSummaryFromEntries(customerId, entries)
+     }
+
+    /**
+     * Phase 4: Converts a first-class [CustomerPayment] entity directly into a [CustomerLedgerEntry].
+     * Status ACTIVE contributes to credit (reducing receivable).
+     * Status REVERSED is neutralized (0 contribution).
+     */
+    fun customerPaymentToLedgerEntry(customerId: String, payment: CustomerPayment): CustomerLedgerEntry? {
+        if (payment.customerId != customerId) return null
+        val status = if (payment.status == "REVERSED") OperationStatus.REVERSED else OperationStatus.ACTIVE
+
+        return CustomerLedgerEntry(
+            transactionId = payment.id,
+            customerId = customerId,
+            date = payment.transactionDate,
+            transactionType = TransactionType.CUSTOMER_PAYMENT,
+            debit = 0.0,
+            credit = payment.amount,
+            operationStatus = status,
+            isArchived = false,
+            description = payment.notes?.takeIf { it.isNotBlank() }
+                ?: payment.reference?.takeIf { it.isNotBlank() }
+                ?: "سداد دفعة"
+        )
+    }
+
+    /**
+     * Phase 5: Converts an [OpeningBalance] entity into a [CustomerLedgerEntry].
+     * Returns null if ob.entityType != "CUSTOMER" or ob.entityId != customerId.
+     * Direction "DEBIT" -> debit = ob.amount, credit = 0.0.
+     * Direction "CREDIT" -> debit = 0.0, credit = ob.amount.
+     * TransactionType = TransactionType.OPENING_BALANCE, operationStatus = OperationStatus.ACTIVE.
+     */
+    fun openingBalanceToLedgerEntry(customerId: String, ob: OpeningBalance): CustomerLedgerEntry? {
+        if (ob.entityType != "CUSTOMER" || ob.entityId != customerId) return null
+
+        val (debit, credit) = when (ob.direction) {
+            "DEBIT" -> Pair(ob.amount, 0.0)
+            "CREDIT" -> Pair(0.0, ob.amount)
+            else -> Pair(ob.amount, 0.0)
+        }
+
+        return CustomerLedgerEntry(
+            transactionId = ob.id,
+            customerId = customerId,
+            date = ob.date,
+            transactionType = TransactionType.OPENING_BALANCE,
+            debit = debit,
+            credit = credit,
+            operationStatus = OperationStatus.ACTIVE,
+            isArchived = false,
+            description = ob.reason?.takeIf { it.isNotBlank() }
+                ?: ob.reference?.takeIf { it.isNotBlank() }
+                ?: "رصيد افتتاحي"
+        )
+    }
+
+    /**
+     * Phase 6: Converts an [Adjustment] entity into a [CustomerLedgerEntry].
+     * Returns null if adjustment.entityType != "CUSTOMER" or adjustment.entityId != customerId.
+     * Direction "DEBIT" -> debit = adjustment.amount, credit = 0.0.
+     * Direction "CREDIT" -> debit = 0.0, credit = adjustment.amount.
+     * TransactionType = TransactionType.BALANCE_ADJUSTMENT, operationStatus = OperationStatus.ACTIVE.
+     */
+    fun adjustmentToLedgerEntry(customerId: String, adjustment: Adjustment): CustomerLedgerEntry? {
+        if (adjustment.entityType != "CUSTOMER" || adjustment.entityId != customerId) return null
+
+        val (debit, credit) = when (adjustment.direction) {
+            "DEBIT" -> Pair(adjustment.amount, 0.0)
+            "CREDIT" -> Pair(0.0, adjustment.amount)
+            else -> Pair(adjustment.amount, 0.0)
+        }
+
+        return CustomerLedgerEntry(
+            transactionId = adjustment.id,
+            customerId = customerId,
+            date = adjustment.date,
+            transactionType = TransactionType.BALANCE_ADJUSTMENT,
+            debit = debit,
+            credit = credit,
+            operationStatus = if (adjustment.status == "REVERSED") OperationStatus.REVERSED else OperationStatus.ACTIVE,
+            isArchived = false,
+            description = adjustment.reason.takeIf { it.isNotBlank() }
+                ?: adjustment.reference?.takeIf { it.isNotBlank() }
+                ?: "تعديل رصيد"
+        )
+    }
+
+    /**
+     * Phase 8: Converts a [SaleReturn] entity into a [CustomerLedgerEntry].
+     * Returns null if saleReturn.customerId != customerId.
+     * Sale return creates a credit (reducing receivable / debt).
+     * Status ACTIVE contributes to credit.
+     * Status REVERSED is neutralized (0 contribution).
+     */
+    fun saleReturnToLedgerEntry(customerId: String, saleReturn: SaleReturn): CustomerLedgerEntry? {
+        if (saleReturn.customerId != customerId) return null
+        val status = if (saleReturn.status == "REVERSED") OperationStatus.REVERSED else OperationStatus.ACTIVE
+
+        return CustomerLedgerEntry(
+            transactionId = saleReturn.id,
+            customerId = customerId,
+            date = saleReturn.returnDate,
+            transactionType = TransactionType.SALE_RETURN,
+            debit = 0.0,
+            credit = saleReturn.amount,
+            operationStatus = status,
+            isArchived = false,
+            description = saleReturn.reason.takeIf { it.isNotBlank() } ?: "مرتجع مبيعات"
+        )
+    }
+
+    /**
+     * Phase 8: Converts a [Refund] entity into a [CustomerLedgerEntry].
+     * Returns null if refund.customerId != customerId.
+     * A customer refund creates a debit (offsets customer advance credit when cash/bank is returned to customer).
+     * Status ACTIVE contributes to debit.
+     * Status REVERSED is neutralized (0 contribution).
+     */
+    fun refundToLedgerEntry(customerId: String, refund: Refund): CustomerLedgerEntry? {
+        if (refund.customerId != customerId) return null
+        val status = if (refund.status == "REVERSED") OperationStatus.REVERSED else OperationStatus.ACTIVE
+
+        return CustomerLedgerEntry(
+            transactionId = refund.id,
+            customerId = customerId,
+            date = refund.refundDate,
+            transactionType = TransactionType.CUSTOMER_REFUND,
+            debit = refund.amount,
+            credit = 0.0,
+            operationStatus = status,
+            isArchived = false,
+            description = refund.reason.takeIf { it.isNotBlank() } ?: "استرداد نقدي"
+        )
+    }
+
+    /**
+     * Phase 4, 5, 6 & 8: Calculates customer balance summary directly from [Sale]s, [CustomerPayment]s,
+     * [OpeningBalance]s, [Adjustment]s, [SaleReturn]s, and [Refund]s.
+     * Subtracts customer_payments and sale_returns (status=ACTIVE) from receivable balance.
+     * Integrates opening balance debit/credit into openingBalance component.
+     * Integrates adjustments into debitAdjustments / creditAdjustments.
+     * Integrates refunds into customer debt/settlement component.
+     */
+    fun calculateCustomerBalance(
+        customerId: String,
+        sales: List<Sale>,
+        payments: List<CustomerPayment> = emptyList(),
+        openingBalances: List<OpeningBalance> = emptyList(),
+        adjustments: List<Adjustment> = emptyList(),
+        saleReturns: List<SaleReturn> = emptyList(),
+        refunds: List<Refund> = emptyList()
+    ): CustomerBalanceSummary {
+        val saleEntries = sales.mapNotNull { saleToLedgerEntry(customerId, it) }
+        val paymentEntries = payments.mapNotNull { customerPaymentToLedgerEntry(customerId, it) }
+        val openingEntries = openingBalances.mapNotNull { openingBalanceToLedgerEntry(customerId, it) }
+        val adjustmentEntries = adjustments.mapNotNull { adjustmentToLedgerEntry(customerId, it) }
+        val returnEntries = saleReturns.mapNotNull { saleReturnToLedgerEntry(customerId, it) }
+        val refundEntries = refunds.mapNotNull { refundToLedgerEntry(customerId, it) }
+        return calculateSummaryFromEntries(customerId, openingEntries + saleEntries + paymentEntries + adjustmentEntries + returnEntries + refundEntries)
+    }
+
+    /**
+     * Phase 4: Calculates customer balance summary directly from [CustomerPayment] entities.
+     */
+    fun calculateCustomerBalanceFromPayments(customerId: String, payments: List<CustomerPayment>): CustomerBalanceSummary {
+        val entries = payments.mapNotNull { customerPaymentToLedgerEntry(customerId, it) }
         return calculateSummaryFromEntries(customerId, entries)
     }
 }

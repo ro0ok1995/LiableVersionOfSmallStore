@@ -45,7 +45,8 @@ data class StatementRow(
     val isCreditDebt: Boolean = false,
     val amount: Double,
     val runningBalance: Double,
-    val isArchived: Boolean = false
+    val isArchived: Boolean = false,
+    val isReversed: Boolean = false
 )
 
 data class ReportPreviewRow(

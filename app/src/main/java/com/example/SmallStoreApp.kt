@@ -273,7 +273,22 @@ fun SmallStoreApp(
                                     onOpenCustomDatePicker = { mainViewModel.openHomeCustomDatePicker() },
                                     onDismissCustomDatePicker = { mainViewModel.dismissHomeCustomDatePicker() },
                                     onSetCustomDateRange = { start, end -> mainViewModel.setHomeCustomDateRange(start, end) },
-                                    onActivityClick = { tx -> mainViewModel.navigateToCustomerProfileFromActivity(tx) }
+                                    onActivityClick = { tx -> mainViewModel.navigateToCustomerProfileFromActivity(tx) },
+                                    onReverseTransaction = { tx, reason -> mainViewModel.reverseTransaction(tx.id, reason) },
+                                    onReturnTransaction = { tx, lines, reason, refundReq ->
+                                        mainViewModel.recordSaleReturn(
+                                            saleId = tx.id,
+                                            returnLines = lines,
+                                            reason = reason,
+                                            refundRequest = refundReq
+                                        )
+                                    },
+                                    onLoadReturnDetails = { saleId ->
+                                        val sale = mainViewModel.getSaleById(saleId)
+                                        val lines = mainViewModel.getSaleLinesForSale(saleId)
+                                        val returnable = mainViewModel.getRemainingReturnableQuantities(saleId)
+                                        Triple(sale, lines, returnable)
+                                    }
                                 )
                             }
 
@@ -343,6 +358,19 @@ fun SmallStoreApp(
                                     onArchiveCustomer = { customer ->
                                         mainViewModel.archiveCustomer(customer.id)
                                         mainViewModel.navigateBackFromCustomerDetails()
+                                    },
+                                    onRecordAdjustment = { direction, amount, date, reason, reference ->
+                                        val cust = uiState.accountsSelectedCustomerDetails
+                                        if (cust != null) {
+                                            mainViewModel.recordCustomerAdjustment(
+                                                customerId = cust.id,
+                                                amount = amount,
+                                                direction = direction,
+                                                date = date,
+                                                reason = reason,
+                                                reference = reference
+                                            )
+                                        }
                                     }
                                 )
                             }
@@ -380,6 +408,13 @@ fun SmallStoreApp(
                                     searchQuery = uiState.purchasesSearchQuery,
                                     isCartExpanded = uiState.isCartExpanded,
                                     languageMode = uiState.languageMode,
+                                    suppliers = uiState.suppliers,
+                                    supplierPurchases = uiState.purchases,
+                                    supplierPayments = uiState.supplierPayments,
+                                    expenses = uiState.expenses,
+                                    expenseCategories = uiState.expenseCategories,
+                                    financialAccounts = uiState.financialAccounts,
+                                    paymentMethods = uiState.paymentMethods,
                                     onBackClick = {
                                         focusManager.clearFocus()
                                         mainViewModel.navigateTo(NavDestination.HOME)
@@ -392,7 +427,31 @@ fun SmallStoreApp(
                                     onSelectCustomer = { mainViewModel.setPurchasesCustomer(it) },
                                     onClearCustomer = { mainViewModel.setPurchasesCustomer(null) },
                                     onCompleteTransaction = { mainViewModel.openPurchasesSettlement() },
-                                    onCompleteTransactionWithItems = { items -> mainViewModel.openPurchasesSettlement(items) }
+                                    onCompleteTransactionWithItems = { items -> mainViewModel.openPurchasesSettlement(items) },
+                                    onAddSupplier = { name, phone, address, notes, onComplete ->
+                                        mainViewModel.addSupplier(name, phone, address, notes, onComplete)
+                                    },
+                                    onRecordPurchase = { supplierId, lines, paid, acc, notes, date, onComplete ->
+                                        mainViewModel.recordPurchase(supplierId, lines, paid, acc, notes, date, onComplete)
+                                    },
+                                    onRecordSupplierPayment = { supplierId, amount, date, acc, notes, onComplete ->
+                                        mainViewModel.recordSupplierPayment(supplierId, amount, date, acc, notes, onComplete)
+                                    },
+                                    onRecordPurchaseReturn = { purchaseId, amount, reason, date, onComplete ->
+                                        mainViewModel.recordPurchaseReturn(purchaseId, amount, reason, date, onComplete)
+                                    },
+                                    onRecordExpense = { catId, amt, accId, pmId, dt, desc, onComp ->
+                                        mainViewModel.recordExpense(catId, amt, accId, pmId, dt, desc, onComp)
+                                    },
+                                    onAddExpenseCategory = { name, desc, onComp ->
+                                        mainViewModel.addExpenseCategory(name, desc, onComp)
+                                    },
+                                    onGetSupplierBalance = { supplierId ->
+                                        mainViewModel.getSupplierBalance(supplierId)
+                                    },
+                                    onGetSupplierStatement = { supplierId ->
+                                        mainViewModel.getSupplierStatement(supplierId)
+                                    }
                                 )
                             }
 
@@ -573,6 +632,10 @@ fun SmallStoreApp(
                                     },
                                     onUnarchiveProduct = { productId ->
                                         mainViewModel.unarchiveProduct(productId)
+                                    },
+                                    productStockMap = uiState.productStockMap,
+                                    onRecordStockAdjustment = { productId, delta, reason ->
+                                        mainViewModel.recordInventoryAdjustment(productId, delta, reason)
                                     }
                                 )
                             }

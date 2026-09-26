@@ -160,6 +160,9 @@ interface TransactionDao {
     @Query("UPDATE transactions SET customerId = :customerId WHERE id = :transactionId")
     suspend fun updateTransactionCustomerId(transactionId: String, customerId: String?)
 
+    @Query("UPDATE transactions SET operationStatus = :status WHERE id = :id")
+    suspend fun updateTransactionOperationStatus(id: String, status: String)
+
     @Deprecated(
         message = "Direct deletion of financial transactions violates the Accounting Golden Rule (ledger immutability).",
         level = DeprecationLevel.WARNING
@@ -365,6 +368,12 @@ interface SaleDao {
     @Query("SELECT * FROM sale_lines WHERE saleId = :saleId ORDER BY createdAt ASC, id ASC")
     fun getSaleLinesBySaleIdFlow(saleId: String): Flow<List<SaleLine>>
 
+    @Query("SELECT * FROM sale_lines WHERE productId = :productId ORDER BY createdAt ASC, id ASC")
+    suspend fun getSaleLinesByProductId(productId: String): List<SaleLine>
+
+    @Query("SELECT * FROM sale_lines ORDER BY createdAt ASC, id ASC")
+    suspend fun getAllSaleLinesSync(): List<SaleLine>
+
     @Update
     suspend fun updateSale(sale: Sale)
 
@@ -374,5 +383,273 @@ interface SaleDao {
     @Query("DELETE FROM sale_lines")
     suspend fun deleteAllSaleLines()
 }
+
+@Dao
+interface FinancialAccountDao {
+    @Query("SELECT * FROM financial_accounts WHERE isActive = 1 ORDER BY name ASC")
+    fun getActiveAccounts(): Flow<List<FinancialAccount>>
+
+    @Query("SELECT * FROM financial_accounts ORDER BY name ASC")
+    fun getAllAccounts(): Flow<List<FinancialAccount>>
+
+    @Query("SELECT * FROM financial_accounts ORDER BY name ASC")
+    suspend fun getAllAccountsSync(): List<FinancialAccount>
+
+    @Query("SELECT * FROM financial_accounts WHERE id = :id LIMIT 1")
+    suspend fun getAccountById(id: String): FinancialAccount?
+
+    @Query("SELECT COUNT(*) FROM financial_accounts")
+    suspend fun getAccountCount(): Int
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertAccount(account: FinancialAccount)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAccounts(accounts: List<FinancialAccount>)
+
+    @Update
+    suspend fun updateAccount(account: FinancialAccount)
+
+    @Query("DELETE FROM financial_accounts")
+    suspend fun deleteAllAccounts()
+}
+
+@Dao
+interface PaymentMethodDao {
+    @Query("SELECT * FROM payment_methods WHERE isActive = 1 ORDER BY name ASC")
+    fun getActivePaymentMethods(): Flow<List<PaymentMethod>>
+
+    @Query("SELECT * FROM payment_methods ORDER BY name ASC")
+    fun getAllPaymentMethods(): Flow<List<PaymentMethod>>
+
+    @Query("SELECT * FROM payment_methods ORDER BY name ASC")
+    suspend fun getAllPaymentMethodsSync(): List<PaymentMethod>
+
+    @Query("SELECT * FROM payment_methods WHERE id = :id LIMIT 1")
+    suspend fun getPaymentMethodById(id: String): PaymentMethod?
+
+    @Query("SELECT COUNT(*) FROM payment_methods")
+    suspend fun getPaymentMethodCount(): Int
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertPaymentMethod(paymentMethod: PaymentMethod)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPaymentMethods(methods: List<PaymentMethod>)
+
+    @Update
+    suspend fun updatePaymentMethod(paymentMethod: PaymentMethod)
+
+    @Query("DELETE FROM payment_methods")
+    suspend fun deleteAllPaymentMethods()
+}
+
+@Dao
+interface CustomerPaymentDao {
+    @Query("SELECT * FROM customer_payments ORDER BY transactionDate DESC, createdAt DESC, id DESC")
+    fun getAllPayments(): Flow<List<CustomerPayment>>
+
+    @Query("SELECT * FROM customer_payments ORDER BY transactionDate DESC, createdAt DESC, id DESC")
+    suspend fun getAllPaymentsSync(): List<CustomerPayment>
+
+    @Query("SELECT * FROM customer_payments WHERE customerId = :customerId ORDER BY transactionDate DESC, createdAt DESC")
+    fun getPaymentsByCustomerId(customerId: String): Flow<List<CustomerPayment>>
+
+    @Query("SELECT * FROM customer_payments WHERE customerId = :customerId ORDER BY transactionDate DESC, createdAt DESC")
+    suspend fun getPaymentsByCustomerIdSync(customerId: String): List<CustomerPayment>
+
+    @Query("SELECT * FROM customer_payments WHERE id = :id LIMIT 1")
+    suspend fun getPaymentById(id: String): CustomerPayment?
+
+    @Query("SELECT COUNT(*) FROM customer_payments")
+    suspend fun getPaymentCount(): Int
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertPayment(payment: CustomerPayment)
+
+    @Update
+    suspend fun updatePayment(payment: CustomerPayment)
+
+    @Query("DELETE FROM customer_payments")
+    suspend fun deleteAllPayments()
+}
+
+@Dao
+interface OpeningBalanceDao {
+    @Query("SELECT * FROM opening_balances ORDER BY date DESC, createdAt DESC, id DESC")
+    fun getAllOpeningBalances(): Flow<List<OpeningBalance>>
+
+    @Query("SELECT * FROM opening_balances ORDER BY date DESC, createdAt DESC, id DESC")
+    suspend fun getAllOpeningBalancesSync(): List<OpeningBalance>
+
+    @Query("SELECT * FROM opening_balances WHERE entityType = :entityType AND entityId = :entityId ORDER BY date DESC, createdAt DESC")
+    fun getOpeningBalancesByEntity(entityType: String, entityId: String): Flow<List<OpeningBalance>>
+
+    @Query("SELECT * FROM opening_balances WHERE entityType = :entityType AND entityId = :entityId ORDER BY date DESC, createdAt DESC")
+    suspend fun getOpeningBalancesByEntitySync(entityType: String, entityId: String): List<OpeningBalance>
+
+    @Query("SELECT * FROM opening_balances WHERE id = :id LIMIT 1")
+    suspend fun getOpeningBalanceById(id: String): OpeningBalance?
+
+    @Query("SELECT COUNT(*) FROM opening_balances")
+    suspend fun getOpeningBalanceCount(): Int
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertOpeningBalance(openingBalance: OpeningBalance)
+
+    @Update
+    suspend fun updateOpeningBalance(openingBalance: OpeningBalance)
+
+    @Query("DELETE FROM opening_balances WHERE id = :id")
+    suspend fun deleteOpeningBalance(id: String)
+
+    @Query("DELETE FROM opening_balances")
+    suspend fun deleteAllOpeningBalances()
+}
+
+@Dao
+interface AdjustmentDao {
+    @Query("SELECT * FROM adjustments ORDER BY date DESC, createdAt DESC, id DESC")
+    fun getAllAdjustments(): Flow<List<Adjustment>>
+
+    @Query("SELECT * FROM adjustments ORDER BY date DESC, createdAt DESC, id DESC")
+    suspend fun getAllAdjustmentsSync(): List<Adjustment>
+
+    @Query("SELECT * FROM adjustments WHERE entityType = :entityType AND entityId = :entityId ORDER BY date DESC, createdAt DESC")
+    fun getAdjustmentsByEntity(entityType: String, entityId: String): Flow<List<Adjustment>>
+
+    @Query("SELECT * FROM adjustments WHERE entityType = :entityType AND entityId = :entityId ORDER BY date DESC, createdAt DESC")
+    suspend fun getAdjustmentsByEntitySync(entityType: String, entityId: String): List<Adjustment>
+
+    @Query("SELECT * FROM adjustments WHERE id = :id LIMIT 1")
+    suspend fun getAdjustmentById(id: String): Adjustment?
+
+    @Query("SELECT COUNT(*) FROM adjustments")
+    suspend fun getAdjustmentCount(): Int
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertAdjustment(adjustment: Adjustment)
+
+    @Update
+    suspend fun updateAdjustment(adjustment: Adjustment)
+}
+
+@Dao
+interface ReversalDao {
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertReversal(reversal: Reversal)
+
+    @Query("SELECT * FROM reversals WHERE originalTransactionId = :originalTransactionId LIMIT 1")
+    suspend fun getReversalByOriginalTransactionId(originalTransactionId: String): Reversal?
+
+    @Query("SELECT * FROM reversals WHERE id = :id LIMIT 1")
+    suspend fun getReversalById(id: String): Reversal?
+
+    @Query("SELECT * FROM reversals ORDER BY reversedAt DESC, id DESC")
+    fun getAllReversals(): Flow<List<Reversal>>
+
+    @Query("SELECT * FROM reversals ORDER BY reversedAt DESC, id DESC")
+    suspend fun getAllReversalsSync(): List<Reversal>
+
+    @Query("SELECT COUNT(*) FROM reversals WHERE originalTransactionId = :originalTransactionId AND status = 'ACTIVE'")
+    suspend fun getActiveReversalCount(originalTransactionId: String): Int
+}
+
+@Dao
+interface SaleReturnDao {
+    @Query("SELECT * FROM sale_returns ORDER BY returnDate DESC, createdAt DESC")
+    fun getAllReturns(): Flow<List<SaleReturn>>
+
+    @Query("SELECT * FROM sale_returns ORDER BY returnDate DESC, createdAt DESC")
+    suspend fun getAllReturnsSync(): List<SaleReturn>
+
+    @Query("SELECT * FROM sale_returns WHERE id = :id LIMIT 1")
+    suspend fun getReturnById(id: String): SaleReturn?
+
+    @Query("SELECT * FROM sale_returns WHERE saleId = :saleId ORDER BY returnDate DESC, createdAt DESC")
+    fun getReturnsBySaleId(saleId: String): Flow<List<SaleReturn>>
+
+    @Query("SELECT * FROM sale_returns WHERE saleId = :saleId ORDER BY returnDate DESC, createdAt DESC")
+    suspend fun getReturnsBySaleIdSync(saleId: String): List<SaleReturn>
+
+    @Query("SELECT * FROM sale_returns WHERE customerId = :customerId ORDER BY returnDate DESC, createdAt DESC")
+    fun getReturnsByCustomerId(customerId: String): Flow<List<SaleReturn>>
+
+    @Query("SELECT * FROM sale_returns WHERE customerId = :customerId ORDER BY returnDate DESC, createdAt DESC")
+    suspend fun getReturnsByCustomerIdSync(customerId: String): List<SaleReturn>
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertReturn(saleReturn: SaleReturn)
+
+    @Update
+    suspend fun updateReturn(saleReturn: SaleReturn)
+
+    @Query("UPDATE sale_returns SET status = :status WHERE id = :id")
+    suspend fun updateReturnStatus(id: String, status: String)
+
+    @Query("DELETE FROM sale_returns")
+    suspend fun deleteAllReturns()
+}
+
+@Dao
+interface SaleReturnLineDao {
+    @Query("SELECT * FROM sale_return_lines WHERE saleReturnId = :returnId")
+    suspend fun getLinesForReturn(returnId: String): List<SaleReturnLine>
+
+    @Query("SELECT * FROM sale_return_lines WHERE saleLineId = :saleLineId")
+    suspend fun getReturnLinesForSaleLine(saleLineId: String): List<SaleReturnLine>
+
+    @Query("SELECT * FROM sale_return_lines WHERE saleLineId IN (:saleLineIds)")
+    suspend fun getReturnLinesForSaleLines(saleLineIds: List<String>): List<SaleReturnLine>
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertReturnLines(lines: List<SaleReturnLine>)
+
+    @Query("SELECT * FROM sale_return_lines WHERE productId = :productId ORDER BY createdAt ASC, id ASC")
+    suspend fun getLinesByProductId(productId: String): List<SaleReturnLine>
+
+    @Query("SELECT * FROM sale_return_lines ORDER BY createdAt ASC, id ASC")
+    suspend fun getAllLinesSync(): List<SaleReturnLine>
+
+    @Query("DELETE FROM sale_return_lines")
+    suspend fun deleteAllReturnLines()
+}
+
+@Dao
+interface RefundDao {
+    @Query("SELECT * FROM refunds ORDER BY refundDate DESC, createdAt DESC")
+    fun getAllRefunds(): Flow<List<Refund>>
+
+    @Query("SELECT * FROM refunds ORDER BY refundDate DESC, createdAt DESC")
+    suspend fun getAllRefundsSync(): List<Refund>
+
+    @Query("SELECT * FROM refunds WHERE id = :id LIMIT 1")
+    suspend fun getRefundById(id: String): Refund?
+
+    @Query("SELECT * FROM refunds WHERE saleReturnId = :saleReturnId")
+    suspend fun getRefundsByReturnId(saleReturnId: String): List<Refund>
+
+    @Query("SELECT * FROM refunds WHERE saleId = :saleId")
+    suspend fun getRefundsBySaleId(saleId: String): List<Refund>
+
+    @Query("SELECT * FROM refunds WHERE customerId = :customerId ORDER BY refundDate DESC, createdAt DESC")
+    fun getRefundsByCustomerId(customerId: String): Flow<List<Refund>>
+
+    @Query("SELECT * FROM refunds WHERE customerId = :customerId ORDER BY refundDate DESC, createdAt DESC")
+    suspend fun getRefundsByCustomerIdSync(customerId: String): List<Refund>
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertRefund(refund: Refund)
+
+    @Update
+    suspend fun updateRefund(refund: Refund)
+
+    @Query("UPDATE refunds SET status = :status WHERE id = :id")
+    suspend fun updateRefundStatus(id: String, status: String)
+
+    @Query("DELETE FROM refunds")
+    suspend fun deleteAllRefunds()
+}
+
 
 

@@ -90,7 +90,10 @@ data class FinancialReportTotals(
     val totalReversedVolume: Double = 0.0,
     val fullSettlementAmount: Double = 0.0,
     val partialSettlementAmount: Double = 0.0
-)
+) {
+    val netSales: Double
+        get() = totalSales - saleReturns
+}
 
 object FinancialReportCalculator {
 

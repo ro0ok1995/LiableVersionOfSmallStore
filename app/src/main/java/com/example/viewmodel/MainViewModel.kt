@@ -9,8 +9,26 @@ import com.example.data.backup.BackupManager
 import com.example.data.backup.BackupPayload
 import com.example.data.db.Sale
 import com.example.data.db.SaleLine
+import com.example.data.db.SaleReturn
+import com.example.data.db.SaleReturnLine
+import com.example.data.db.Refund
+import com.example.data.db.Reversal
+import com.example.data.db.Supplier
+import com.example.data.db.Purchase
+import com.example.data.db.PurchaseLine
+import com.example.data.db.SupplierPayment
+import com.example.data.db.PurchaseReturn
+import com.example.data.db.ExpenseCategory
+import com.example.data.db.Expense
+import com.example.data.db.FinancialAccount
+import com.example.data.db.PaymentMethod
+import com.example.data.db.Adjustment
 import com.example.data.db.TransactionItemLineEntity
 import com.example.data.repository.StoreRepository
+import com.example.accounting.SupplierBalanceSummary
+import com.example.accounting.SupplierLedgerEntry
+import com.example.accounting.InventoryMovementEntry
+import com.example.accounting.ProductStockSummary
 import com.example.model.AccountFilter
 import com.example.model.AppThemeMode
 import com.example.model.CartItem
@@ -21,6 +39,11 @@ import com.example.model.NavDestination
 import com.example.model.NotificationItem
 import com.example.model.PeriodFilter
 import com.example.model.ProductItem
+import com.example.model.PurchaseLineRequest
+import com.example.model.PurchaseResult
+import com.example.model.RefundRequest
+import com.example.model.SaleReturnLineRequest
+import com.example.model.SaleReturnResult
 import com.example.model.SampleData
 import com.example.model.SettlementType
 import com.example.model.StoreInfo
@@ -71,6 +94,15 @@ data class MainUiState(
     val transactionLines: List<com.example.data.db.TransactionItemLineEntity> = emptyList(),
     val unresolvedCustomerConflicts: List<CustomerConflictItem> = emptyList(),
     val unresolvedConflictCount: Int = 0,
+    val suppliers: List<Supplier> = emptyList(),
+    val purchases: List<Purchase> = emptyList(),
+    val supplierPayments: List<SupplierPayment> = emptyList(),
+    val expenseCategories: List<ExpenseCategory> = emptyList(),
+    val expenses: List<Expense> = emptyList(),
+    val financialAccounts: List<FinancialAccount> = emptyList(),
+    val paymentMethods: List<PaymentMethod> = emptyList(),
+    val productStockMap: Map<String, ProductStockSummary> = emptyMap(),
+    val totalInventoryValuation: Double = 0.0,
 
     // Archive conflict resolution state
     val pendingArchiveConflict: ArchiveConflict? = null,
@@ -208,6 +240,66 @@ class MainViewModel @JvmOverloads constructor(
         viewModelScope.launch {
             repository.storeInfo.collect { info ->
                 _uiState.update { it.copy(storeInfo = info) }
+            }
+        }
+
+        viewModelScope.launch {
+            repository.allSuppliers.collect { list ->
+                _uiState.update { it.copy(suppliers = list) }
+            }
+        }
+
+        viewModelScope.launch {
+            repository.allPurchases.collect { list ->
+                _uiState.update { it.copy(purchases = list) }
+            }
+        }
+
+        viewModelScope.launch {
+            repository.allSupplierPayments.collect { list ->
+                _uiState.update { it.copy(supplierPayments = list) }
+            }
+        }
+
+        viewModelScope.launch {
+            repository.allExpenseCategories.collect { list ->
+                _uiState.update { it.copy(expenseCategories = list) }
+            }
+        }
+
+        viewModelScope.launch {
+            repository.allExpenses.collect { list ->
+                _uiState.update { it.copy(expenses = list) }
+            }
+        }
+
+        viewModelScope.launch {
+            repository.allFinancialAccounts.collect { list ->
+                _uiState.update { it.copy(financialAccounts = list) }
+            }
+        }
+
+        viewModelScope.launch {
+            repository.allPaymentMethods.collect { list ->
+                _uiState.update { it.copy(paymentMethods = list) }
+            }
+        }
+
+        viewModelScope.launch {
+            repository.allProducts.collect {
+                refreshInventory()
+            }
+        }
+
+        viewModelScope.launch {
+            repository.allPurchases.collect {
+                refreshInventory()
+            }
+        }
+
+        viewModelScope.launch {
+            repository.allSales.collect {
+                refreshInventory()
             }
         }
     }
@@ -419,6 +511,324 @@ class MainViewModel @JvmOverloads constructor(
     fun updateCustomer(customer: CustomerAccount) {
         viewModelScope.launch {
             repository.updateCustomer(customer)
+        }
+    }
+
+    /**
+     * Phase 6: Records a documented accounting adjustment for a customer.
+     * Enforces that the customer's balance is derived through the Customer Ledger
+     * rather than directly mutating the stored balance.
+     */
+    fun recordCustomerAdjustment(
+        customerId: String,
+        amount: Double,
+        direction: String,
+        date: String,
+        reason: String,
+        reference: String? = null
+    ) {
+        viewModelScope.launch {
+            repository.recordAdjustment(
+                entityType = "CUSTOMER",
+                entityId = customerId,
+                amount = amount,
+                direction = direction,
+                date = date,
+                reason = reason,
+                reference = reference
+            )
+        }
+    }
+
+    // Phase 7: Reversal Engine
+    fun reverseTransaction(
+        originalTransactionId: String,
+        reason: String,
+        onComplete: (Result<Reversal>) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                val reversal = repository.reverseTransaction(originalTransactionId, reason)
+                onComplete(Result.success(reversal))
+            } catch (e: Exception) {
+                onComplete(Result.failure(e))
+            }
+        }
+    }
+
+    // Phase 8: Returns & Refunds
+    fun recordSaleReturn(
+        saleId: String,
+        returnLines: List<SaleReturnLineRequest>,
+        reason: String,
+        returnDate: String = getCurrentDateString(),
+        refundRequest: RefundRequest? = null,
+        onComplete: (Result<SaleReturnResult>) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                val result = repository.recordSaleReturn(
+                    saleId = saleId,
+                    returnLines = returnLines,
+                    reason = reason,
+                    returnDate = returnDate,
+                    refundRequest = refundRequest
+                )
+                onComplete(Result.success(result))
+            } catch (e: Exception) {
+                onComplete(Result.failure(e))
+            }
+        }
+    }
+
+    suspend fun getRemainingReturnableQuantities(saleId: String): Map<String, Int> {
+        return repository.getRemainingReturnableQuantities(saleId)
+    }
+
+    suspend fun getSaleLinesForSale(saleId: String): List<SaleLine> {
+        return repository.getSaleLines(saleId)
+    }
+
+    suspend fun getReturnsForSale(saleId: String): List<SaleReturn> {
+        return repository.getReturnsForSale(saleId)
+    }
+
+    suspend fun getSaleById(saleId: String): Sale? {
+        return repository.getSaleById(saleId)
+    }
+
+    // Phase 9: Suppliers & Purchases
+    fun addSupplier(
+        name: String,
+        phone: String = "",
+        address: String? = null,
+        notes: String? = null,
+        onComplete: (Result<Supplier>) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                val supplier = Supplier(
+                    id = "sup_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(6)}",
+                    name = name.trim(),
+                    phone = phone.trim(),
+                    address = address?.trim(),
+                    notes = notes?.trim(),
+                    isArchived = false
+                )
+                val inserted = repository.insertSupplier(supplier)
+                onComplete(Result.success(inserted))
+            } catch (e: Exception) {
+                onComplete(Result.failure(e))
+            }
+        }
+    }
+
+    fun recordPurchase(
+        supplierId: String,
+        lines: List<PurchaseLineRequest>,
+        paidAmount: Double = 0.0,
+        financialAccountId: String? = null,
+        notes: String? = null,
+        purchaseDate: String = getCurrentDateString(),
+        onComplete: (Result<PurchaseResult>) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                val result = repository.recordPurchase(
+                    supplierId = supplierId,
+                    lines = lines,
+                    purchaseDate = purchaseDate,
+                    paidAmount = paidAmount,
+                    financialAccountId = financialAccountId,
+                    notes = notes
+                )
+                onComplete(Result.success(result))
+            } catch (e: Exception) {
+                onComplete(Result.failure(e))
+            }
+        }
+    }
+
+    fun recordSupplierPayment(
+        supplierId: String,
+        amount: Double,
+        paymentDate: String = getCurrentDateString(),
+        financialAccountId: String? = null,
+        notes: String? = null,
+        onComplete: (Result<SupplierPayment>) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                val result = repository.recordSupplierPayment(
+                    supplierId = supplierId,
+                    amount = amount,
+                    paymentDate = paymentDate,
+                    financialAccountId = financialAccountId,
+                    notes = notes
+                )
+                onComplete(Result.success(result))
+            } catch (e: Exception) {
+                onComplete(Result.failure(e))
+            }
+        }
+    }
+
+    fun recordPurchaseReturn(
+        purchaseId: String,
+        amount: Double,
+        reason: String,
+        returnDate: String = getCurrentDateString(),
+        onComplete: (Result<PurchaseReturn>) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                val result = repository.recordPurchaseReturn(
+                    purchaseId = purchaseId,
+                    amount = amount,
+                    reason = reason,
+                    returnDate = returnDate
+                )
+                onComplete(Result.success(result))
+            } catch (e: Exception) {
+                onComplete(Result.failure(e))
+            }
+        }
+    }
+
+    suspend fun getSupplierBalance(supplierId: String): SupplierBalanceSummary {
+        return repository.getSupplierBalance(supplierId)
+    }
+
+    suspend fun getSupplierStatement(supplierId: String): List<SupplierLedgerEntry> {
+        return repository.getSupplierStatement(supplierId)
+    }
+
+    suspend fun getPurchaseLines(purchaseId: String): List<PurchaseLine> {
+        return repository.getPurchaseLines(purchaseId)
+    }
+
+    suspend fun getPurchasesForSupplier(supplierId: String): List<Purchase> {
+        return repository.getPurchasesForSupplier(supplierId)
+    }
+
+    suspend fun getPaymentsForSupplier(supplierId: String): List<SupplierPayment> {
+        return repository.getPaymentsForSupplier(supplierId)
+    }
+
+    // EXPENSES (Phase 10 Core)
+    fun addExpenseCategory(
+        name: String,
+        description: String? = null,
+        onComplete: (Result<ExpenseCategory>) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                val catId = "exp_cat_${System.currentTimeMillis()}"
+                val category = ExpenseCategory(
+                    id = catId,
+                    name = name.trim(),
+                    description = description?.trim(),
+                    isActive = true
+                )
+                val inserted = repository.insertExpenseCategory(category)
+                onComplete(Result.success(inserted))
+            } catch (e: Exception) {
+                onComplete(Result.failure(e))
+            }
+        }
+    }
+
+    fun insertExpenseCategory(
+        category: ExpenseCategory,
+        onComplete: (Result<ExpenseCategory>) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                val inserted = repository.insertExpenseCategory(category)
+                onComplete(Result.success(inserted))
+            } catch (e: Exception) {
+                onComplete(Result.failure(e))
+            }
+        }
+    }
+
+    fun recordExpense(
+        categoryId: String,
+        amount: Double,
+        financialAccountId: String,
+        paymentMethodId: String? = null,
+        date: String? = null,
+        description: String,
+        onComplete: (Result<Expense>) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                val expense = repository.recordExpense(
+                    categoryId = categoryId,
+                    amount = amount,
+                    financialAccountId = financialAccountId,
+                    paymentMethodId = paymentMethodId,
+                    date = date,
+                    description = description
+                )
+                onComplete(Result.success(expense))
+            } catch (e: Exception) {
+                onComplete(Result.failure(e))
+            }
+        }
+    }
+
+    suspend fun getFinancialAccountBalance(accountId: String): Double {
+        return repository.getFinancialAccountBalance(accountId)
+    }
+
+    suspend fun getAllExpenseCategories(): List<ExpenseCategory> {
+        return repository.getAllExpenseCategoriesSync()
+    }
+
+    suspend fun getAllExpenses(): List<Expense> {
+        return repository.getAllExpensesSync()
+    }
+
+    // INVENTORY (Phase 11 Core)
+    fun refreshInventory() {
+        viewModelScope.launch {
+            try {
+                val stockMap = repository.getAllProductsStock()
+                val valuation = repository.getTotalInventoryValuation()
+                _uiState.update {
+                    it.copy(
+                        productStockMap = stockMap,
+                        totalInventoryValuation = valuation
+                    )
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    suspend fun getProductStock(productId: String): ProductStockSummary {
+        return repository.getProductStock(productId)
+    }
+
+    suspend fun getInventoryStatement(productId: String): List<InventoryMovementEntry> {
+        return repository.getInventoryStatement(productId)
+    }
+
+    fun recordInventoryAdjustment(
+        productId: String,
+        quantityDelta: Int,
+        reason: String,
+        date: String? = null,
+        onComplete: (Result<Adjustment>) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                val adj = repository.recordInventoryAdjustment(productId, quantityDelta, reason, date)
+                refreshInventory()
+                onComplete(Result.success(adj))
+            } catch (e: Exception) {
+                onComplete(Result.failure(e))
+            }
         }
     }
 

@@ -616,49 +616,7 @@ class AnalysisCenterViewModel : ViewModel() {
      * 5. Customer payments and merchandise returns decrease customer receivable.
      * 6. Archived-but-not-reversed transactions continue to contribute to the balance.
      */
-    fun getTransactionReceivableImpact(tx: TransactionItem): Double {
-        // Reversed transactions have ZERO financial impact on customer balance
-        if (tx.typedOperationStatus == OperationStatus.REVERSED) {
-            return 0.0
-        }
-
-        val type = tx.typedTransactionType
-        return when (type) {
-            TransactionType.SALE -> {
-                when (tx.typedSaleType) {
-                    SaleType.CASH -> 0.0
-                    SaleType.CREDIT -> if (tx.creditAmount > 0.0) tx.creditAmount else tx.amount
-                    SaleType.MIXED -> {
-                        when {
-                            tx.creditAmount > 0.0 -> tx.creditAmount
-                            tx.paidAmount > 0.0 -> (tx.amount - tx.paidAmount).coerceAtLeast(0.0)
-                            else -> tx.amount
-                        }
-                    }
-                    null -> {
-                        if (tx.creditAmount > 0.0) {
-                            tx.creditAmount
-                        } else if (tx.paidAmount > 0.0 && tx.isCredit) {
-                            (tx.amount - tx.paidAmount).coerceAtLeast(0.0)
-                        } else if (tx.isCredit) {
-                            tx.amount
-                        } else {
-                            0.0
-                        }
-                    }
-                }
-            }
-            TransactionType.CUSTOMER_PAYMENT -> -tx.amount
-            TransactionType.SALE_RETURN -> -tx.amount
-            TransactionType.CUSTOMER_REFUND -> tx.amount
-            TransactionType.OPENING_BALANCE -> tx.amount
-            TransactionType.BALANCE_ADJUSTMENT -> if (tx.isCredit) tx.amount else -tx.amount
-            TransactionType.REVERSAL -> if (tx.isCredit) tx.amount else -tx.amount
-            else -> {
-                if (tx.isCredit) tx.amount else 0.0
-            }
-        }
-    }
+    fun getTransactionReceivableImpact(tx: TransactionItem): Double = Companion.getTransactionReceivableImpact(tx)
 
     /**
      * Helper to compute filtered statement rows with running balances.
@@ -756,6 +714,7 @@ class AnalysisCenterViewModel : ViewModel() {
 
             val isDebtPurchase = (tx.typedTransactionType == TransactionType.SALE &&
                 (tx.typedSaleType == SaleType.CREDIT || tx.typedSaleType == SaleType.MIXED || tx.isCredit)) ||
+                tx.typedTransactionType == TransactionType.CUSTOMER_REFUND ||
                 tx.creditAmount > 0.0 ||
                 tx.activityType.contains("آجل") || tx.activityType.contains("دين") || tx.activityType.contains("Debt")
 
@@ -773,7 +732,8 @@ class AnalysisCenterViewModel : ViewModel() {
                     isCreditDebt = isDebtPurchase,
                     amount = tx.amount,
                     runningBalance = running,
-                    isArchived = tx.isArchived
+                    isArchived = tx.isArchived,
+                    isReversed = (tx.typedOperationStatus == OperationStatus.REVERSED)
                 )
             )
         }
@@ -810,5 +770,51 @@ class AnalysisCenterViewModel : ViewModel() {
             isArabic = isArabic,
             today = today
         )
+    }
+
+    companion object {
+        fun getTransactionReceivableImpact(tx: TransactionItem): Double {
+            // Reversed transactions have ZERO financial impact on customer balance
+            if (tx.typedOperationStatus == OperationStatus.REVERSED) {
+                return 0.0
+            }
+
+            val type = tx.typedTransactionType
+            return when (type) {
+                TransactionType.SALE -> {
+                    when (tx.typedSaleType) {
+                        SaleType.CASH -> 0.0
+                        SaleType.CREDIT -> if (tx.creditAmount > 0.0) tx.creditAmount else tx.amount
+                        SaleType.MIXED -> {
+                            when {
+                                tx.creditAmount > 0.0 -> tx.creditAmount
+                                tx.paidAmount > 0.0 -> (tx.amount - tx.paidAmount).coerceAtLeast(0.0)
+                                else -> tx.amount
+                            }
+                        }
+                        null -> {
+                            if (tx.creditAmount > 0.0) {
+                                tx.creditAmount
+                            } else if (tx.paidAmount > 0.0 && tx.isCredit) {
+                                (tx.amount - tx.paidAmount).coerceAtLeast(0.0)
+                            } else if (tx.isCredit) {
+                                tx.amount
+                            } else {
+                                0.0
+                            }
+                        }
+                    }
+                }
+                TransactionType.CUSTOMER_PAYMENT -> -tx.amount
+                TransactionType.SALE_RETURN -> -tx.amount
+                TransactionType.CUSTOMER_REFUND -> tx.amount
+                TransactionType.OPENING_BALANCE -> tx.amount
+                TransactionType.BALANCE_ADJUSTMENT -> if (tx.isCredit) tx.amount else -tx.amount
+                TransactionType.REVERSAL -> if (tx.isCredit) tx.amount else -tx.amount
+                else -> {
+                    if (tx.isCredit) tx.amount else 0.0
+                }
+            }
+        }
     }
 }

@@ -50,6 +50,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -65,6 +67,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -83,12 +86,26 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.accounting.SupplierBalanceSummary
+import com.example.accounting.SupplierLedgerEntry
+import com.example.data.db.Purchase
+import com.example.data.db.PurchaseReturn
+import com.example.data.db.Supplier
+import com.example.data.db.SupplierPayment
 import com.example.model.AppCurrency
 import com.example.model.CartItem
 import com.example.model.CustomerAccount
 import com.example.model.LanguageMode
 import com.example.model.ProductItem
+import com.example.model.PurchaseLineRequest
+import com.example.model.PurchaseResult
 import com.example.model.StoreStrings
+import com.example.data.db.Expense
+import com.example.data.db.ExpenseCategory
+import com.example.data.db.FinancialAccount
+import com.example.data.db.PaymentMethod
+import com.example.ui.components.ExpensesSection
+import com.example.ui.components.SupplierPurchasesSection
 import com.example.ui.theme.GeoOutline
 import com.example.ui.theme.GeoOutlineVariant
 import com.example.ui.theme.GeoPrimary
@@ -109,6 +126,13 @@ fun PurchasesScreen(
     searchQuery: String = "",
     isCartExpanded: Boolean = false,
     languageMode: LanguageMode = LanguageMode.ARABIC,
+    suppliers: List<Supplier> = emptyList(),
+    supplierPurchases: List<Purchase> = emptyList(),
+    supplierPayments: List<SupplierPayment> = emptyList(),
+    expenses: List<Expense> = emptyList(),
+    expenseCategories: List<ExpenseCategory> = emptyList(),
+    financialAccounts: List<FinancialAccount> = emptyList(),
+    paymentMethods: List<PaymentMethod> = emptyList(),
     onBackClick: () -> Unit = {},
     onSearchQueryChange: (String) -> Unit = {},
     onAddToCart: (ProductItem) -> Unit = {},
@@ -119,6 +143,14 @@ fun PurchasesScreen(
     onClearCustomer: () -> Unit = {},
     onCompleteTransaction: () -> Unit = {},
     onCompleteTransactionWithItems: ((List<CartItem>) -> Unit)? = null,
+    onAddSupplier: (name: String, phone: String, address: String?, notes: String?, onComplete: (Result<Supplier>) -> Unit) -> Unit = { _, _, _, _, _ -> },
+    onRecordPurchase: (supplierId: String, lines: List<PurchaseLineRequest>, paidAmount: Double, financialAccountId: String?, notes: String?, date: String, onComplete: (Result<PurchaseResult>) -> Unit) -> Unit = { _, _, _, _, _, _, _ -> },
+    onRecordSupplierPayment: (supplierId: String, amount: Double, date: String, financialAccountId: String?, notes: String?, onComplete: (Result<SupplierPayment>) -> Unit) -> Unit = { _, _, _, _, _, _ -> },
+    onRecordPurchaseReturn: ((purchaseId: String, amount: Double, reason: String, date: String, onComplete: (Result<PurchaseReturn>) -> Unit) -> Unit)? = null,
+    onRecordExpense: (categoryId: String, amount: Double, financialAccountId: String, paymentMethodId: String?, date: String?, description: String, onComplete: (Result<Expense>) -> Unit) -> Unit = { _, _, _, _, _, _, _ -> },
+    onAddExpenseCategory: (name: String, description: String?, onComplete: (Result<ExpenseCategory>) -> Unit) -> Unit = { _, _, _ -> },
+    onGetSupplierBalance: (suspend (supplierId: String) -> SupplierBalanceSummary)? = null,
+    onGetSupplierStatement: (suspend (supplierId: String) -> List<SupplierLedgerEntry>)? = null,
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
@@ -127,6 +159,7 @@ fun PurchasesScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     var showCustomerPicker by remember { mutableStateOf(false) }
+    var activeSectionTab by remember { mutableIntStateOf(0) }
 
     val totalCartItems = cart.sumOf { it.quantity }
     val totalCartAmount = cart.sumOf { it.product.price * it.quantity }
@@ -142,39 +175,68 @@ fun PurchasesScreen(
                 color = MaterialTheme.colorScheme.surface,
                 shadowElevation = 1.dp
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = {
-                            focusManager.clearFocus()
-                            onBackClick()
-                        },
-                        modifier = Modifier.testTag("purchases_back_button")
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = if (isArabic) "رجوع" else "Back",
-                            tint = MaterialTheme.colorScheme.onSurface
+                        IconButton(
+                            onClick = {
+                                focusManager.clearFocus()
+                                onBackClick()
+                            },
+                            modifier = Modifier.testTag("purchases_back_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = if (isArabic) "رجوع" else "Back",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (isArabic) StoreStrings.PURCHASES_AR else StoreStrings.PURCHASES_EN,
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 20.sp
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.testTag("purchases_screen_title")
                         )
                     }
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = if (isArabic) StoreStrings.PURCHASES_AR else StoreStrings.PURCHASES_EN,
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 20.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.testTag("purchases_screen_title")
-                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = activeSectionTab == 0,
+                            onClick = { activeSectionTab = 0 },
+                            label = { Text(if (isArabic) "نقطة البيع (السلة)" else "POS Cart") },
+                            modifier = Modifier.testTag("tab_purchases_pos")
+                        )
+                        FilterChip(
+                            selected = activeSectionTab == 1,
+                            onClick = { activeSectionTab = 1 },
+                            label = { Text(if (isArabic) "مشتريات الموردين" else "Suppliers & Purchases") },
+                            modifier = Modifier.testTag("tab_purchases_suppliers")
+                        )
+                        FilterChip(
+                            selected = activeSectionTab == 2,
+                            onClick = { activeSectionTab = 2 },
+                            label = { Text(if (isArabic) "المصروفات" else "Expenses") },
+                            modifier = Modifier.testTag("tab_purchases_expenses")
+                        )
+                    }
                 }
             }
         },
         bottomBar = {
+            if (activeSectionTab == 0) {
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 shadowElevation = 8.dp,
@@ -399,8 +461,40 @@ fun PurchasesScreen(
                     }
                 }
             }
+            }
         }
     ) { innerPadding ->
+        if (activeSectionTab == 1) {
+            SupplierPurchasesSection(
+                suppliers = suppliers,
+                purchases = supplierPurchases,
+                supplierPayments = supplierPayments,
+                products = products,
+                languageMode = languageMode,
+                onAddSupplier = onAddSupplier,
+                onRecordPurchase = onRecordPurchase,
+                onRecordSupplierPayment = onRecordSupplierPayment,
+                onGetSupplierBalance = onGetSupplierBalance ?: { SupplierBalanceSummary(it) },
+                onGetSupplierStatement = onGetSupplierStatement ?: { emptyList() },
+                onRecordPurchaseReturn = onRecordPurchaseReturn,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            )
+        } else if (activeSectionTab == 2) {
+            ExpensesSection(
+                expenses = expenses,
+                expenseCategories = expenseCategories,
+                financialAccounts = financialAccounts,
+                paymentMethods = paymentMethods,
+                languageMode = languageMode,
+                onRecordExpense = onRecordExpense,
+                onAddExpenseCategory = onAddExpenseCategory,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            )
+        } else {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -524,6 +618,7 @@ fun PurchasesScreen(
                     }
                 }
             }
+        }
         }
     }
 

@@ -72,6 +72,58 @@ object LegacyAccountingBridge {
         "SALE"
     )
 
+    private val EXACT_LEGACY_ADJUSTMENT_TOKENS: Set<String> = setOf(
+        "BALANCE_ADJUSTMENT",
+        "تعديل رصيد",
+        "تعديل رصيد (+)",
+        "تعديل رصيد (-)",
+        "Adjustment",
+        "Balance Adjustment"
+    )
+
+    private val EXACT_LEGACY_SALE_RETURN_TOKENS: Set<String> = setOf(
+        "SALE_RETURN",
+        "مرتجع مبيعات",
+        "مرتجع",
+        "Sale Return",
+        "Return"
+    )
+
+    private val EXACT_LEGACY_REFUND_TOKENS: Set<String> = setOf(
+        "CUSTOMER_REFUND",
+        "استرداد نقدي",
+        "استرداد",
+        "Refund",
+        "Customer Refund"
+    )
+
+    private val EXACT_LEGACY_SUPPLIER_PURCHASE_TOKENS: Set<String> = setOf(
+        "PURCHASE",
+        "فاتورة مشتريات",
+        "مشتريات",
+        "Supplier Purchase"
+    )
+
+    private val EXACT_LEGACY_SUPPLIER_PAYMENT_TOKENS: Set<String> = setOf(
+        "SUPPLIER_PAYMENT",
+        "سداد مورد",
+        "دفعة مورد",
+        "Supplier Payment"
+    )
+
+    private val EXACT_LEGACY_PURCHASE_RETURN_TOKENS: Set<String> = setOf(
+        "PURCHASE_RETURN",
+        "مرتجع مشتريات",
+        "Purchase Return"
+    )
+
+    private val EXACT_LEGACY_EXPENSE_TOKENS: Set<String> = setOf(
+        "EXPENSE",
+        "مصروف",
+        "مصروفات",
+        "Expense"
+    )
+
     /**
      * Deterministically classifies a legacy transaction into a [TransactionType].
      *
@@ -84,7 +136,14 @@ object LegacyAccountingBridge {
         val token = rawActivityType.trim()
 
         return when {
+            EXACT_LEGACY_EXPENSE_TOKENS.contains(token) -> TransactionType.EXPENSE
+            EXACT_LEGACY_SUPPLIER_PAYMENT_TOKENS.contains(token) -> TransactionType.SUPPLIER_PAYMENT
+            EXACT_LEGACY_PURCHASE_RETURN_TOKENS.contains(token) -> TransactionType.PURCHASE_RETURN
+            EXACT_LEGACY_SUPPLIER_PURCHASE_TOKENS.contains(token) -> TransactionType.PURCHASE
             EXACT_LEGACY_PAYMENT_TOKENS.contains(token) -> TransactionType.CUSTOMER_PAYMENT
+            EXACT_LEGACY_ADJUSTMENT_TOKENS.contains(token) -> TransactionType.BALANCE_ADJUSTMENT
+            EXACT_LEGACY_SALE_RETURN_TOKENS.contains(token) -> TransactionType.SALE_RETURN
+            EXACT_LEGACY_REFUND_TOKENS.contains(token) -> TransactionType.CUSTOMER_REFUND
             EXACT_LEGACY_SALE_CASH_TOKENS.contains(token) -> TransactionType.SALE
             EXACT_LEGACY_SALE_CREDIT_TOKENS.contains(token) -> TransactionType.SALE
             EXACT_LEGACY_GENERIC_SALE_TOKENS.contains(token) -> TransactionType.SALE
@@ -237,6 +296,20 @@ object LegacyAccountingBridge {
                     activityType = "تسديد",
                     isCredit = false,
                     settlementType = settlementType
+                )
+            }
+            TransactionType.SALE_RETURN -> {
+                LegacyTransactionFields(
+                    activityType = "مرتجع مبيعات",
+                    isCredit = false,
+                    settlementType = null
+                )
+            }
+            TransactionType.CUSTOMER_REFUND -> {
+                LegacyTransactionFields(
+                    activityType = "استرداد نقدي",
+                    isCredit = false,
+                    settlementType = null
                 )
             }
             else -> {
