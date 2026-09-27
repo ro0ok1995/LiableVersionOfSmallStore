@@ -35,6 +35,7 @@ import com.example.accounting.SupplierLedgerEntry
 import com.example.accounting.InventoryLedgerCalculator
 import com.example.accounting.InventoryMovementEntry
 import com.example.accounting.ProductStockSummary
+import com.example.accounting.StockMovement
 import com.example.model.CustomerAccount
 import com.example.model.CustomerConflictItem
 import com.example.model.NotificationItem
@@ -1865,6 +1866,10 @@ class StoreRepository private constructor(
         )
     }
 
+    suspend fun getStockMovements(productId: String): List<StockMovement> {
+        return getInventoryStatement(productId)
+    }
+
     suspend fun getAllProductsStock(): Map<String, ProductStockSummary> {
         val products = productDao.getAllProductsSync()
         val productIds = products.map { it.id }.toSet()
@@ -1934,6 +1939,21 @@ class StoreRepository private constructor(
 
         adjustmentDao.insertAdjustment(adj)
         return adj
+    }
+
+    suspend fun recordInventoryDamage(
+        productId: String,
+        quantity: Int,
+        reason: String = "بضاعة تالفة",
+        date: String? = null
+    ): Adjustment {
+        require(quantity > 0) { "Damage quantity must be greater than zero" }
+        return recordInventoryAdjustment(
+            productId = productId,
+            quantityDelta = -quantity,
+            reason = reason,
+            date = date
+        )
     }
 
     companion object {

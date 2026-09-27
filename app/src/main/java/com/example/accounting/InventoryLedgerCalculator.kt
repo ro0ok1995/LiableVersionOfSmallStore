@@ -215,6 +215,8 @@ object InventoryLedgerCalculator {
                     quantityOut = 0,
                     unitCost = line.unitCost,
                     reference = parent?.invoiceNumber ?: line.purchaseId,
+                    referenceType = "PURCHASE",
+                    referenceId = line.purchaseId,
                     operationStatus = status
                 )
             )
@@ -245,6 +247,8 @@ object InventoryLedgerCalculator {
                                 quantityOut = returnedQty,
                                 unitCost = line.unitCost,
                                 reference = pr.reason,
+                                referenceType = "PURCHASE_RETURN",
+                                referenceId = pr.id,
                                 operationStatus = status
                             )
                         )
@@ -273,6 +277,8 @@ object InventoryLedgerCalculator {
                     quantityOut = line.quantity,
                     unitCost = line.costPriceAtSale,
                     reference = parent?.invoiceNumber ?: line.saleId,
+                    referenceType = "SALE",
+                    referenceId = line.saleId,
                     operationStatus = status
                 )
             )
@@ -298,6 +304,8 @@ object InventoryLedgerCalculator {
                     quantityOut = 0,
                     unitCost = line.costPriceAtReturn,
                     reference = line.saleReturnId,
+                    referenceType = "SALE_RETURN",
+                    referenceId = line.saleReturnId,
                     operationStatus = status
                 )
             )
@@ -309,6 +317,12 @@ object InventoryLedgerCalculator {
             val status = if (adj.status == "REVERSED") OperationStatus.REVERSED else OperationStatus.ACTIVE
             val qty = adj.amount.toInt()
             val isDebit = adj.direction == "DEBIT"
+            val isDamage = !isDebit && isDamageReason(adj.reason)
+            val movType = when {
+                isDebit -> InventoryMovementType.ADJUSTMENT_IN
+                isDamage -> InventoryMovementType.DAMAGE_OUT
+                else -> InventoryMovementType.ADJUSTMENT_OUT
+            }
             rawEntries.add(
                 InventoryMovementEntry(
                     id = "inv_adj_${adj.id}",
@@ -318,11 +332,13 @@ object InventoryLedgerCalculator {
                     lineId = adj.id,
                     date = adj.date,
                     timestamp = adj.createdAt,
-                    movementType = if (isDebit) InventoryMovementType.ADJUSTMENT_IN else InventoryMovementType.ADJUSTMENT_OUT,
+                    movementType = movType,
                     quantityIn = if (isDebit) qty else 0,
                     quantityOut = if (!isDebit) qty else 0,
                     unitCost = 0.0,
                     reference = adj.reason,
+                    referenceType = if (isDamage) "DAMAGE" else "ADJUSTMENT",
+                    referenceId = adj.id,
                     operationStatus = status
                 )
             )
@@ -376,6 +392,41 @@ object InventoryLedgerCalculator {
                 adjustments = adjustments
             )
         }
+    }
+
+    /**
+     * Identifies whether an adjustment reason describes damaged or spoiled merchandise.
+     */
+    fun isDamageReason(reason: String): Boolean {
+        val lower = reason.lowercase()
+        return lower.contains("damage") || lower.contains("loss") || lower.contains("تالف") || lower.contains("تلف") || lower.contains("spoil")
+    }
+
+    /**
+     * Builds and returns the chronological stock movement ledger (StockMovement model).
+     */
+    fun getStockMovements(
+        productId: String,
+        purchases: List<Purchase>,
+        purchaseLines: List<PurchaseLine>,
+        sales: List<Sale>,
+        saleLines: List<SaleLine>,
+        saleReturns: List<SaleReturn>,
+        saleReturnLines: List<SaleReturnLine>,
+        purchaseReturns: List<PurchaseReturn> = emptyList(),
+        adjustments: List<Adjustment> = emptyList()
+    ): List<StockMovement> {
+        return buildInventoryLedger(
+            productId = productId,
+            purchases = purchases,
+            purchaseLines = purchaseLines,
+            sales = sales,
+            saleLines = saleLines,
+            saleReturns = saleReturns,
+            saleReturnLines = saleReturnLines,
+            purchaseReturns = purchaseReturns,
+            adjustments = adjustments
+        )
     }
 
     /**

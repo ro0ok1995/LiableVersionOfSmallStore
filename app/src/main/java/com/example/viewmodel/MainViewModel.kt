@@ -29,6 +29,7 @@ import com.example.accounting.SupplierBalanceSummary
 import com.example.accounting.SupplierLedgerEntry
 import com.example.accounting.InventoryMovementEntry
 import com.example.accounting.ProductStockSummary
+import com.example.accounting.StockMovement
 import com.example.model.AccountFilter
 import com.example.model.AppThemeMode
 import com.example.model.CartItem
@@ -814,6 +815,10 @@ class MainViewModel @JvmOverloads constructor(
         return repository.getInventoryStatement(productId)
     }
 
+    suspend fun getStockMovements(productId: String): List<StockMovement> {
+        return repository.getStockMovements(productId)
+    }
+
     fun recordInventoryAdjustment(
         productId: String,
         quantityDelta: Int,
@@ -824,6 +829,24 @@ class MainViewModel @JvmOverloads constructor(
         viewModelScope.launch {
             try {
                 val adj = repository.recordInventoryAdjustment(productId, quantityDelta, reason, date)
+                refreshInventory()
+                onComplete(Result.success(adj))
+            } catch (e: Exception) {
+                onComplete(Result.failure(e))
+            }
+        }
+    }
+
+    fun recordInventoryDamage(
+        productId: String,
+        quantity: Int,
+        reason: String = "بضاعة تالفة",
+        date: String? = null,
+        onComplete: (Result<Adjustment>) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                val adj = repository.recordInventoryDamage(productId, quantity, reason, date)
                 refreshInventory()
                 onComplete(Result.success(adj))
             } catch (e: Exception) {
