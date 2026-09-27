@@ -24,6 +24,8 @@ import com.example.data.db.SupplierPayment
 import com.example.data.db.PurchaseReturn
 import com.example.data.db.ExpenseCategory
 import com.example.data.db.Expense
+import com.example.data.db.StockMovementEntity as PersistentStockMovement
+import com.example.data.db.StockMovementDao
 import com.example.data.db.TransactionEntity
 import com.example.data.db.TransactionItemLineEntity
 import com.example.data.db.toEntity
@@ -34,6 +36,7 @@ import com.example.accounting.SupplierLedgerCalculator
 import com.example.accounting.SupplierLedgerEntry
 import com.example.accounting.InventoryLedgerCalculator
 import com.example.accounting.InventoryMovementEntry
+import com.example.accounting.InventoryMovementType
 import com.example.accounting.ProductStockSummary
 import com.example.accounting.StockMovement
 import com.example.model.CustomerAccount
@@ -88,6 +91,7 @@ class StoreRepository private constructor(
     private val purchaseReturnDao = database.purchaseReturnDao()
     private val expenseCategoryDao = database.expenseCategoryDao()
     private val expenseDao = database.expenseDao()
+    private val stockMovementDao = database.stockMovementDao()
 
     val allFinancialAccounts: Flow<List<FinancialAccount>> = financialAccountDao.getAllAccounts()
     val allPaymentMethods: Flow<List<PaymentMethod>> = paymentMethodDao.getAllPaymentMethods()
@@ -102,6 +106,7 @@ class StoreRepository private constructor(
     val allSupplierPayments: Flow<List<SupplierPayment>> = supplierPaymentDao.getAllPayments()
     val allExpenseCategories: Flow<List<ExpenseCategory>> = expenseCategoryDao.getActiveCategories()
     val allExpenses: Flow<List<Expense>> = expenseDao.getAllExpenses()
+    val allPersistentStockMovements: Flow<List<PersistentStockMovement>> = stockMovementDao.getAllMovements()
 
     val customerConflicts: Flow<List<CustomerConflictItem>> = customerConflictDao.getAllConflicts().map { list ->
         list.map { it.toModel() }
@@ -1489,6 +1494,32 @@ class StoreRepository private constructor(
                 }
             }
 
+            // Phase 11: Persist StockMovement rows for each purchased line in the same transaction
+            val stockMovements = purchaseLines.mapNotNull { line ->
+                if (!line.productId.isNullOrBlank()) {
+                    PersistentStockMovement(
+                        id = "sm_${line.id}",
+                        productId = line.productId,
+                        productNameSnapshot = line.productNameSnapshot,
+                        transactionId = purchase.id,
+                        lineId = line.id,
+                        date = purchase.purchaseDate,
+                        timestamp = line.createdAt,
+                        movementType = InventoryMovementType.PURCHASE_IN.name,
+                        quantityIn = line.quantity,
+                        quantityOut = 0,
+                        unitCost = line.unitCost,
+                        reference = purchase.invoiceNumber,
+                        referenceType = "PURCHASE",
+                        referenceId = purchase.id,
+                        status = purchase.status
+                    )
+                } else null
+            }
+            if (stockMovements.isNotEmpty()) {
+                stockMovementDao.insertStockMovements(stockMovements)
+            }
+
             // Insert historical activity record (customerId null to prevent FK conflict with customers table)
             val txEntity = purchase.toTransactionItem(supplier.name).copy(
                 customerId = null,
@@ -1869,6 +1900,25 @@ class StoreRepository private constructor(
     suspend fun getStockMovements(productId: String): List<StockMovement> {
         return getInventoryStatement(productId)
     }
+
+    // Phase 11A: Persistent Stock Movement Operations
+    suspend fun insertPersistentStockMovement(movement: PersistentStockMovement): Long =
+        stockMovementDao.insertMovement(movement)
+
+    suspend fun insertPersistentStockMovements(movements: List<PersistentStockMovement>) =
+        stockMovementDao.insertMovements(movements)
+
+    suspend fun getPersistentStockMovements(productId: String): List<PersistentStockMovement> =
+        stockMovementDao.getMovementsByProductIdSync(productId)
+
+    fun observePersistentStockMovements(productId: String): Flow<List<PersistentStockMovement>> =
+        stockMovementDao.getMovementsByProductId(productId)
+
+    suspend fun getPersistentStockMovementsByDateRange(startDate: String, endDate: String): List<PersistentStockMovement> =
+        stockMovementDao.getMovementsByDateRangeSync(startDate, endDate)
+
+    suspend fun getPersistentStockMovementCount(): Int =
+        stockMovementDao.getMovementCount()
 
     suspend fun getAllProductsStock(): Map<String, ProductStockSummary> {
         val products = productDao.getAllProductsSync()

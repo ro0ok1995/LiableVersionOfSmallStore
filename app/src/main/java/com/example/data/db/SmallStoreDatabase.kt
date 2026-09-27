@@ -33,9 +33,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SupplierPayment::class,
         PurchaseReturn::class,
         ExpenseCategory::class,
-        Expense::class
+        Expense::class,
+        StockMovementEntity::class
     ],
-    version = 16,
+    version = 17,
     exportSchema = false
 )
 abstract class SmallStoreDatabase : RoomDatabase() {
@@ -63,6 +64,7 @@ abstract class SmallStoreDatabase : RoomDatabase() {
     abstract fun purchaseReturnDao(): PurchaseReturnDao
     abstract fun expenseCategoryDao(): ExpenseCategoryDao
     abstract fun expenseDao(): ExpenseDao
+    abstract fun stockMovementDao(): StockMovementDao
 
     companion object {
         @Volatile
@@ -115,7 +117,8 @@ abstract class SmallStoreDatabase : RoomDatabase() {
                         MIGRATION_12_13,
                         MIGRATION_13_14,
                         MIGRATION_14_15,
-                        MIGRATION_15_16
+                        MIGRATION_15_16,
+                        MIGRATION_16_17
                     )
                     .build()
                 INSTANCE = instance
