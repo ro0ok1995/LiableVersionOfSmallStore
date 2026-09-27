@@ -33,8 +33,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SupplierPayment::class,
         PurchaseReturn::class,
         ExpenseCategory::class,
-        Expense::class,
-        PurchaseReturnLine::class
+        Expense::class
     ],
     version = 16,
     exportSchema = false
@@ -62,7 +61,6 @@ abstract class SmallStoreDatabase : RoomDatabase() {
     abstract fun purchaseLineDao(): PurchaseLineDao
     abstract fun supplierPaymentDao(): SupplierPaymentDao
     abstract fun purchaseReturnDao(): PurchaseReturnDao
-    abstract fun purchaseReturnLineDao(): PurchaseReturnLineDao
     abstract fun expenseCategoryDao(): ExpenseCategoryDao
     abstract fun expenseDao(): ExpenseDao
 
