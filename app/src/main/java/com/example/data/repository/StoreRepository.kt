@@ -1093,6 +1093,9 @@ class StoreRepository private constructor(
             throw UnsupportedOperationException("Transaction $originalTransactionId is not eligible for reversal")
         }
 
+        // Neutralize physical stock movements for reversed transaction
+        stockMovementDao.updateStatusByTransactionId(originalTransactionId, "REVERSED")
+
         // Rule B & 3: Create reversal record
         val reversedAt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
         val reversalId = "rev_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}"

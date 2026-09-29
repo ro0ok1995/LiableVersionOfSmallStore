@@ -10,6 +10,7 @@ import com.example.data.db.ProductEntity
 import com.example.data.db.Sale
 import com.example.data.db.SaleLine
 import com.example.data.db.SmallStoreDatabase
+import com.example.data.db.StockMovementEntity
 import com.example.data.db.Supplier
 import com.example.data.repository.StoreRepository
 import com.example.model.PurchaseLineRequest
@@ -558,5 +559,286 @@ class InventoryLedgerPhase11Test {
         assertEquals(0, stockAfterFailed.quantityOnHand)
         val movements = repository.getStockMovements(testProductId)
         assertTrue("Inventory movements must be completely rolled back", movements.isEmpty())
+    }
+
+    /**
+     * Requirement TEST D:
+     * Purchase 5, Purchase Return 2 => Expected stock = 3
+     */
+    @Test
+    fun testPurchaseReturnDecreasesStock() = runBlocking {
+        // Purchase 5 units at 20.0 (total 100.0)
+        val purchaseResult = repository.recordPurchase(
+            supplierId = testSupplierId,
+            lines = listOf(
+                PurchaseLineRequest(
+                    productId = testProductId,
+                    productNameSnapshot = "زيت زيتون بكر",
+                    quantity = 5,
+                    unitCost = 20.0
+                )
+            ),
+            paidAmount = 100.0,
+            financialAccountId = testAccountId,
+            purchaseDate = "2026-03-01"
+        )
+        assertEquals(5, repository.getProductStock(testProductId).quantityOnHand)
+
+        // Return 2 units (amount = 40.0)
+        val pr = repository.recordPurchaseReturn(
+            purchaseId = purchaseResult.purchase.id,
+            amount = 40.0,
+            reason = "إرجاع وحدتين للمورد"
+        )
+        assertNotNull(pr)
+
+        val stockAfterReturn = repository.getProductStock(testProductId)
+        assertEquals(3, stockAfterReturn.quantityOnHand)
+        assertEquals(2, stockAfterReturn.totalReturnedToSuppliers)
+
+        val movements = db.stockMovementDao().getMovementsByProductIdSync(testProductId)
+        val prMov = movements.find { it.movementType == "PURCHASE_RETURN_OUT" }
+        assertNotNull(prMov)
+        assertEquals(2, prMov?.quantityOut)
+    }
+
+    /**
+     * Requirement TEST E:
+     * Purchase 5, Adjustment +3 => Expected stock = 8
+     */
+    @Test
+    fun testPurchaseAndPositiveAdjustmentIncreasesStock() = runBlocking {
+        repository.recordPurchase(
+            supplierId = testSupplierId,
+            lines = listOf(
+                PurchaseLineRequest(
+                    productId = testProductId,
+                    productNameSnapshot = "زيت زيتون بكر",
+                    quantity = 5,
+                    unitCost = 20.0
+                )
+            ),
+            paidAmount = 100.0,
+            financialAccountId = testAccountId
+        )
+        assertEquals(5, repository.getProductStock(testProductId).quantityOnHand)
+
+        repository.recordInventoryAdjustment(
+            productId = testProductId,
+            quantityDelta = 3,
+            reason = "جرد إضافي"
+        )
+
+        assertEquals(8, repository.getProductStock(testProductId).quantityOnHand)
+    }
+
+    /**
+     * Requirement TEST G:
+     * Purchase 5, Sale 2, Reverse Sale => Expected stock = 5
+     */
+    @Test
+    fun testReverseSaleRestoresStockToOriginal() = runBlocking {
+        repository.recordPurchase(
+            supplierId = testSupplierId,
+            lines = listOf(
+                PurchaseLineRequest(
+                    productId = testProductId,
+                    productNameSnapshot = "زيت زيتون بكر",
+                    quantity = 5,
+                    unitCost = 20.0
+                )
+            ),
+            paidAmount = 100.0,
+            financialAccountId = testAccountId
+        )
+        assertEquals(5, repository.getProductStock(testProductId).quantityOnHand)
+
+        val saleId = "sale_rev_test_01"
+        repository.createSale(
+            Sale(
+                id = saleId,
+                customerId = testCustomerId,
+                invoiceNumber = "INV-REV-01",
+                saleType = "CASH",
+                totalAmount = 60.0,
+                paidAmount = 60.0,
+                creditAmount = 0.0,
+                paymentStatus = "PAID",
+                transactionDate = "2026-03-10",
+                status = "ACTIVE"
+            ),
+            listOf(
+                SaleLine(
+                    id = "sale_rev_line_01",
+                    saleId = saleId,
+                    productId = testProductId,
+                    productNameSnapshot = "زيت زيتون بكر",
+                    quantity = 2,
+                    unitPrice = 30.0,
+                    costPriceAtSale = 20.0,
+                    subtotal = 60.0
+                )
+            )
+        )
+        assertEquals(3, repository.getProductStock(testProductId).quantityOnHand)
+
+        // Reverse the sale
+        val reversal = repository.reverseTransaction(saleId, "إلغاء البيع بناء على طلب العميل")
+        assertNotNull(reversal)
+
+        // Stock must return to 5 (not remain 3)
+        val stockAfterReversal = repository.getProductStock(testProductId)
+        assertEquals(5, stockAfterReversal.quantityOnHand)
+    }
+
+    /**
+     * Requirement TEST H:
+     * Purchase 5, Adjustment +3, Reverse Adjustment => Expected stock = 5
+     */
+    @Test
+    fun testReverseAdjustmentRestoresStockToOriginal() = runBlocking {
+        repository.recordPurchase(
+            supplierId = testSupplierId,
+            lines = listOf(
+                PurchaseLineRequest(
+                    productId = testProductId,
+                    productNameSnapshot = "زيت زيتون بكر",
+                    quantity = 5,
+                    unitCost = 20.0
+                )
+            ),
+            paidAmount = 100.0,
+            financialAccountId = testAccountId
+        )
+        assertEquals(5, repository.getProductStock(testProductId).quantityOnHand)
+
+        val adj = repository.recordInventoryAdjustment(
+            productId = testProductId,
+            quantityDelta = 3,
+            reason = "تسوية خاطئة"
+        )
+        assertEquals(8, repository.getProductStock(testProductId).quantityOnHand)
+
+        // Reverse the adjustment
+        val reversal = repository.reverseTransaction(adj.id, "تصحيح تسوية خاطئة")
+        assertNotNull(reversal)
+
+        // Stock must return to 5 (not remain 8)
+        val stockAfterReversal = repository.getProductStock(testProductId)
+        assertEquals(5, stockAfterReversal.quantityOnHand)
+    }
+
+    /**
+     * Requirement TEST I:
+     * Verify persisted StockMovement records contain the expected movement types and active/reversed behavior.
+     */
+    @Test
+    fun testPersistedStockMovementTypesAndReversedStatus() = runBlocking {
+        // Purchase 5
+        repository.recordPurchase(
+            supplierId = testSupplierId,
+            lines = listOf(
+                PurchaseLineRequest(
+                    productId = testProductId,
+                    productNameSnapshot = "زيت زيتون بكر",
+                    quantity = 5,
+                    unitCost = 20.0
+                )
+            ),
+            paidAmount = 100.0,
+            financialAccountId = testAccountId
+        )
+
+        // Sell 2
+        val saleId = "sale_type_test"
+        repository.createSale(
+            Sale(
+                id = saleId,
+                customerId = testCustomerId,
+                invoiceNumber = "INV-T-01",
+                saleType = "CASH",
+                totalAmount = 60.0,
+                paidAmount = 60.0,
+                creditAmount = 0.0,
+                paymentStatus = "PAID",
+                transactionDate = "2026-03-10",
+                status = "ACTIVE"
+            ),
+            listOf(
+                SaleLine(
+                    id = "sale_line_type_01",
+                    saleId = saleId,
+                    productId = testProductId,
+                    productNameSnapshot = "زيت زيتون بكر",
+                    quantity = 2,
+                    unitPrice = 30.0,
+                    costPriceAtSale = 20.0,
+                    subtotal = 60.0
+                )
+            )
+        )
+
+        val movementsBefore = db.stockMovementDao().getMovementsByProductIdSync(testProductId)
+        assertEquals(2, movementsBefore.size)
+        assertTrue(movementsBefore.any { it.movementType == "PURCHASE_IN" && it.status == "ACTIVE" })
+        val saleMovBefore = movementsBefore.find { it.movementType == "SALE_OUT" }
+        assertNotNull(saleMovBefore)
+        assertEquals("ACTIVE", saleMovBefore?.status)
+
+        // Reverse sale
+        repository.reverseTransaction(saleId, "إلغاء المعاملة")
+
+        val movementsAfter = db.stockMovementDao().getMovementsByProductIdSync(testProductId)
+        assertEquals(2, movementsAfter.size)
+        val saleMovAfter = movementsAfter.find { it.movementType == "SALE_OUT" }
+        assertNotNull(saleMovAfter)
+        assertEquals("REVERSED", saleMovAfter?.status)
+    }
+
+    /**
+     * Requirement TEST J:
+     * Verify the stock calculation uses persisted StockMovement state and does not retain
+     * the effect of a reversed stock movement.
+     */
+    @Test
+    fun testStockCalculationFromPersistedMovementsExcludesReversed() = runBlocking {
+        val dao = db.stockMovementDao()
+
+        // Manually insert active movements and reversed movements directly into stock_movements
+        dao.insertMovement(
+            StockMovementEntity(
+                id = "sm_p1",
+                productId = testProductId,
+                movementType = "PURCHASE_IN",
+                quantityIn = 10,
+                quantityOut = 0,
+                status = "ACTIVE"
+            )
+        )
+        dao.insertMovement(
+            StockMovementEntity(
+                id = "sm_s1",
+                productId = testProductId,
+                movementType = "SALE_OUT",
+                quantityIn = 0,
+                quantityOut = 4,
+                status = "REVERSED" // Reversed movement
+            )
+        )
+        dao.insertMovement(
+            StockMovementEntity(
+                id = "sm_s2",
+                productId = testProductId,
+                movementType = "SALE_OUT",
+                quantityIn = 0,
+                quantityOut = 2,
+                status = "ACTIVE"
+            )
+        )
+
+        // Expected stock: 10 - 2 = 8 (the -4 SALE_OUT is REVERSED and must be excluded)
+        val summary = repository.getProductStock(testProductId)
+        assertEquals(8, summary.quantityOnHand)
+        assertEquals(1, summary.reversedMovementCount)
     }
 }

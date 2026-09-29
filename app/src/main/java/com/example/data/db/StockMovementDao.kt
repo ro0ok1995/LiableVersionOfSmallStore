@@ -62,6 +62,9 @@ interface StockMovementDao {
     @Query("SELECT * FROM stock_movements WHERE transactionId = :transactionId ORDER BY timestamp ASC")
     suspend fun getMovementsByTransactionId(transactionId: String): List<StockMovementEntity>
 
+    @Query("UPDATE stock_movements SET status = :status WHERE transactionId = :transactionId OR referenceId = :transactionId")
+    suspend fun updateStatusByTransactionId(transactionId: String, status: String)
+
     @Query("DELETE FROM stock_movements")
     suspend fun deleteAllStockMovements()
 }
