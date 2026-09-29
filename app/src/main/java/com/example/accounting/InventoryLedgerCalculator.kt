@@ -8,6 +8,7 @@ import com.example.data.db.Sale
 import com.example.data.db.SaleLine
 import com.example.data.db.SaleReturn
 import com.example.data.db.SaleReturnLine
+import com.example.data.db.StockMovementEntity
 import com.example.model.OperationStatus
 import kotlin.math.roundToInt
 
@@ -390,6 +391,118 @@ object InventoryLedgerCalculator {
                 productName = productNames[pid] ?: "",
                 purchaseReturns = purchaseReturns,
                 adjustments = adjustments
+            )
+        }
+    }
+
+    /**
+     * Calculates ProductStockSummary directly from persistent StockMovementEntity records.
+     * Single source of truth for physical stock calculations.
+     */
+    fun calculateProductStockFromMovements(
+        productId: String,
+        movements: List<StockMovementEntity>,
+        fallbackUnitCost: Double = 0.0,
+        productName: String = ""
+    ): ProductStockSummary {
+        var totalPurchased = 0
+        var totalSold = 0
+        var totalReturnedFromSales = 0
+        var totalReturnedToSuppliers = 0
+        var totalAdjustments = 0
+        var activeMovements = 0
+        var reversedMovements = 0
+
+        var resolvedProductName = productName
+        var latestActivePurchaseUnitCost: Double? = null
+        var latestPurchaseTimestamp: Long = -1L
+
+        for (movement in movements) {
+            if (movement.productId != productId) continue
+
+            if (resolvedProductName.isBlank() && movement.productNameSnapshot.isNotBlank()) {
+                resolvedProductName = movement.productNameSnapshot
+            }
+
+            if (movement.status == "REVERSED") {
+                reversedMovements++
+                continue
+            }
+
+            activeMovements++
+            when (movement.movementType) {
+                InventoryMovementType.PURCHASE_IN.name -> {
+                    totalPurchased += movement.quantityIn
+                    if (movement.timestamp >= latestPurchaseTimestamp) {
+                        latestPurchaseTimestamp = movement.timestamp
+                        if (movement.unitCost > 0.0) {
+                            latestActivePurchaseUnitCost = movement.unitCost
+                        }
+                    }
+                }
+                InventoryMovementType.SALE_OUT.name -> {
+                    totalSold += movement.quantityOut
+                }
+                InventoryMovementType.SALE_RETURN_IN.name -> {
+                    totalReturnedFromSales += movement.quantityIn
+                }
+                InventoryMovementType.PURCHASE_RETURN_OUT.name -> {
+                    totalReturnedToSuppliers += movement.quantityOut
+                }
+                InventoryMovementType.ADJUSTMENT_IN.name -> {
+                    totalAdjustments += movement.quantityIn
+                }
+                InventoryMovementType.ADJUSTMENT_OUT.name,
+                InventoryMovementType.DAMAGE_OUT.name -> {
+                    totalAdjustments -= movement.quantityOut
+                }
+                else -> {
+                    if (movement.quantityIn > 0) {
+                        totalAdjustments += movement.quantityIn
+                    }
+                    if (movement.quantityOut > 0) {
+                        totalAdjustments -= movement.quantityOut
+                    }
+                }
+            }
+        }
+
+        val quantityOnHand = totalPurchased - totalSold + totalReturnedFromSales - totalReturnedToSuppliers + totalAdjustments
+        val unitCost = latestActivePurchaseUnitCost ?: fallbackUnitCost
+        val totalValuation = if (quantityOnHand > 0) quantityOnHand * unitCost else 0.0
+
+        return ProductStockSummary(
+            productId = productId,
+            productName = resolvedProductName,
+            totalPurchased = totalPurchased,
+            totalSold = totalSold,
+            totalReturnedFromSales = totalReturnedFromSales,
+            totalReturnedToSuppliers = totalReturnedToSuppliers,
+            totalAdjustments = totalAdjustments,
+            quantityOnHand = quantityOnHand,
+            unitCost = unitCost,
+            totalValuation = totalValuation,
+            activeMovementCount = activeMovements,
+            reversedMovementCount = reversedMovements
+        )
+    }
+
+    /**
+     * Calculates all products stock summaries directly from persistent StockMovementEntity records.
+     */
+    fun calculateAllProductsStockFromMovements(
+        productIds: Set<String>,
+        movements: List<StockMovementEntity>,
+        productCostPrices: Map<String, Double> = emptyMap(),
+        productNames: Map<String, String> = emptyMap()
+    ): Map<String, ProductStockSummary> {
+        val movementsByProduct = movements.groupBy { it.productId }
+        return productIds.associateWith { pid ->
+            calculateProductStockFromMovements(
+                productId = pid,
+                movements = movementsByProduct[pid] ?: emptyList(),
+                fallbackUnitCost = productCostPrices[pid] ?: 0.0,
+                productName = productNames[pid] ?: ""
             )
         }
     }

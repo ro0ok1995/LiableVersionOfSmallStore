@@ -469,6 +469,32 @@ class StoreRepository private constructor(
             transactionItemLineDao.insertLines(legacyLines)
         }
 
+        // 5. Phase 11: Persist SALE_OUT StockMovement for each sold SaleLine
+        val stockMovements = lines.mapNotNull { sl ->
+            if (!sl.productId.isNullOrBlank()) {
+                PersistentStockMovement(
+                    id = "sm_${sl.id}",
+                    productId = sl.productId,
+                    productNameSnapshot = sl.productNameSnapshot,
+                    transactionId = sale.id,
+                    lineId = sl.id,
+                    date = sale.transactionDate,
+                    timestamp = sl.createdAt,
+                    movementType = InventoryMovementType.SALE_OUT.name,
+                    quantityIn = 0,
+                    quantityOut = sl.quantity,
+                    unitCost = sl.costPriceAtSale,
+                    reference = sale.invoiceNumber,
+                    referenceType = "SALE",
+                    referenceId = sale.id,
+                    status = sale.status
+                )
+            } else null
+        }
+        if (stockMovements.isNotEmpty()) {
+            stockMovementDao.insertStockMovements(stockMovements)
+        }
+
         sale
     }
 
@@ -1246,6 +1272,32 @@ class StoreRepository private constructor(
             }
             transactionItemLineDao.insertLines(txLines)
 
+            // Phase 11: Persist SALE_RETURN_IN StockMovement for each returned line
+            val stockMovements = constructedLines.mapNotNull { rl ->
+                if (!rl.productId.isNullOrBlank()) {
+                    PersistentStockMovement(
+                        id = "sm_${rl.id}",
+                        productId = rl.productId,
+                        productNameSnapshot = rl.productNameSnapshot,
+                        transactionId = returnId,
+                        lineId = rl.id,
+                        date = saleReturn.returnDate,
+                        timestamp = System.currentTimeMillis(),
+                        movementType = InventoryMovementType.SALE_RETURN_IN.name,
+                        quantityIn = rl.quantity,
+                        quantityOut = 0,
+                        unitCost = rl.costPriceAtReturn,
+                        reference = sale.invoiceNumber,
+                        referenceType = "SALE_RETURN",
+                        referenceId = returnId,
+                        status = saleReturn.status
+                    )
+                } else null
+            }
+            if (stockMovements.isNotEmpty()) {
+                stockMovementDao.insertStockMovements(stockMovements)
+            }
+
             if (constructedRefund != null) {
                 refundDao.insertRefund(constructedRefund)
                 val refundTx = constructedRefund.toTransactionItem(resolvedCustomerName, sale.invoiceNumber).toEntity()
@@ -1645,6 +1697,40 @@ class StoreRepository private constructor(
         database.withTransaction {
             purchaseReturnDao.insertReturn(pr)
 
+            // Phase 11: Persist PURCHASE_RETURN_OUT StockMovement for returned items
+            val purchaseLines = purchaseLineDao.getLinesByPurchaseId(purchaseId)
+            val totalPurchaseAmt = purchase.totalAmount
+            if (purchaseLines.isNotEmpty() && totalPurchaseAmt > 0.0) {
+                val returnRatio = (amount / totalPurchaseAmt).coerceAtMost(1.0)
+                val stockMovements = purchaseLines.mapNotNull { line ->
+                    if (!line.productId.isNullOrBlank()) {
+                        val returnedQty = kotlin.math.round((line.quantity * returnRatio)).toInt().coerceAtLeast(0)
+                        if (returnedQty > 0) {
+                            PersistentStockMovement(
+                                id = "sm_${pr.id}_${line.id}",
+                                productId = line.productId,
+                                productNameSnapshot = line.productNameSnapshot,
+                                transactionId = pr.id,
+                                lineId = line.id,
+                                date = pr.returnDate,
+                                timestamp = pr.createdAt,
+                                movementType = InventoryMovementType.PURCHASE_RETURN_OUT.name,
+                                quantityIn = 0,
+                                quantityOut = returnedQty,
+                                unitCost = line.unitCost,
+                                reference = pr.reason,
+                                referenceType = "PURCHASE_RETURN",
+                                referenceId = pr.id,
+                                status = pr.status
+                            )
+                        } else null
+                    } else null
+                }
+                if (stockMovements.isNotEmpty()) {
+                    stockMovementDao.insertStockMovements(stockMovements)
+                }
+            }
+
             val txEntity = pr.toTransactionItem(supplier.name, purchase.invoiceNumber).copy(
                 customerId = null,
                 customerName = supplier.name
@@ -1850,27 +1936,13 @@ class StoreRepository private constructor(
 
     suspend fun getProductStock(productId: String): ProductStockSummary {
         val product = productDao.getProductById(productId)
-        val purchases = purchaseDao.getAllPurchasesSync()
-        val purchaseLines = purchaseLineDao.getLinesByProductId(productId)
-        val sales = saleDao.getAllSalesSync()
-        val saleLines = saleDao.getSaleLinesByProductId(productId)
-        val saleReturns = saleReturnDao.getAllReturnsSync()
-        val saleReturnLines = saleReturnLineDao.getLinesByProductId(productId)
-        val purchaseReturns = purchaseReturnDao.getAllReturnsSync()
-        val adjustments = adjustmentDao.getAdjustmentsByEntitySync("PRODUCT", productId)
+        val movements = stockMovementDao.getMovementsByProductIdSync(productId)
 
-        return InventoryLedgerCalculator.calculateProductStock(
+        return InventoryLedgerCalculator.calculateProductStockFromMovements(
             productId = productId,
-            purchases = purchases,
-            purchaseLines = purchaseLines,
-            sales = sales,
-            saleLines = saleLines,
-            saleReturns = saleReturns,
-            saleReturnLines = saleReturnLines,
+            movements = movements,
             fallbackUnitCost = product?.costPrice ?: 0.0,
-            productName = product?.name ?: "",
-            purchaseReturns = purchaseReturns,
-            adjustments = adjustments
+            productName = product?.name ?: ""
         )
     }
 
@@ -1923,30 +1995,16 @@ class StoreRepository private constructor(
     suspend fun getAllProductsStock(): Map<String, ProductStockSummary> {
         val products = productDao.getAllProductsSync()
         val productIds = products.map { it.id }.toSet()
-        val purchases = purchaseDao.getAllPurchasesSync()
-        val purchaseLines = purchaseLineDao.getAllLinesSync()
-        val sales = saleDao.getAllSalesSync()
-        val saleLines = saleDao.getAllSaleLinesSync()
-        val saleReturns = saleReturnDao.getAllReturnsSync()
-        val saleReturnLines = saleReturnLineDao.getAllLinesSync()
-        val purchaseReturns = purchaseReturnDao.getAllReturnsSync()
-        val adjustments = adjustmentDao.getAllAdjustmentsSync()
+        val movements = stockMovementDao.getAllMovementsSync()
 
         val costMap = products.associate { it.id to it.costPrice }
         val nameMap = products.associate { it.id to it.name }
 
-        return InventoryLedgerCalculator.calculateAllProductsStock(
+        return InventoryLedgerCalculator.calculateAllProductsStockFromMovements(
             productIds = productIds,
-            purchases = purchases,
-            purchaseLines = purchaseLines,
-            sales = sales,
-            saleLines = saleLines,
-            saleReturns = saleReturns,
-            saleReturnLines = saleReturnLines,
+            movements = movements,
             productCostPrices = costMap,
-            productNames = nameMap,
-            purchaseReturns = purchaseReturns,
-            adjustments = adjustments
+            productNames = nameMap
         )
     }
 
@@ -1987,7 +2045,30 @@ class StoreRepository private constructor(
             status = "ACTIVE"
         )
 
-        adjustmentDao.insertAdjustment(adj)
+        database.withTransaction {
+            adjustmentDao.insertAdjustment(adj)
+
+            val isIncrease = quantityDelta > 0
+            val movement = PersistentStockMovement(
+                id = "sm_${adj.id}",
+                productId = product.id,
+                productNameSnapshot = product.name,
+                transactionId = adj.id,
+                lineId = adj.id,
+                date = dateToUse,
+                timestamp = System.currentTimeMillis(),
+                movementType = if (isIncrease) InventoryMovementType.ADJUSTMENT_IN.name else InventoryMovementType.ADJUSTMENT_OUT.name,
+                quantityIn = if (isIncrease) quantityDelta else 0,
+                quantityOut = if (!isIncrease) Math.abs(quantityDelta) else 0,
+                unitCost = product.costPrice,
+                reference = reason.trim(),
+                referenceType = "ADJUSTMENT",
+                referenceId = adj.id,
+                status = adj.status
+            )
+            stockMovementDao.insertStockMovement(movement)
+        }
+
         return adj
     }
 
