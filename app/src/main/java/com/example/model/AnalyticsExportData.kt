@@ -1,5 +1,6 @@
 package com.example.model
 
+import com.example.accounting.CustomerLedgerCalculator
 import com.example.accounting.FinancialReportCalculator
 import com.example.data.db.TransactionItemLineEntity
 import com.example.ui.components.BreakdownChartType
@@ -221,12 +222,13 @@ object AnalyticsExportDataPreparer {
 
         // 5. Selected Customer Info (strictly only for ONE_SELECTED_CUSTOMER)
         val customerInfo = if (selectedCustomer != null) {
+            val liveBalance = CustomerLedgerCalculator.calculateCustomerBalance(selectedCustomer.id, transactions).balance
             AnalyticsCustomerInfo(
                 customerId = selectedCustomer.id,
                 customerName = selectedCustomer.customerName,
                 phone = selectedCustomer.phone,
-                currentBalance = selectedCustomer.balance,
-                totalDebt = selectedCustomer.totalDebt
+                currentBalance = liveBalance,
+                totalDebt = liveBalance.coerceAtLeast(0.0)
             )
         } else null
 

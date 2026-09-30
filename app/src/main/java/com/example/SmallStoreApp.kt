@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.accounting.CustomerLedgerCalculator
 import com.example.model.AccountFilter
 import com.example.model.AppThemeMode
 import com.example.model.CustomerAccount
@@ -248,8 +249,12 @@ fun SmallStoreApp(
                                     }
                                 }
 
-                                val totalDebt = uiState.customers.sumOf { it.balance }
-                                val totalBalance = uiState.customers.sumOf { it.totalDebt }
+                                val totalDebt = remember(uiState.customers, uiState.allTransactions) {
+                                    uiState.customers.sumOf { cust ->
+                                        CustomerLedgerCalculator.calculateCustomerBalance(cust.id, uiState.allTransactions).balance.coerceAtLeast(0.0)
+                                    }
+                                }
+                                val totalBalance = totalDebt
 
                                 HomeScreen(
                                     totalBalance = totalBalance,
@@ -293,7 +298,7 @@ fun SmallStoreApp(
                             }
 
                             NavDestination.ACCOUNTS -> {
-                                val filteredAccounts = remember(uiState.customers, uiState.accountsSearchQuery, uiState.accountsFilter) {
+                                val filteredAccounts = remember(uiState.customers, uiState.allTransactions, uiState.accountsSearchQuery, uiState.accountsFilter) {
                                     var list = uiState.customers
                                     if (uiState.accountsSearchQuery.isNotBlank()) {
                                         val q = uiState.accountsSearchQuery.trim().lowercase()
@@ -301,7 +306,9 @@ fun SmallStoreApp(
                                     }
                                     when (uiState.accountsFilter) {
                                         AccountFilter.ALL -> list
-                                        AccountFilter.HAS_DEBT -> list.filter { it.balance > 0 }
+                                        AccountFilter.HAS_DEBT -> list.filter { cust ->
+                                            CustomerLedgerCalculator.calculateCustomerBalance(cust.id, uiState.allTransactions).balance > 0.001
+                                        }
                                         AccountFilter.RECENTLY_ACTIVE -> list.filter { it.hasRecentActivity }
                                     }
                                 }

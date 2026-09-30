@@ -124,24 +124,15 @@ object DebtAgingUtils {
         isArabic: Boolean = false
     ): CustomerDebtAgingResult {
         // Authoritative ledger calculation (CustomerLedgerCalculator source of truth):
-        val hasCustomerTransactions = allTransactions.any { it.customerId == customer.id }
-        val ledgerSummary = if (hasCustomerTransactions) {
-            CustomerLedgerCalculator.calculateCustomerBalance(customer.id, allTransactions)
-        } else {
-            null
-        }
+        val ledgerSummary = CustomerLedgerCalculator.calculateCustomerBalance(customer.id, allTransactions)
 
         // Net authoritative customer balance (never use cumulative historical customer.totalDebt):
-        val currentBalance = ledgerSummary?.balance ?: customer.balance
+        val currentBalance = ledgerSummary.balance
         // Active outstanding receivable obligation (balance > 0 means customer owes store):
         val outstandingDebt = currentBalance.coerceAtLeast(0.0)
 
         // Convert customer transactions to typed ledger entries:
-        val customerEntries = if (hasCustomerTransactions) {
-            CustomerLedgerCalculator.toLedgerEntries(customer.id, allTransactions)
-        } else {
-            emptyList()
-        }
+        val customerEntries = CustomerLedgerCalculator.toLedgerEntries(customer.id, allTransactions)
 
         // Candidate receivable entries: active operations that created receivable debit:
         val candidateEntries = customerEntries.filter { entry ->
@@ -601,8 +592,10 @@ class AnalysisCenterViewModel : ViewModel() {
             )
         }
 
-        return priorTransactions.sumOf { tx ->
-            getTransactionReceivableImpact(tx)
+        return if (selectedCustomer != null) {
+            CustomerLedgerCalculator.calculateCustomerBalance(selectedCustomer.id, priorTransactions).balance
+        } else {
+            priorTransactions.sumOf { getTransactionReceivableImpact(it) }
         }
     }
 
@@ -774,47 +767,8 @@ class AnalysisCenterViewModel : ViewModel() {
 
     companion object {
         fun getTransactionReceivableImpact(tx: TransactionItem): Double {
-            // Reversed transactions have ZERO financial impact on customer balance
-            if (tx.typedOperationStatus == OperationStatus.REVERSED) {
-                return 0.0
-            }
-
-            val type = tx.typedTransactionType
-            return when (type) {
-                TransactionType.SALE -> {
-                    when (tx.typedSaleType) {
-                        SaleType.CASH -> 0.0
-                        SaleType.CREDIT -> if (tx.creditAmount > 0.0) tx.creditAmount else tx.amount
-                        SaleType.MIXED -> {
-                            when {
-                                tx.creditAmount > 0.0 -> tx.creditAmount
-                                tx.paidAmount > 0.0 -> (tx.amount - tx.paidAmount).coerceAtLeast(0.0)
-                                else -> tx.amount
-                            }
-                        }
-                        null -> {
-                            if (tx.creditAmount > 0.0) {
-                                tx.creditAmount
-                            } else if (tx.paidAmount > 0.0 && tx.isCredit) {
-                                (tx.amount - tx.paidAmount).coerceAtLeast(0.0)
-                            } else if (tx.isCredit) {
-                                tx.amount
-                            } else {
-                                0.0
-                            }
-                        }
-                    }
-                }
-                TransactionType.CUSTOMER_PAYMENT -> -tx.amount
-                TransactionType.SALE_RETURN -> -tx.amount
-                TransactionType.CUSTOMER_REFUND -> tx.amount
-                TransactionType.OPENING_BALANCE -> tx.amount
-                TransactionType.BALANCE_ADJUSTMENT -> if (tx.isCredit) tx.amount else -tx.amount
-                TransactionType.REVERSAL -> if (tx.isCredit) tx.amount else -tx.amount
-                else -> {
-                    if (tx.isCredit) tx.amount else 0.0
-                }
-            }
+            val custId = tx.customerId ?: return 0.0
+            return CustomerLedgerCalculator.calculateCustomerBalance(custId, listOf(tx)).balance
         }
     }
 }

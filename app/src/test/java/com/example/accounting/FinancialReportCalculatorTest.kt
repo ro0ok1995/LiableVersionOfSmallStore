@@ -1,6 +1,9 @@
 package com.example.accounting
 
 import com.example.data.db.Sale
+import com.example.data.db.SaleLine
+import com.example.data.db.SaleReturn
+import com.example.data.db.SaleReturnLine
 import com.example.model.OperationStatus
 import com.example.model.SaleType
 import com.example.model.TransactionItem
@@ -644,5 +647,267 @@ class FinancialReportCalculatorTest {
         assertEquals(1, totals.creditSaleCount)
         assertEquals(1, totals.mixedSaleCount)
         assertEquals(500.0, totals.reversedSalesVolume, 0.0001)
+    }
+
+    // =========================================================================
+    // Phase 4 Step 1: Central COGS, Gross Profit & Gross Margin Verification
+    // =========================================================================
+
+    /**
+     * Test A: Normal sale.
+     * Revenue 100, COGS 60, Gross Profit 40, Gross Margin 40% (0.40)
+     */
+    @Test
+    fun testPhase4Step1_TestA_normalSale() {
+        val sale = Sale(
+            id = "s_normal",
+            invoiceNumber = "INV-P4-001",
+            customerId = customerId,
+            saleType = "CASH",
+            totalAmount = 100.0,
+            paidAmount = 100.0,
+            creditAmount = 0.0,
+            paymentStatus = "PAID",
+            transactionDate = "2026-09-29",
+            status = "ACTIVE"
+        )
+        val line = SaleLine(
+            id = "sl_1",
+            saleId = "s_normal",
+            productId = "prod_1",
+            productNameSnapshot = "Product 1",
+            quantity = 2,
+            unitPrice = 50.0,
+            costPriceAtSale = 30.0, // 2 * 30 = 60 COGS
+            subtotal = 100.0
+        )
+
+        val totals = FinancialReportCalculator.calculateFromSales(
+            sales = listOf(sale),
+            saleLines = listOf(line)
+        )
+
+        assertEquals(100.0, totals.totalSales, 0.0001)
+        assertEquals(100.0, totals.netSales, 0.0001)
+        assertEquals(60.0, totals.cogs, 0.0001)
+        assertEquals(40.0, totals.grossProfit, 0.0001)
+        assertEquals(0.40, totals.grossMargin, 0.0001)
+        assertEquals(40.0, totals.grossMarginPercent, 0.0001)
+    }
+
+    /**
+     * Test B: Multiple sale lines.
+     * Verify COGS equals the sum of quantity * frozen historical cost.
+     */
+    @Test
+    fun testPhase4Step1_TestB_multipleSaleLines() {
+        val sale = Sale(
+            id = "s_multi",
+            invoiceNumber = "INV-P4-002",
+            customerId = customerId,
+            saleType = "MIXED",
+            totalAmount = 250.0,
+            paidAmount = 100.0,
+            creditAmount = 150.0,
+            paymentStatus = "PARTIAL",
+            transactionDate = "2026-09-29",
+            status = "ACTIVE"
+        )
+        val line1 = SaleLine(
+            id = "sl_m1",
+            saleId = "s_multi",
+            productId = "prod_1",
+            productNameSnapshot = "Product 1",
+            quantity = 3,
+            unitPrice = 50.0,
+            costPriceAtSale = 25.0, // 3 * 25 = 75
+            subtotal = 150.0
+        )
+        val line2 = SaleLine(
+            id = "sl_m2",
+            saleId = "s_multi",
+            productId = "prod_2",
+            productNameSnapshot = "Product 2",
+            quantity = 2,
+            unitPrice = 50.0,
+            costPriceAtSale = 35.0, // 2 * 35 = 70
+            subtotal = 100.0
+        )
+
+        // Expected COGS = 75 + 70 = 145.0
+        val cogs = FinancialReportCalculator.calculateCogs(
+            sales = listOf(sale),
+            saleLines = listOf(line1, line2)
+        )
+        assertEquals(145.0, cogs, 0.0001)
+
+        val totals = FinancialReportCalculator.calculateFromSales(
+            sales = listOf(sale),
+            saleLines = listOf(line1, line2)
+        )
+        assertEquals(250.0, totals.netSales, 0.0001)
+        assertEquals(145.0, totals.cogs, 0.0001)
+        assertEquals(105.0, totals.grossProfit, 0.0001)
+        assertEquals(105.0 / 250.0, totals.grossMargin, 0.0001)
+    }
+
+    /**
+     * Test C: Sale return.
+     * Verify returned quantity reverses its historical COGS contribution.
+     */
+    @Test
+    fun testPhase4Step1_TestC_saleReturnReversesCogs() {
+        val sale = Sale(
+            id = "s_ret_orig",
+            invoiceNumber = "INV-P4-003",
+            customerId = customerId,
+            saleType = "CASH",
+            totalAmount = 200.0,
+            paidAmount = 200.0,
+            creditAmount = 0.0,
+            paymentStatus = "PAID",
+            transactionDate = "2026-09-29",
+            status = "ACTIVE"
+        )
+        val saleLine = SaleLine(
+            id = "sl_ret_1",
+            saleId = "s_ret_orig",
+            productId = "prod_ret",
+            productNameSnapshot = "Returnable Item",
+            quantity = 4,
+            unitPrice = 50.0,
+            costPriceAtSale = 30.0, // Initial COGS = 4 * 30 = 120
+            subtotal = 200.0
+        )
+
+        val saleReturn = SaleReturn(
+            id = "sr_1",
+            saleId = "s_ret_orig",
+            customerId = customerId,
+            returnDate = "2026-09-29",
+            reason = "Customer changed mind",
+            amount = 50.0, // 1 item returned
+            status = "ACTIVE"
+        )
+        val returnLine = SaleReturnLine(
+            id = "srl_1",
+            saleReturnId = "sr_1",
+            saleLineId = "sl_ret_1",
+            productId = "prod_ret",
+            productNameSnapshot = "Returnable Item",
+            quantity = 1,
+            unitPrice = 50.0,
+            costPriceAtReturn = 30.0, // Reverses 1 * 30 = 30 COGS
+            subtotal = 50.0
+        )
+
+        val totals = FinancialReportCalculator.calculateFromSales(
+            sales = listOf(sale),
+            saleLines = listOf(saleLine),
+            saleReturns = listOf(saleReturn),
+            saleReturnLines = listOf(returnLine)
+        )
+
+        // Net Sales = 200 - 50 = 150.0
+        assertEquals(150.0, totals.netSales, 0.0001)
+        // Net COGS = 120 - 30 = 90.0
+        assertEquals(90.0, totals.cogs, 0.0001)
+        // Gross Profit = 150 - 90 = 60.0
+        assertEquals(60.0, totals.grossProfit, 0.0001)
+        // Gross Margin = 60 / 150 = 0.40 (40%)
+        assertEquals(0.40, totals.grossMargin, 0.0001)
+    }
+
+    /**
+     * Test D: Reversed sale.
+     * Verify it does not contribute to active COGS/profit.
+     */
+    @Test
+    fun testPhase4Step1_TestD_reversedSaleExclusion() {
+        val activeSale = Sale(
+            id = "s_active",
+            invoiceNumber = "INV-P4-004A",
+            customerId = customerId,
+            saleType = "CASH",
+            totalAmount = 100.0,
+            paidAmount = 100.0,
+            creditAmount = 0.0,
+            paymentStatus = "PAID",
+            transactionDate = "2026-09-29",
+            status = "ACTIVE"
+        )
+        val activeLine = SaleLine(
+            id = "sl_act",
+            saleId = "s_active",
+            productId = "prod_a",
+            productNameSnapshot = "Active Item",
+            quantity = 2,
+            unitPrice = 50.0,
+            costPriceAtSale = 30.0, // COGS = 60.0
+            subtotal = 100.0
+        )
+
+        val reversedSale = Sale(
+            id = "s_reversed",
+            invoiceNumber = "INV-P4-004B",
+            customerId = customerId,
+            saleType = "CREDIT",
+            totalAmount = 300.0,
+            paidAmount = 0.0,
+            creditAmount = 300.0,
+            paymentStatus = "UNPAID",
+            transactionDate = "2026-09-29",
+            status = "REVERSED"
+        )
+        val reversedLine = SaleLine(
+            id = "sl_rev",
+            saleId = "s_reversed",
+            productId = "prod_b",
+            productNameSnapshot = "Reversed Item",
+            quantity = 3,
+            unitPrice = 100.0,
+            costPriceAtSale = 70.0, // COGS = 210.0 (MUST BE EXCLUDED)
+            subtotal = 300.0
+        )
+
+        val totals = FinancialReportCalculator.calculateFromSales(
+            sales = listOf(activeSale, reversedSale),
+            saleLines = listOf(activeLine, reversedLine)
+        )
+
+        // Active revenue = 100.0, reversed excluded
+        assertEquals(100.0, totals.totalSales, 0.0001)
+        assertEquals(100.0, totals.netSales, 0.0001)
+        // Active COGS = 60.0, reversed line (210.0) excluded
+        assertEquals(60.0, totals.cogs, 0.0001)
+        // Active Gross Profit = 100 - 60 = 40.0
+        assertEquals(40.0, totals.grossProfit, 0.0001)
+        assertEquals(0.40, totals.grossMargin, 0.0001)
+    }
+
+    /**
+     * Test E: Zero revenue.
+     * Verify no division-by-zero.
+     */
+    @Test
+    fun testPhase4Step1_TestE_zeroRevenueDivisionByZero() {
+        val totals = FinancialReportCalculator.calculateFromSales(
+            sales = emptyList(),
+            saleLines = emptyList()
+        )
+
+        assertEquals(0.0, totals.totalSales, 0.0001)
+        assertEquals(0.0, totals.netSales, 0.0001)
+        assertEquals(0.0, totals.cogs, 0.0001)
+        assertEquals(0.0, totals.grossProfit, 0.0001)
+        assertEquals(0.0, totals.grossMargin, 0.0001)
+        assertFalse(totals.grossMargin.isNaN())
+        assertFalse(totals.grossMargin.isInfinite())
+
+        // Also test direct helper method
+        val margin = FinancialReportCalculator.calculateGrossMargin(grossProfit = 0.0, netSales = 0.0)
+        assertEquals(0.0, margin, 0.0001)
+        assertFalse(margin.isNaN())
+        assertFalse(margin.isInfinite())
     }
 }

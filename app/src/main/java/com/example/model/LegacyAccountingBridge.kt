@@ -97,6 +97,14 @@ object LegacyAccountingBridge {
         "Customer Refund"
     )
 
+    private val EXACT_LEGACY_OPENING_BALANCE_TOKENS: Set<String> = setOf(
+        "OPENING_BALANCE",
+        "رصيد افتتاحي",
+        "رصيد أول المدة",
+        "Opening Balance",
+        "Initial Balance"
+    )
+
     private val EXACT_LEGACY_SUPPLIER_PURCHASE_TOKENS: Set<String> = setOf(
         "PURCHASE",
         "فاتورة مشتريات",
@@ -144,11 +152,12 @@ object LegacyAccountingBridge {
             EXACT_LEGACY_ADJUSTMENT_TOKENS.contains(token) -> TransactionType.BALANCE_ADJUSTMENT
             EXACT_LEGACY_SALE_RETURN_TOKENS.contains(token) -> TransactionType.SALE_RETURN
             EXACT_LEGACY_REFUND_TOKENS.contains(token) -> TransactionType.CUSTOMER_REFUND
+            EXACT_LEGACY_OPENING_BALANCE_TOKENS.contains(token) -> TransactionType.OPENING_BALANCE
             EXACT_LEGACY_SALE_CASH_TOKENS.contains(token) -> TransactionType.SALE
             EXACT_LEGACY_SALE_CREDIT_TOKENS.contains(token) -> TransactionType.SALE
             EXACT_LEGACY_GENERIC_SALE_TOKENS.contains(token) -> TransactionType.SALE
-            isCredit -> TransactionType.SALE // In SmallStore, debt was strictly incurred via sales
-            else -> null // Unknown legacy record; preserve safely without guessing
+            isCredit && (token.isEmpty() || EXACT_LEGACY_SALE_CREDIT_TOKENS.contains(token)) -> TransactionType.SALE
+            else -> null // Unknown legacy record; preserve safely without guessing. Never automatically convert generic transactions into debt.
         }
     }
 

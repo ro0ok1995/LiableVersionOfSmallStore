@@ -1,6 +1,11 @@
 package com.example.accounting
 
+import com.example.data.db.Expense
 import com.example.data.db.Sale
+import com.example.data.db.SaleLine
+import com.example.data.db.SaleReturn
+import com.example.data.db.SaleReturnLine
+import com.example.data.db.TransactionItemLineEntity
 import com.example.model.OperationStatus
 import com.example.model.SaleType
 import com.example.model.TransactionItem
@@ -59,7 +64,8 @@ data class TransactionFinancialDecomposition(
     val receivableChange: Double = 0.0,
     val isReversed: Boolean = false,
     val fullSettlementAmount: Double = 0.0,
-    val partialSettlementAmount: Double = 0.0
+    val partialSettlementAmount: Double = 0.0,
+    val expenses: Double = 0.0
 )
 
 /**
@@ -89,10 +95,24 @@ data class FinancialReportTotals(
     val reversedPaymentsVolume: Double = 0.0,
     val totalReversedVolume: Double = 0.0,
     val fullSettlementAmount: Double = 0.0,
-    val partialSettlementAmount: Double = 0.0
+    val partialSettlementAmount: Double = 0.0,
+    val cogs: Double = 0.0,
+    val grossProfit: Double = 0.0,
+    val grossMargin: Double = 0.0,
+    val expenses: Double = 0.0,
+    val netProfit: Double = 0.0
 ) {
     val netSales: Double
         get() = totalSales - saleReturns
+
+    val grossMarginPercent: Double
+        get() = grossMargin * 100.0
+
+    val netMargin: Double
+        get() = if (netSales > 0.0001) netProfit / netSales else 0.0
+
+    val netMarginPercent: Double
+        get() = netMargin * 100.0
 }
 
 object FinancialReportCalculator {
@@ -136,6 +156,7 @@ object FinancialReportCalculator {
         var debitAdjustments = 0.0
         var creditAdjustments = 0.0
         var receivableChange = 0.0
+        var expenses = 0.0
 
         when (type) {
             TransactionType.SALE -> {
@@ -244,6 +265,9 @@ object FinancialReportCalculator {
                     receivableChange = -tx.amount
                 }
             }
+            TransactionType.EXPENSE -> {
+                expenses = tx.amount
+            }
             else -> {
                 if (tx.isCredit) {
                     receivableChange = tx.amount
@@ -267,7 +291,8 @@ object FinancialReportCalculator {
             receivableChange = receivableChange,
             isReversed = false,
             fullSettlementAmount = fullSettlementAmount,
-            partialSettlementAmount = partialSettlementAmount
+            partialSettlementAmount = partialSettlementAmount,
+            expenses = expenses
         )
     }
 
@@ -344,6 +369,7 @@ object FinancialReportCalculator {
         var debitAdjustments = 0.0
         var creditAdjustments = 0.0
         var netReceivableIncrease = 0.0
+        var expenses = 0.0
 
         var activeCount = 0
         var reversedCount = 0
@@ -381,6 +407,7 @@ object FinancialReportCalculator {
             debitAdjustments += d.debitAdjustments
             creditAdjustments += d.creditAdjustments
             netReceivableIncrease += d.receivableChange
+            expenses += d.expenses
 
             when (d.transactionType) {
                 TransactionType.SALE -> {
@@ -424,32 +451,197 @@ object FinancialReportCalculator {
             reversedPaymentsVolume = reversedPaymentsVolume,
             totalReversedVolume = totalReversedVolume,
             fullSettlementAmount = fullSettlementAmount,
-            partialSettlementAmount = partialSettlementAmount
+            partialSettlementAmount = partialSettlementAmount,
+            expenses = expenses
         )
     }
 
     /**
-     * Primary entry point: Calculates authoritative financial totals directly from a list
-     * of domain [TransactionItem]s.
+     * Phase 4: Calculates Cost of Goods Sold (COGS) from persisted [SaleLine]s and [SaleReturnLine]s.
+     *
+     * Invariants:
+     * - Line COGS = quantity * costPriceAtSale (frozen historical cost snapshot).
+     * - Sale Return COGS reversed = quantity * costPriceAtReturn (via cogsReversed).
+     * - REVERSED sales and REVERSED sale returns are strictly excluded.
+     * - Net COGS = max(0.0, activeSalesCogs - activeReturnsCogs).
      */
-    fun calculate(transactions: List<TransactionItem>): FinancialReportTotals {
-        val decompositions = transactions.map { decomposeTransaction(it) }
-        return calculateTotalsFromDecompositions(decompositions)
+    fun calculateCogs(
+        sales: List<Sale>,
+        saleLines: List<SaleLine>,
+        saleReturns: List<SaleReturn> = emptyList(),
+        saleReturnLines: List<SaleReturnLine> = emptyList()
+    ): Double {
+        val reversedSaleIds = sales.filter { it.status == "REVERSED" }.map { it.id }.toSet()
+        val reversedReturnIds = saleReturns.filter { it.status == "REVERSED" }.map { it.id }.toSet()
+        return calculateCogs(saleLines, reversedSaleIds, saleReturnLines, reversedReturnIds)
     }
 
     /**
-     * Calculates authoritative financial totals directly from a list of first-class [Sale] entities.
+     * Calculates Cost of Goods Sold (COGS) directly from [SaleLine]s with explicit set of reversed IDs.
      */
-    fun calculateFromSales(sales: List<Sale>): FinancialReportTotals {
+    fun calculateCogs(
+        saleLines: List<SaleLine>,
+        reversedSaleIds: Set<String> = emptySet(),
+        saleReturnLines: List<SaleReturnLine> = emptyList(),
+        reversedReturnIds: Set<String> = emptySet()
+    ): Double {
+        val salesCogs = saleLines
+            .filter { it.saleId !in reversedSaleIds }
+            .sumOf { it.quantity * it.costPriceAtSale }
+
+        val returnsCogs = saleReturnLines
+            .filter { it.saleReturnId !in reversedReturnIds }
+            .sumOf { it.cogsReversed }
+
+        return (salesCogs - returnsCogs).coerceAtLeast(0.0)
+    }
+
+    /**
+     * Phase 4: Calculates Cost of Goods Sold (COGS) from legacy [TransactionItemLineEntity] rows.
+     */
+    fun calculateCogsFromTransactionLines(
+        transactions: List<TransactionItem>,
+        transactionLines: List<TransactionItemLineEntity>
+    ): Double {
+        val reversedTxIds = transactions
+            .filter { (it.operationStatus ?: it.typedOperationStatus) == OperationStatus.REVERSED }
+            .map { it.id }
+            .toSet()
+        return transactionLines
+            .filter { it.transactionId !in reversedTxIds }
+            .sumOf { it.quantity * it.costPrice }
+            .coerceAtLeast(0.0)
+    }
+
+    /**
+     * Phase 4: Calculates Gross Profit.
+     * Gross Profit = Net Sales Revenue - COGS
+     */
+    fun calculateGrossProfit(netSales: Double, cogs: Double): Double {
+        return netSales - cogs
+    }
+
+    /**
+     * Phase 4: Calculates Gross Margin.
+     * Gross Margin = Gross Profit / Net Sales Revenue
+     * Avoids division by zero if Net Sales Revenue <= 0.
+     */
+    fun calculateGrossMargin(grossProfit: Double, netSales: Double): Double {
+        return if (netSales > EPSILON) grossProfit / netSales else 0.0
+    }
+
+    /**
+     * Phase 4C: Calculates Operating Expenses from a list of first-class [Expense] entities.
+     * Invariant: Excludes REVERSED expenses.
+     */
+    fun calculateOperatingExpenses(expenses: List<Expense>): Double {
+        return expenses.filter { it.status != "REVERSED" }.sumOf { it.amount }
+    }
+
+    /**
+     * Phase 4C: Calculates Net Profit.
+     * Net Profit = Gross Profit - Operating Expenses
+     *
+     * Invariants:
+     * - Loss values remain negative (never clamped to zero).
+     * - Cash movements (collections, deposits) are NOT treated as profit.
+     * - Customer payments are receivables collections, NOT revenue.
+     */
+    fun calculateNetProfit(grossProfit: Double, operatingExpenses: Double): Double {
+        return grossProfit - operatingExpenses
+    }
+
+    /**
+     * Primary entry point: Calculates authoritative financial totals directly from a list
+     * of domain [TransactionItem]s and optional line entities.
+     */
+    fun calculate(
+        transactions: List<TransactionItem>,
+        transactionLines: List<TransactionItemLineEntity> = emptyList()
+    ): FinancialReportTotals {
+        val decompositions = transactions.map { decomposeTransaction(it) }
+        val baseTotals = calculateTotalsFromDecompositions(decompositions)
+        if (transactionLines.isEmpty()) {
+            val netProfit = calculateNetProfit(baseTotals.netSales, baseTotals.expenses)
+            return baseTotals.copy(
+                grossProfit = baseTotals.netSales,
+                grossMargin = calculateGrossMargin(baseTotals.netSales, baseTotals.netSales),
+                netProfit = netProfit
+            )
+        }
+
+        val cogs = calculateCogsFromTransactionLines(transactions, transactionLines)
+        val grossProfit = calculateGrossProfit(baseTotals.netSales, cogs)
+        val grossMargin = calculateGrossMargin(grossProfit, baseTotals.netSales)
+        val netProfit = calculateNetProfit(grossProfit, baseTotals.expenses)
+
+        return baseTotals.copy(
+            cogs = cogs,
+            grossProfit = grossProfit,
+            grossMargin = grossMargin,
+            netProfit = netProfit
+        )
+    }
+
+    /**
+     * Calculates authoritative financial totals directly from a list of first-class [Sale] entities,
+     * with optional line items, return lines, and expenses for authoritative COGS, Gross Profit, and Net Profit calculation.
+     */
+    fun calculateFromSales(
+        sales: List<Sale>,
+        saleLines: List<SaleLine> = emptyList(),
+        saleReturns: List<SaleReturn> = emptyList(),
+        saleReturnLines: List<SaleReturnLine> = emptyList(),
+        expenses: List<Expense> = emptyList()
+    ): FinancialReportTotals {
         val decompositions = sales.map { saleToDecomposition(it) }
-        return calculateTotalsFromDecompositions(decompositions)
+        val baseTotals = calculateTotalsFromDecompositions(decompositions)
+
+        val activeReturns = saleReturns.filter { it.status != "REVERSED" }
+        val returnAmount = activeReturns.sumOf { it.amount }
+        val effectiveReturns = if (returnAmount > 0.0) returnAmount else baseTotals.saleReturns
+        val netSales = baseTotals.totalSales - effectiveReturns
+        val totalExpenses = calculateOperatingExpenses(expenses)
+
+        if (saleLines.isEmpty()) {
+            val grossProfit = netSales
+            val grossMargin = calculateGrossMargin(grossProfit, netSales)
+            val netProfit = calculateNetProfit(grossProfit, totalExpenses)
+            return baseTotals.copy(
+                saleReturns = effectiveReturns,
+                grossProfit = grossProfit,
+                grossMargin = grossMargin,
+                expenses = totalExpenses,
+                netProfit = netProfit
+            )
+        }
+
+        val cogs = calculateCogs(sales, saleLines, saleReturns, saleReturnLines)
+        val grossProfit = calculateGrossProfit(netSales, cogs)
+        val grossMargin = calculateGrossMargin(grossProfit, netSales)
+        val netProfit = calculateNetProfit(grossProfit, totalExpenses)
+
+        return baseTotals.copy(
+            saleReturns = effectiveReturns,
+            cogs = cogs,
+            grossProfit = grossProfit,
+            grossMargin = grossMargin,
+            expenses = totalExpenses,
+            netProfit = netProfit
+        )
     }
 
     /**
      * Convenience method to calculate financial report totals for a specific customer.
      */
-    fun calculateCustomerTotals(customerId: String, transactions: List<TransactionItem>): FinancialReportTotals {
+    fun calculateCustomerTotals(
+        customerId: String,
+        transactions: List<TransactionItem>,
+        transactionLines: List<TransactionItemLineEntity> = emptyList()
+    ): FinancialReportTotals {
         val customerTransactions = transactions.filter { it.customerId == customerId }
-        return calculate(customerTransactions)
+        val custTxIds = customerTransactions.map { it.id }.toSet()
+        val customerLines = transactionLines.filter { it.transactionId in custTxIds }
+        return calculate(customerTransactions, customerLines)
     }
 }

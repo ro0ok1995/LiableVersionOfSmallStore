@@ -72,6 +72,7 @@ import com.example.model.LanguageMode
 import com.example.model.SettlementType
 import com.example.model.StoreStrings
 import com.example.model.TransactionItem
+import com.example.accounting.CustomerLedgerCalculator
 import com.example.accounting.FinancialReportCalculator
 import com.example.ui.components.CustomerSearchField
 import com.example.ui.theme.GeoOutline
@@ -121,10 +122,16 @@ fun AccountsScreen(
         }
     }
 
-    val sortedAccounts = remember(accounts, sortOption, customerCashTotals) {
+    val customerBalances = remember(transactions) {
+        transactions.groupBy { it.customerId }.mapValues { (custId, txs) ->
+            if (custId != null) CustomerLedgerCalculator.calculateCustomerBalance(custId, txs).balance else 0.0
+        }
+    }
+
+    val sortedAccounts = remember(accounts, sortOption, customerCashTotals, customerBalances) {
         when (sortOption) {
             AccountSortOption.DEFAULT -> accounts
-            AccountSortOption.HIGHEST_DEBT -> accounts.sortedByDescending { it.balance }
+            AccountSortOption.HIGHEST_DEBT -> accounts.sortedByDescending { customerBalances[it.id] ?: 0.0 }
             AccountSortOption.HIGHEST_CASH -> accounts.sortedByDescending { customer ->
                 customerCashTotals[customer.id] ?: 0.0
             }
@@ -431,8 +438,10 @@ fun AccountsScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                 }
                 items(items = sortedAccounts, key = { it.id }) { customer ->
+                    val liveBalance = customerBalances[customer.id] ?: 0.0
                     CustomerCardItem(
                         customer = customer,
+                        balance = liveBalance,
                         currency = currency,
                         isArabic = isArabic,
                         onClick = { onCustomerClick(customer) }
@@ -457,12 +466,13 @@ fun AccountsScreen(
 @Composable
 private fun CustomerCardItem(
     customer: CustomerAccount,
+    balance: Double,
     currency: String,
     isArabic: Boolean = true,
     onClick: () -> Unit
 ) {
-    val hasDebt = customer.balance > 0
-    val isPaidUp = customer.balance == 0.0
+    val hasDebt = balance > 0.001
+    val isPaidUp = Math.abs(balance) <= 0.001
 
     Card(
         shape = RoundedCornerShape(14.dp),
@@ -544,7 +554,7 @@ private fun CustomerCardItem(
                                 Locale.US,
                                 "%s%,.2f %s",
                                 if (hasDebt) "" else "-",
-                                customer.balance,
+                                balance,
                                 currency
                             ),
                             fontSize = 12.sp,

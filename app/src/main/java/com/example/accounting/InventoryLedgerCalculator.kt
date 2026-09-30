@@ -403,7 +403,8 @@ object InventoryLedgerCalculator {
         productId: String,
         movements: List<StockMovementEntity>,
         fallbackUnitCost: Double = 0.0,
-        productName: String = ""
+        productName: String = "",
+        openingQuantity: Int = 0
     ): ProductStockSummary {
         var totalPurchased = 0
         var totalSold = 0
@@ -467,7 +468,7 @@ object InventoryLedgerCalculator {
             }
         }
 
-        val quantityOnHand = totalPurchased - totalSold + totalReturnedFromSales - totalReturnedToSuppliers + totalAdjustments
+        val quantityOnHand = openingQuantity + totalPurchased - totalSold + totalReturnedFromSales - totalReturnedToSuppliers + totalAdjustments
         val unitCost = latestActivePurchaseUnitCost ?: fallbackUnitCost
         val totalValuation = if (quantityOnHand > 0) quantityOnHand * unitCost else 0.0
 
@@ -494,7 +495,8 @@ object InventoryLedgerCalculator {
         productIds: Set<String>,
         movements: List<StockMovementEntity>,
         productCostPrices: Map<String, Double> = emptyMap(),
-        productNames: Map<String, String> = emptyMap()
+        productNames: Map<String, String> = emptyMap(),
+        openingQuantities: Map<String, Int> = emptyMap()
     ): Map<String, ProductStockSummary> {
         val movementsByProduct = movements.groupBy { it.productId }
         return productIds.associateWith { pid ->
@@ -502,7 +504,8 @@ object InventoryLedgerCalculator {
                 productId = pid,
                 movements = movementsByProduct[pid] ?: emptyList(),
                 fallbackUnitCost = productCostPrices[pid] ?: 0.0,
-                productName = productNames[pid] ?: ""
+                productName = productNames[pid] ?: "",
+                openingQuantity = openingQuantities[pid] ?: 0
             )
         }
     }

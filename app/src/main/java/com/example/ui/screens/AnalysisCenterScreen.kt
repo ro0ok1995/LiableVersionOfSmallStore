@@ -2002,8 +2002,8 @@ private fun ReportsTabContent(
     val sum90Plus = storeAgingSummary.sum90Plus
 
     // 2. SALES_AND_ITEMS calculations
-    val salesBreakdown = remember(periodTransactions) {
-        FinancialReportCalculator.calculate(periodTransactions)
+    val salesBreakdown = remember(periodTransactions, transactionLines) {
+        FinancialReportCalculator.calculate(periodTransactions, transactionLines)
     }
     val cashSalesInvoices = remember(periodTransactions) {
         periodTransactions.filter { tx ->
@@ -2036,10 +2036,8 @@ private fun ReportsTabContent(
             .map { (name, lines) ->
                 val totalQty = lines.sumOf { it.quantity }
                 val totalSales = lines.sumOf { it.subtotal }
-                val profitMargin = lines.sumOf { line ->
-                    val margin = (line.unitPrice - line.costPrice).coerceAtLeast(0.0)
-                    margin * line.quantity
-                }
+                val lineCogs = FinancialReportCalculator.calculateCogsFromTransactionLines(periodTransactions, lines)
+                val profitMargin = FinancialReportCalculator.calculateGrossProfit(totalSales, lineCogs)
                 AggregatedProductLine(
                     productId = lines.firstOrNull()?.productId ?: "",
                     productName = name,
@@ -2065,8 +2063,8 @@ private fun ReportsTabContent(
             tx.customerId == selectedCustomer.id
         }.sortedByDescending { it.date }
     }
-    val customerBreakdown = remember(customerTransactions) {
-        FinancialReportCalculator.calculate(customerTransactions)
+    val customerBreakdown = remember(customerTransactions, transactionLines) {
+        FinancialReportCalculator.calculate(customerTransactions, transactionLines)
     }
     val customerCashPurchases = customerBreakdown.cashSales
     val customerDebtPurchases = customerBreakdown.creditSales
@@ -2085,7 +2083,10 @@ private fun ReportsTabContent(
                     productName = name,
                     totalQuantity = gLines.sumOf { it.quantity },
                     totalSales = gLines.sumOf { it.subtotal },
-                    profitMargin = 0.0
+                    profitMargin = FinancialReportCalculator.calculateGrossProfit(
+                        gLines.sumOf { it.subtotal },
+                        FinancialReportCalculator.calculateCogsFromTransactionLines(customerTransactions, gLines)
+                    )
                 )
             }.sortedByDescending { it.totalQuantity }
     }

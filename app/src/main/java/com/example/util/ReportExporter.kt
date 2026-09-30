@@ -1020,6 +1020,7 @@ object ReportExporter {
         isArabic: Boolean = true
     ) {
         val customerDomainTotals = FinancialReportCalculator.calculateCustomerTotals(customer.id, transactions)
+        val customerLedgerBalance = CustomerLedgerCalculator.calculateCustomerBalance(customer.id, transactions).balance
         val resolvedCash = if (totalCash >= 0.0) totalCash else customerDomainTotals.cashSales
         val resolvedDebt = if (totalDebt >= 0.0) totalDebt else customerDomainTotals.creditSales
         val resolvedPayments = if (totalPayments >= 0.0) totalPayments else customerDomainTotals.customerPayments
@@ -1339,14 +1340,14 @@ object ReportExporter {
                     canvas.drawText(phoneText, margin + 14f, y + 40f, paint)
                 }
 
-                val balanceStatusText = if (customer.balance > 0) {
-                    if (isArabic) "الرصيد المستحق: ${AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)}"
-                    else "Outstanding Balance: ${AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)}"
+                val balanceStatusText = if (customerLedgerBalance > 0.001) {
+                    if (isArabic) "الرصيد المستحق: ${AppCurrency.formatAmountWithDecimals(customerLedgerBalance, isArabic)}"
+                    else "Outstanding Balance: ${AppCurrency.formatAmountWithDecimals(customerLedgerBalance, isArabic)}"
                 } else {
                     if (isArabic) "الحساب مسدد بالكامل (0.00 ₪)"
                     else "Fully Settled Account (0.00 ₪)"
                 }
-                paint.color = if (customer.balance > 0) redColor else greenColor
+                paint.color = if (customerLedgerBalance > 0.001) redColor else greenColor
                 paint.textSize = 10f
                 paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                 if (isArabic) {
@@ -1363,7 +1364,7 @@ object ReportExporter {
                 // 3. CUSTOMER SUMMARY (Summary KPI Cards)
                 // =====================================================================
                 val customerKpis = listOf(
-                    (if (isArabic) "الرصيد المستحق" else "Balance Due") to AppCurrency.formatAmountWithDecimals(customer.balance, isArabic),
+                    (if (isArabic) "الرصيد المستحق" else "Balance Due") to AppCurrency.formatAmountWithDecimals(customerLedgerBalance, isArabic),
                     (if (isArabic) "مشتريات كاش" else "Cash Purchases") to AppCurrency.formatAmountWithDecimals(resolvedCash, isArabic),
                     (if (isArabic) "مشتريات آجل" else "Debt Purchases") to AppCurrency.formatAmountWithDecimals(resolvedDebt, isArabic),
                     (if (isArabic) "إجمالي المسدد" else "Payments") to AppCurrency.formatAmountWithDecimals(resolvedPayments, isArabic)
@@ -1404,7 +1405,7 @@ object ReportExporter {
                         canvas.drawText(kpiTitle, cardLeft + 8f, y + 16f, paint)
                     }
 
-                    paint.color = if (k == 0 && customer.balance > 0) redColor else primaryColor
+                    paint.color = if (k == 0 && customerLedgerBalance > 0.001) redColor else primaryColor
                     paint.textSize = 10.5f
                     paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                     if (isArabic) {
@@ -1752,9 +1753,9 @@ object ReportExporter {
             paint.textSize = 8.5f
             paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             val balanceSummaryText = if (isArabic) {
-                "الرصيد المستحق: ${AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)}   |   مشتريات كاش: ${AppCurrency.formatAmountWithDecimals(resolvedCash, isArabic)}   |   مشتريات آجل: ${AppCurrency.formatAmountWithDecimals(resolvedDebt, isArabic)}   |   المسدد: ${AppCurrency.formatAmountWithDecimals(resolvedPayments, isArabic)}"
+                "الرصيد المستحق: ${AppCurrency.formatAmountWithDecimals(customerLedgerBalance, isArabic)}   |   مشتريات كاش: ${AppCurrency.formatAmountWithDecimals(resolvedCash, isArabic)}   |   مشتريات آجل: ${AppCurrency.formatAmountWithDecimals(resolvedDebt, isArabic)}   |   المسدد: ${AppCurrency.formatAmountWithDecimals(resolvedPayments, isArabic)}"
             } else {
-                "Balance Due: ${AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)}   |   Cash: ${AppCurrency.formatAmountWithDecimals(resolvedCash, isArabic)}   |   Debt: ${AppCurrency.formatAmountWithDecimals(resolvedDebt, isArabic)}   |   Payments: ${AppCurrency.formatAmountWithDecimals(resolvedPayments, isArabic)}"
+                "Balance Due: ${AppCurrency.formatAmountWithDecimals(customerLedgerBalance, isArabic)}   |   Cash: ${AppCurrency.formatAmountWithDecimals(resolvedCash, isArabic)}   |   Debt: ${AppCurrency.formatAmountWithDecimals(resolvedDebt, isArabic)}   |   Payments: ${AppCurrency.formatAmountWithDecimals(resolvedPayments, isArabic)}"
             }
             paint.textAlign = Paint.Align.CENTER
             activePage.canvas.drawText(balanceSummaryText, pageWidth / 2f, activePage.currentY + 18f, paint)
@@ -3174,6 +3175,7 @@ object ReportExporter {
         isArabic: Boolean = true
     ): String {
         val customerDomainTotals = FinancialReportCalculator.calculateCustomerTotals(customer.id, transactions)
+        val customerLedgerBalance = CustomerLedgerCalculator.calculateCustomerBalance(customer.id, transactions).balance
         val resolvedCash = if (totalCash >= 0.0) totalCash else customerDomainTotals.cashSales
         val resolvedDebt = if (totalDebt >= 0.0) totalDebt else customerDomainTotals.creditSales
         val resolvedPayments = if (totalPayments >= 0.0) totalPayments else customerDomainTotals.customerPayments
@@ -3205,8 +3207,8 @@ object ReportExporter {
         sb.append(csvRow(if (isArabic) "اسم العميل" else "Customer Name", customer.customerName))
         val phoneVal = customer.phone.ifBlank { if (isArabic) "غير محدد" else "Not Specified" }
         sb.append(csvRow(if (isArabic) "رقم الهاتف" else "Phone Number", phoneVal))
-        sb.append(csvRow(if (isArabic) "الرصيد المستحق" else "Outstanding Balance", AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)))
-        val statusVal = if (customer.balance > 0) {
+        sb.append(csvRow(if (isArabic) "الرصيد المستحق" else "Outstanding Balance", AppCurrency.formatAmountWithDecimals(customerLedgerBalance, isArabic)))
+        val statusVal = if (customerLedgerBalance > 0.001) {
             if (isArabic) "رصيد مستحق" else "Balance Due"
         } else {
             if (isArabic) "الحساب مسدد بالكامل" else "Fully Settled Account"
@@ -3217,7 +3219,7 @@ object ReportExporter {
         // SECTION 3: Customer Summary
         val summarySecTitle = if (isArabic) "ملخص حساب العميل" else "Customer Account Summary"
         sb.append(csvRow(summarySecTitle))
-        sb.append(csvRow(if (isArabic) "الرصيد المستحق" else "Outstanding Balance", AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)))
+        sb.append(csvRow(if (isArabic) "الرصيد المستحق" else "Outstanding Balance", AppCurrency.formatAmountWithDecimals(customerLedgerBalance, isArabic)))
         sb.append(csvRow(if (isArabic) "مشتريات كاش" else "Cash Purchases", AppCurrency.formatAmountWithDecimals(resolvedCash, isArabic)))
         sb.append(csvRow(if (isArabic) "مشتريات آجل" else "Credit Purchases", AppCurrency.formatAmountWithDecimals(resolvedDebt, isArabic)))
         sb.append(csvRow(if (isArabic) "إجمالي المسدد" else "Total Payments", AppCurrency.formatAmountWithDecimals(resolvedPayments, isArabic)))
@@ -3309,7 +3311,7 @@ object ReportExporter {
             sb.append("\n")
             val finalBalanceTitle = if (isArabic) "الرصيد والحساب النهائي للعميل" else "Final Customer Balance & Totals"
             sb.append(csvRow(finalBalanceTitle))
-            sb.append(csvRow(if (isArabic) "الرصيد المستحق" else "Balance Due", AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)))
+            sb.append(csvRow(if (isArabic) "الرصيد المستحق" else "Balance Due", AppCurrency.formatAmountWithDecimals(customerLedgerBalance, isArabic)))
             sb.append(csvRow(if (isArabic) "مشتريات كاش" else "Cash Purchases", AppCurrency.formatAmountWithDecimals(resolvedCash, isArabic)))
             sb.append(csvRow(if (isArabic) "مشتريات آجل" else "Debt Purchases", AppCurrency.formatAmountWithDecimals(resolvedDebt, isArabic)))
             sb.append(csvRow(if (isArabic) "إجمالي المسدد" else "Total Payments", AppCurrency.formatAmountWithDecimals(resolvedPayments, isArabic)))
@@ -3676,6 +3678,7 @@ object ReportExporter {
         isArabic: Boolean = true
     ): String {
         val customerDomainTotals = FinancialReportCalculator.calculateCustomerTotals(customer.id, transactions)
+        val customerLedgerBalance = CustomerLedgerCalculator.calculateCustomerBalance(customer.id, transactions).balance
         val resolvedCash = if (totalCash >= 0.0) totalCash else customerDomainTotals.cashSales
         val resolvedDebt = if (totalDebt >= 0.0) totalDebt else customerDomainTotals.creditSales
         val resolvedPayments = if (totalPayments >= 0.0) totalPayments else customerDomainTotals.customerPayments
@@ -3706,8 +3709,8 @@ object ReportExporter {
         sb.appendLine("${if (isArabic) "اسم العميل" else "Customer Name"}: ${customer.customerName}")
         val phoneVal = customer.phone.ifBlank { if (isArabic) "غير محدد" else "Not Specified" }
         sb.appendLine("${if (isArabic) "رقم الهاتف" else "Phone Number"}: $phoneVal")
-        sb.appendLine("${if (isArabic) "الرصيد المستحق" else "Outstanding Balance"}: ${AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)}")
-        val statusVal = if (customer.balance > 0) {
+        sb.appendLine("${if (isArabic) "الرصيد المستحق" else "Outstanding Balance"}: ${AppCurrency.formatAmountWithDecimals(customerLedgerBalance, isArabic)}")
+        val statusVal = if (customerLedgerBalance > 0.001) {
             if (isArabic) "رصيد مستحق" else "Balance Due"
         } else {
             if (isArabic) "الحساب مسدد بالكامل" else "Fully Settled Account"
@@ -3719,7 +3722,7 @@ object ReportExporter {
         sb.appendLine(sepDouble)
         sb.appendLine(if (isArabic) "ملخص حساب العميل" else "CUSTOMER SUMMARY")
         sb.appendLine(sepDouble)
-        sb.appendLine("${if (isArabic) "الرصيد المستحق" else "Outstanding Balance"}: ${AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)}")
+        sb.appendLine("${if (isArabic) "الرصيد المستحق" else "Outstanding Balance"}: ${AppCurrency.formatAmountWithDecimals(customerLedgerBalance, isArabic)}")
         sb.appendLine("${if (isArabic) "مشتريات كاش" else "Cash Purchases"}: ${AppCurrency.formatAmountWithDecimals(resolvedCash, isArabic)}")
         sb.appendLine("${if (isArabic) "مشتريات آجل" else "Credit Purchases"}: ${AppCurrency.formatAmountWithDecimals(resolvedDebt, isArabic)}")
         sb.appendLine("${if (isArabic) "إجمالي المسدد" else "Total Payments"}: ${AppCurrency.formatAmountWithDecimals(resolvedPayments, isArabic)}")
@@ -3790,7 +3793,7 @@ object ReportExporter {
             sb.appendLine(sepDouble)
             sb.appendLine(if (isArabic) "الرصيد والحساب النهائي للعميل" else "FINAL CUSTOMER BALANCE & TOTALS")
             sb.appendLine(sepDouble)
-            sb.appendLine("${if (isArabic) "الرصيد المستحق" else "Outstanding Balance"}: ${AppCurrency.formatAmountWithDecimals(customer.balance, isArabic)}")
+            sb.appendLine("${if (isArabic) "الرصيد المستحق" else "Outstanding Balance"}: ${AppCurrency.formatAmountWithDecimals(customerLedgerBalance, isArabic)}")
             sb.appendLine("${if (isArabic) "مشتريات كاش" else "Cash Purchases"}: ${AppCurrency.formatAmountWithDecimals(resolvedCash, isArabic)}")
             sb.appendLine("${if (isArabic) "مشتريات آجل" else "Debt Purchases"}: ${AppCurrency.formatAmountWithDecimals(resolvedDebt, isArabic)}")
             sb.appendLine("${if (isArabic) "إجمالي المسدد" else "Total Payments"}: ${AppCurrency.formatAmountWithDecimals(resolvedPayments, isArabic)}")

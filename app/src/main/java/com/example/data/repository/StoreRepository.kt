@@ -2,8 +2,10 @@ package com.example.data.repository
 
 import android.content.Context
 import androidx.room.withTransaction
+import com.example.accounting.CentralAccountingEngine
 import com.example.accounting.CustomerBalanceSummary
 import com.example.accounting.CustomerLedgerCalculator
+import com.example.accounting.FinancialReportCalculator
 import com.example.data.backup.BackupPayload
 import com.example.data.db.Adjustment
 import com.example.data.db.CustomerPayment
@@ -40,6 +42,8 @@ import com.example.accounting.InventoryMovementType
 import com.example.accounting.ProductStockSummary
 import com.example.accounting.StockMovement
 import com.example.model.CustomerAccount
+import com.example.model.ConflictReason
+import com.example.model.ConflictResolutionStatus
 import com.example.model.CustomerConflictItem
 import com.example.model.NotificationItem
 import com.example.model.OperationStatus
@@ -376,11 +380,11 @@ class StoreRepository private constructor(
         val saleReturns = saleReturnDao.getReturnsByCustomerIdSync(customerId)
         val refunds = refundDao.getRefundsByCustomerIdSync(customerId)
         if (sales.isNotEmpty() || payments.isNotEmpty() || openingBalances.isNotEmpty() || adjustments.isNotEmpty() || saleReturns.isNotEmpty() || refunds.isNotEmpty()) {
-            return CustomerLedgerCalculator.calculateCustomerBalance(customerId, sales, payments, openingBalances, adjustments, saleReturns, refunds)
+            return CentralAccountingEngine.calculateCustomerBalance(customerId, sales, payments, openingBalances, adjustments, saleReturns, refunds)
         }
         val txEntities = transactionDao.getTransactionsByCustomerIdSync(customerId)
         val domainTransactions = txEntities.map { it.toModel() }
-        return CustomerLedgerCalculator.calculateCustomerBalance(customerId, domainTransactions)
+        return CentralAccountingEngine.calculateCustomerBalance(customerId, domainTransactions)
     }
 
     fun getCustomerBalanceFlow(customerId: String): Flow<CustomerBalanceSummary> {
@@ -402,10 +406,10 @@ class StoreRepository private constructor(
             transactionDao.getTransactionsByCustomerId(customerId)
         ) { (sales, payments, openingBalances), (adjustments, saleReturns, refunds), txEntities ->
             if (sales.isNotEmpty() || payments.isNotEmpty() || openingBalances.isNotEmpty() || adjustments.isNotEmpty() || saleReturns.isNotEmpty() || refunds.isNotEmpty()) {
-                CustomerLedgerCalculator.calculateCustomerBalance(customerId, sales, payments, openingBalances, adjustments, saleReturns, refunds)
+                CentralAccountingEngine.calculateCustomerBalance(customerId, sales, payments, openingBalances, adjustments, saleReturns, refunds)
             } else {
                 val domainTransactions = txEntities.map { it.toModel() }
-                CustomerLedgerCalculator.calculateCustomerBalance(customerId, domainTransactions)
+                CentralAccountingEngine.calculateCustomerBalance(customerId, domainTransactions)
             }
         }
     }
@@ -834,6 +838,58 @@ class StoreRepository private constructor(
     }
 
     /**
+     * Phase 5.3: Audits historical transactions with null customerId and registers
+     * any unresolved ambiguous records in the customer identity conflict tracker.
+     * Enforces the Accounting Invariants:
+     * - Rule 1: customerId is authoritative whenever available.
+     * - Rule 2: Name-based customer matching is NOT an accounting source of truth.
+     * - Rule 3: Duplicate customer names are NEVER guessed.
+     * - Rule 4: If identity cannot be resolved uniquely:
+     *   record is marked as AMBIGUOUS_CUSTOMER_NAME or CUSTOMER_NOT_FOUND awaiting review;
+     *   never assigned to an arbitrary customer or converted to debt.
+     * - Rule 7: Historical financial transactions are never deleted.
+     */
+    suspend fun auditAndRegisterHistoricalCustomerConflicts(): Int {
+        val allCustomers = customerDao.getAllCustomersSync()
+        val customersByName = allCustomers.groupBy { it.customerName.trim().lowercase() }
+        val unlinkedTransactions = transactionDao.getAllTransactionsSync().filter { it.customerId == null }
+
+        var conflictCount = 0
+        for (tx in unlinkedTransactions) {
+            val name = tx.customerName.trim()
+            if (name.isBlank() || name == "عميل كاش" || name == "عميل عام" || name == "عميل نقدي" || !tx.isCredit) {
+                // Anonymous walk-in cash sale: valid, no customer conflict needed
+                continue
+            }
+
+            val cleanName = name.lowercase()
+            val matches = customersByName[cleanName] ?: emptyList()
+            val reason = when {
+                matches.size > 1 -> ConflictReason.AMBIGUOUS_CUSTOMER_NAME
+                matches.isEmpty() -> ConflictReason.CUSTOMER_NOT_FOUND
+                else -> null
+            }
+
+            if (reason != null) {
+                val existing = customerConflictDao.getConflictByTransactionId(tx.id)
+                if (existing == null) {
+                    val conflict = CustomerConflictItem(
+                        id = "conflict_${tx.id}",
+                        transactionId = tx.id,
+                        originalCustomerName = name,
+                        conflictReason = reason,
+                        createdAt = tx.date.ifBlank { java.time.Instant.now().toString() },
+                        resolutionStatus = ConflictResolutionStatus.UNRESOLVED
+                    )
+                    customerConflictDao.insertConflict(conflict.toEntity())
+                    conflictCount++
+                }
+            }
+        }
+        return conflictCount
+    }
+
+    /**
      * Resolves an accounting identity conflict explicitly and deterministically.
      *
      * Invariants:
@@ -1249,7 +1305,7 @@ class StoreRepository private constructor(
         )
 
         val cogsReversed = constructedLines.sumOf { it.cogsReversed }
-        val grossProfitCorrection = totalReturnAmount - cogsReversed
+        val grossProfitCorrection = FinancialReportCalculator.calculateGrossProfit(totalReturnAmount, cogsReversed)
 
         database.withTransaction {
             saleReturnDao.insertReturn(saleReturn)
@@ -1750,7 +1806,7 @@ class StoreRepository private constructor(
         val returns = purchaseReturnDao.getReturnsBySupplierIdSync(supplierId)
         val adjustments = adjustmentDao.getAdjustmentsByEntitySync("SUPPLIER", supplierId)
         val openingBalances = openingBalanceDao.getOpeningBalancesByEntitySync("SUPPLIER", supplierId)
-        return SupplierLedgerCalculator.calculateSupplierBalance(
+        return CentralAccountingEngine.calculateSupplierBalance(
             supplierId = supplierId,
             purchases = purchases,
             payments = payments,
@@ -1766,7 +1822,7 @@ class StoreRepository private constructor(
         val returns = purchaseReturnDao.getReturnsBySupplierIdSync(supplierId)
         val adjustments = adjustmentDao.getAdjustmentsByEntitySync("SUPPLIER", supplierId)
         val openingBalances = openingBalanceDao.getOpeningBalancesByEntitySync("SUPPLIER", supplierId)
-        return SupplierLedgerCalculator.buildSupplierLedger(
+        return CentralAccountingEngine.buildSupplierLedger(
             supplierId = supplierId,
             purchases = purchases,
             payments = payments,
@@ -1941,7 +1997,7 @@ class StoreRepository private constructor(
         val product = productDao.getProductById(productId)
         val movements = stockMovementDao.getMovementsByProductIdSync(productId)
 
-        return InventoryLedgerCalculator.calculateProductStockFromMovements(
+        return CentralAccountingEngine.calculateProductStockFromMovements(
             productId = productId,
             movements = movements,
             fallbackUnitCost = product?.costPrice ?: 0.0,
@@ -1959,7 +2015,7 @@ class StoreRepository private constructor(
         val purchaseReturns = purchaseReturnDao.getAllReturnsSync()
         val adjustments = adjustmentDao.getAdjustmentsByEntitySync("PRODUCT", productId)
 
-        return InventoryLedgerCalculator.buildInventoryLedger(
+        return CentralAccountingEngine.buildInventoryLedger(
             productId = productId,
             purchases = purchases,
             purchaseLines = purchaseLines,
@@ -2003,7 +2059,7 @@ class StoreRepository private constructor(
         val costMap = products.associate { it.id to it.costPrice }
         val nameMap = products.associate { it.id to it.name }
 
-        return InventoryLedgerCalculator.calculateAllProductsStockFromMovements(
+        return CentralAccountingEngine.calculateAllProductsStockFromMovements(
             productIds = productIds,
             movements = movements,
             productCostPrices = costMap,
@@ -2013,7 +2069,7 @@ class StoreRepository private constructor(
 
     suspend fun getTotalInventoryValuation(): Double {
         val stockMap = getAllProductsStock()
-        return InventoryLedgerCalculator.calculateTotalInventoryValuation(stockMap.values)
+        return CentralAccountingEngine.calculateTotalInventoryValuation(stockMap.values)
     }
 
     suspend fun recordInventoryAdjustment(
