@@ -1,6 +1,5 @@
 package com.example.model
 
-import com.example.accounting.CustomerLedgerCalculator
 import com.example.accounting.FinancialReportCalculator
 import com.example.data.db.TransactionItemLineEntity
 import com.example.ui.components.BreakdownChartType
@@ -84,7 +83,10 @@ data class AnalyticsSummaryMetrics(
     val partialSettlementAmount: Double,
     val netOutstandingBalance: Double,
     val transactionCount: Int,
-    val customerCount: Int? = null // non-null for ALL_CUSTOMERS, null for ONE_SELECTED_CUSTOMER
+    val customerCount: Int? = null, // non-null for ALL_CUSTOMERS, null for ONE_SELECTED_CUSTOMER
+    val cogs: Double = 0.0,
+    val grossProfit: Double = 0.0,
+    val netProfit: Double = 0.0
 )
 
 /**
@@ -170,8 +172,10 @@ object AnalyticsExportDataPreparer {
             )
         }
 
-        // 3. Exact calculations using unified FinancialReportCalculator
-        val breakdown = FinancialReportCalculator.calculate(filteredTransactions)
+        // 3. Exact calculations using unified FinancialReportCalculator, including historical COGS lines.
+        val filteredTransactionIds = filteredTransactions.map { it.id }.toSet()
+        val filteredLines = transactionLines.filter { it.transactionId in filteredTransactionIds }
+        val breakdown = FinancialReportCalculator.calculate(filteredTransactions, filteredLines)
         val totalCashSales = breakdown.cashSales
         val totalDebtSales = breakdown.creditSales
         val fullSettlementAmount = breakdown.fullSettlementAmount
@@ -179,7 +183,11 @@ object AnalyticsExportDataPreparer {
 
         val totalPaymentsReceived = breakdown.customerPayments
         val totalSales = breakdown.totalSales
-        val netBalance = totalDebtSales - totalPaymentsReceived
+        val netBalance = if (selectedCustomer != null) {
+            selectedCustomer.balance
+        } else {
+            allCustomers.sumOf { it.balance }
+        }
 
         // Volume & percentages matching HomeScreen.kt and StatisticsTabContent
         val totalVolume = totalDebtSales + totalCashSales + fullSettlementAmount + partialSettlementAmount
@@ -222,13 +230,12 @@ object AnalyticsExportDataPreparer {
 
         // 5. Selected Customer Info (strictly only for ONE_SELECTED_CUSTOMER)
         val customerInfo = if (selectedCustomer != null) {
-            val summary = CustomerLedgerCalculator.calculateCustomerBalance(selectedCustomer.id, transactions)
             AnalyticsCustomerInfo(
                 customerId = selectedCustomer.id,
                 customerName = selectedCustomer.customerName,
                 phone = selectedCustomer.phone,
-                currentBalance = summary.balance,
-                totalDebt = summary.totalCreditSales
+                currentBalance = selectedCustomer.balance,
+                totalDebt = selectedCustomer.totalDebt
             )
         } else null
 
@@ -282,6 +289,9 @@ object AnalyticsExportDataPreparer {
             fullSettlementAmount = fullSettlementAmount,
             partialSettlementAmount = partialSettlementAmount,
             netOutstandingBalance = netBalance,
+            cogs = breakdown.cogs,
+            grossProfit = breakdown.grossProfit,
+            netProfit = breakdown.netProfit,
             transactionCount = filteredTransactions.size,
             customerCount = if (selectedCustomer == null) allCustomers.size else null
         )

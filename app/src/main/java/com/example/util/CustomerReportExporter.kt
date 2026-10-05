@@ -5,7 +5,6 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
-import com.example.accounting.CustomerLedgerCalculator
 import com.example.accounting.FinancialReportCalculator
 import com.example.model.AppCurrency
 import com.example.model.CustomerAccount
@@ -95,7 +94,7 @@ object CustomerReportExporter {
         isArabic: Boolean = true
     ) {
         val customerDomainTotals = FinancialReportCalculator.calculateCustomerTotals(customer.id, transactions)
-        val customerLedgerBalance = CustomerLedgerCalculator.calculateCustomerBalance(customer.id, transactions).balance
+        val customerLedgerBalance = customer.balance
         val resolvedCash = if (totalCash >= 0.0) totalCash else customerDomainTotals.cashSales
         val resolvedDebt = if (totalDebt >= 0.0) totalDebt else customerDomainTotals.creditSales
         val resolvedPayments = if (totalPayments >= 0.0) totalPayments else customerDomainTotals.customerPayments
@@ -894,7 +893,7 @@ object CustomerReportExporter {
         isArabic: Boolean = true
     ): String {
         val customerDomainTotals = FinancialReportCalculator.calculateCustomerTotals(customer.id, transactions)
-        val customerLedgerBalance = CustomerLedgerCalculator.calculateCustomerBalance(customer.id, transactions).balance
+        val customerLedgerBalance = customer.balance
         val resolvedCash = if (totalCash >= 0.0) totalCash else customerDomainTotals.cashSales
         val resolvedDebt = if (totalDebt >= 0.0) totalDebt else customerDomainTotals.creditSales
         val resolvedPayments = if (totalPayments >= 0.0) totalPayments else customerDomainTotals.customerPayments
@@ -1089,7 +1088,7 @@ object CustomerReportExporter {
         isArabic: Boolean = true
     ): String {
         val customerDomainTotals = FinancialReportCalculator.calculateCustomerTotals(customer.id, transactions)
-        val customerLedgerBalance = CustomerLedgerCalculator.calculateCustomerBalance(customer.id, transactions).balance
+        val customerLedgerBalance = customer.balance
         val resolvedCash = if (totalCash >= 0.0) totalCash else customerDomainTotals.cashSales
         val resolvedDebt = if (totalDebt >= 0.0) totalDebt else customerDomainTotals.creditSales
         val resolvedPayments = if (totalPayments >= 0.0) totalPayments else customerDomainTotals.customerPayments

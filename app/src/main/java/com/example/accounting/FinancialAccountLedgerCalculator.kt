@@ -66,6 +66,34 @@ data class FinancialAccountStatement(
  */
 object FinancialAccountLedgerCalculator {
 
+    /**
+     * Single authoritative final-balance entry point for financial accounts.
+     * The statement builder owns the movement formula; callers must not duplicate it.
+     */
+    fun calculateAccountBalance(
+        accountId: String,
+        sales: List<Sale> = emptyList(),
+        customerPayments: List<CustomerPayment> = emptyList(),
+        openingBalances: List<OpeningBalance> = emptyList(),
+        adjustments: List<Adjustment> = emptyList(),
+        refunds: List<Refund> = emptyList(),
+        purchases: List<Purchase> = emptyList(),
+        supplierPayments: List<SupplierPayment> = emptyList(),
+        expenses: List<Expense> = emptyList()
+    ): Double = buildFinancialAccountStatement(
+        accountId = accountId,
+        startDate = null,
+        endDate = null,
+        sales = sales,
+        customerPayments = customerPayments,
+        openingBalances = openingBalances,
+        adjustments = adjustments,
+        refunds = refunds,
+        purchases = purchases,
+        supplierPayments = supplierPayments,
+        expenses = expenses
+    ).closingBalance
+
     private data class RawFinancialItem(
         val id: String,
         val date: String,

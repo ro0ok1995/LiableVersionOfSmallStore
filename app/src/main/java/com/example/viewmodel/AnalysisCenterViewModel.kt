@@ -3,6 +3,7 @@ package com.example.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.accounting.CustomerLedgerCalculator
+import com.example.accounting.FinancialReportCalculator
 import com.example.data.db.TransactionItemLineEntity
 import com.example.model.AnalyticsExportDataPreparer
 import com.example.model.AnalyticsReportData
@@ -20,6 +21,7 @@ import com.example.model.typedTransactionType
 import com.example.ui.components.BreakdownChartType
 import com.example.util.ReportPreviewRow
 import com.example.util.StatementRow
+import com.example.util.ReportPresentationUtils
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -622,7 +624,8 @@ class AnalysisCenterViewModel : ViewModel() {
         customStartDate: LocalDate? = null,
         customEndDate: LocalDate? = null,
         today: LocalDate = LocalDate.now(),
-        includeOpeningBalanceRow: Boolean = false
+        includeOpeningBalanceRow: Boolean = true,
+        isArabic: Boolean = true
     ): List<StatementRow> {
         // 1. Filter by customer (Phase 2: Persistent customer identity)
         val customerTransactions = if (selectedCustomer != null) {
@@ -657,30 +660,12 @@ class AnalysisCenterViewModel : ViewModel() {
         // 4. Filter by transaction type using typed classifications with legacy fallback
         txList = when (filter) {
             StatementTxFilter.ALL -> txList
-            StatementTxFilter.PAYMENT -> txList.filter { tx ->
-                val type = tx.typedTransactionType
-                if (type != null) {
-                    type == TransactionType.CUSTOMER_PAYMENT || type == TransactionType.SALE_RETURN
-                } else {
-                    tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
-                }
+            StatementTxFilter.PAYMENT -> txList.filter { ReportPresentationUtils.isPaymentTransaction(it) }
+            StatementTxFilter.CASH_PURCHASE -> txList.filter {
+                ReportPresentationUtils.cashSalesAmount(it) > FinancialReportCalculator.EPSILON
             }
-            StatementTxFilter.CASH_PURCHASE -> txList.filter { tx ->
-                val type = tx.typedTransactionType
-                if (type != null) {
-                    type == TransactionType.SALE && tx.typedSaleType == SaleType.CASH
-                } else {
-                    !tx.isCredit && (tx.activityType.contains("كاش") || tx.activityType.contains("Cash"))
-                }
-            }
-            StatementTxFilter.DEBT_PURCHASE -> txList.filter { tx ->
-                val type = tx.typedTransactionType
-                if (type != null) {
-                    (type == TransactionType.SALE && (tx.typedSaleType == SaleType.CREDIT || tx.typedSaleType == SaleType.MIXED || tx.creditAmount > 0.0)) ||
-                    type == TransactionType.CUSTOMER_REFUND
-                } else {
-                    tx.creditAmount > 0.0 || tx.isCredit || tx.activityType.contains("آجل") || tx.activityType.contains("دين") || tx.activityType.contains("Debt")
-                }
+            StatementTxFilter.DEBT_PURCHASE -> txList.filter {
+                ReportPresentationUtils.creditSalesAmount(it) > FinancialReportCalculator.EPSILON
             }
         }
 
@@ -713,20 +698,8 @@ class AnalysisCenterViewModel : ViewModel() {
         }
 
         for (tx in sortedList) {
-            val type = tx.typedTransactionType
-            val isPayment = if (type != null) {
-                type == TransactionType.CUSTOMER_PAYMENT || type == TransactionType.SALE_RETURN
-            } else {
-                tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
-            }
-
-            val isDebtPurchase = if (type != null) {
-                (type == TransactionType.SALE &&
-                    (tx.typedSaleType == SaleType.CREDIT || tx.typedSaleType == SaleType.MIXED || tx.isCredit || tx.creditAmount > 0.0)) ||
-                    type == TransactionType.CUSTOMER_REFUND
-            } else {
-                tx.creditAmount > 0.0 || tx.isCredit || tx.activityType.contains("آجل") || tx.activityType.contains("دين") || tx.activityType.contains("Debt")
-            }
+            val isPayment = ReportPresentationUtils.isPaymentTransaction(tx)
+            val isDebtPurchase = ReportPresentationUtils.isDebtTransaction(tx)
 
             val impact = getTransactionReceivableImpact(tx)
             running += impact
@@ -736,8 +709,8 @@ class AnalysisCenterViewModel : ViewModel() {
                     id = tx.id,
                     date = tx.date,
                     customerName = tx.customerNameSnapshot,
-                    description = if (tx.notes.isNotBlank()) tx.notes else tx.activityType,
-                    type = tx.activityType,
+                    description = if (tx.notes.isNotBlank()) tx.notes else tx.title.ifBlank { tx.activityType },
+                    type = ReportPresentationUtils.getTransactionTypeLabel(tx, isArabic, shortLabel = true),
                     isPayment = isPayment,
                     isCreditDebt = isDebtPurchase,
                     amount = tx.amount,

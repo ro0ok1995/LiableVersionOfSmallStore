@@ -146,14 +146,56 @@ class StoreRepository private constructor(
     val archivedProducts: Flow<List<ProductItem>> = productRepository.archivedProducts
     val allProducts: Flow<List<ProductItem>> = productRepository.allProducts
 
+    private data class CustomerLedgerInputs(
+        val sales: List<Sale>,
+        val payments: List<CustomerPayment>,
+        val openingBalances: List<OpeningBalance>,
+        val adjustments: List<Adjustment>,
+        val saleReturns: List<SaleReturn>,
+        val refunds: List<Refund>
+    )
+
+    private val modernCustomerLedgerInputs: Flow<CustomerLedgerInputs> = combine(
+        combine(
+            allSales,
+            allCustomerPayments,
+            openingBalanceDao.getAllOpeningBalances()
+        ) { sales, payments, openingBalances ->
+            Triple(sales, payments, openingBalances)
+        },
+        combine(
+            adjustmentDao.getAllAdjustments(),
+            allSaleReturns,
+            allRefunds
+        ) { adjustments, saleReturns, refunds ->
+            Triple(adjustments, saleReturns, refunds)
+        }
+    ) { left, right ->
+        CustomerLedgerInputs(
+            sales = left.first,
+            payments = left.second,
+            openingBalances = left.third,
+            adjustments = right.first,
+            saleReturns = right.second,
+            refunds = right.third
+        )
+    }
+
     val customers: Flow<List<CustomerAccount>> = combine(
         customerDao.getActiveCustomers(),
-        transactionDao.getAllTransactions()
-    ) { custList, txList ->
-        val domainTxList = txList.map { it.toModel() }
+        modernCustomerLedgerInputs
+    ) { custList, ledger ->
         custList.map { cEntity ->
             val model = cEntity.toModel()
-            val summary = CentralAccountingEngine.calculateCustomerBalance(model.id, domainTxList)
+            val summary = CentralAccountingEngine.calculateCustomerBalance(
+                customerId = model.id,
+                sales = ledger.sales,
+                payments = ledger.payments,
+                openingBalances = ledger.openingBalances,
+                adjustments = ledger.adjustments,
+                saleReturns = ledger.saleReturns,
+                refunds = ledger.refunds
+            )
             model.copy(
                 balance = summary.balance,
                 totalDebt = summary.totalCreditSales
@@ -163,12 +205,19 @@ class StoreRepository private constructor(
 
     val archivedCustomers: Flow<List<CustomerAccount>> = combine(
         customerDao.getArchivedCustomers(),
-        transactionDao.getAllTransactions()
-    ) { custList, txList ->
-        val domainTxList = txList.map { it.toModel() }
+        modernCustomerLedgerInputs
+    ) { custList, ledger ->
         custList.map { cEntity ->
             val model = cEntity.toModel()
-            val summary = CentralAccountingEngine.calculateCustomerBalance(model.id, domainTxList)
+            val summary = CentralAccountingEngine.calculateCustomerBalance(
+                customerId = model.id,
+                sales = ledger.sales,
+                payments = ledger.payments,
+                openingBalances = ledger.openingBalances,
+                adjustments = ledger.adjustments,
+                saleReturns = ledger.saleReturns,
+                refunds = ledger.refunds
+            )
             model.copy(
                 balance = summary.balance,
                 totalDebt = summary.totalCreditSales
@@ -178,12 +227,19 @@ class StoreRepository private constructor(
 
     val allCustomers: Flow<List<CustomerAccount>> = combine(
         customerDao.getAllCustomers(),
-        transactionDao.getAllTransactions()
-    ) { custList, txList ->
-        val domainTxList = txList.map { it.toModel() }
+        modernCustomerLedgerInputs
+    ) { custList, ledger ->
         custList.map { cEntity ->
             val model = cEntity.toModel()
-            val summary = CentralAccountingEngine.calculateCustomerBalance(model.id, domainTxList)
+            val summary = CentralAccountingEngine.calculateCustomerBalance(
+                customerId = model.id,
+                sales = ledger.sales,
+                payments = ledger.payments,
+                openingBalances = ledger.openingBalances,
+                adjustments = ledger.adjustments,
+                saleReturns = ledger.saleReturns,
+                refunds = ledger.refunds
+            )
             model.copy(
                 balance = summary.balance,
                 totalDebt = summary.totalCreditSales

@@ -64,6 +64,7 @@ import com.example.ui.theme.StatusBlue
 import com.example.ui.theme.StatusGreen
 import com.example.ui.theme.StatusGreenBg
 import com.example.util.ReportPreviewRow
+import com.example.util.ReportPresentationUtils
 import java.util.Locale
 
 /**
@@ -109,44 +110,20 @@ fun TransactionsReportPresentation(
 ) {
     var filterMode by remember { mutableStateOf(TxFilterMode.ALL) }
 
-    // Categorization counts & stats using typed enums with backward-compatible fallback
+    // Categorization is derived exclusively from typed accounting semantics.
     val cashTxList = remember(sortedTransactions) {
-        sortedTransactions.filter { tx ->
-            val saleType = tx.typedSaleType
-            val txType = tx.typedTransactionType
-            if (txType != null) {
-                txType == TransactionType.SALE && (saleType == SaleType.CASH || (!tx.isCredit && tx.creditAmount == 0.0))
-            } else {
-                (!tx.isCredit && (tx.activityType.contains("كاش") || tx.activityType.contains("Cash") ||
-                    (!tx.activityType.contains("تسديد") && !tx.activityType.contains("Payment") &&
-                        !tx.activityType.contains("آجل") && !tx.activityType.contains("دين") && !tx.activityType.contains("Debt"))))
-            }
-        }
+        sortedTransactions.filter { ReportPresentationUtils.cashSalesAmount(it) > FinancialReportCalculator.EPSILON }
     }
 
     val debtTxList = remember(sortedTransactions) {
-        sortedTransactions.filter { tx ->
-            val saleType = tx.typedSaleType
-            val txType = tx.typedTransactionType
-            if (txType != null) {
-                (txType == TransactionType.SALE && (saleType == SaleType.CREDIT || saleType == SaleType.MIXED || tx.creditAmount > 0.0)) ||
-                    txType == TransactionType.CUSTOMER_REFUND
-            } else {
-                tx.isCredit || tx.activityType.contains("آجل") || tx.activityType.contains("دين") ||
-                    tx.activityType.contains("Debt") || tx.activityType.contains("شراء بالدين")
-            }
+        sortedTransactions.filter {
+            ReportPresentationUtils.creditSalesAmount(it) > FinancialReportCalculator.EPSILON ||
+                it.typedTransactionType == TransactionType.CUSTOMER_REFUND
         }
     }
 
     val paymentsTxList = remember(sortedTransactions) {
-        sortedTransactions.filter { tx ->
-            val txType = tx.typedTransactionType
-            if (txType != null) {
-                txType == TransactionType.CUSTOMER_PAYMENT || txType == TransactionType.SALE_RETURN
-            } else {
-                tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
-            }
-        }
+        sortedTransactions.filter { ReportPresentationUtils.isPaymentTransaction(it) }
     }
 
     val totalFinancialVolume = remember(totalTxCash, totalTxDebt, totalTxPayments) {
@@ -817,33 +794,13 @@ fun TransactionsReportPresentation(
                     // Full detailed transactions list
                     displayedTransactions.forEachIndexed { idx, tx ->
                         val isEven = idx % 2 == 1
-                        val txType = tx.typedTransactionType
-                        val saleType = tx.typedSaleType
-                        val isPayment = if (txType != null) {
-                            txType == TransactionType.CUSTOMER_PAYMENT || txType == TransactionType.SALE_RETURN
-                        } else {
-                            tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
-                        }
-                        val isDebt = if (txType != null) {
-                            !isPayment && ((txType == TransactionType.SALE && (saleType == SaleType.CREDIT || saleType == SaleType.MIXED || tx.isCredit || tx.creditAmount > 0.0)) ||
-                                txType == TransactionType.CUSTOMER_REFUND)
-                        } else {
-                            !isPayment && (saleType == SaleType.CREDIT || saleType == SaleType.MIXED ||
-                                tx.isCredit || tx.activityType.contains("آجل") ||
-                                tx.activityType.contains("دين") || tx.activityType.contains("Debt") ||
-                                tx.activityType.contains("شراء بالدين"))
-                        }
-
-                        val typeLabel = if (isPayment) {
-                            if (isArabic) "تسديد (دفعة)" else "Payment"
-                        } else if (txType == TransactionType.SALE && saleType == SaleType.MIXED) {
-                            if (isArabic) "شراء مختلط" else "Mixed Purchase"
-                        } else if (isDebt) {
-                            if (isArabic) "شراء آجل (دين)" else "Credit Purchase"
-                        } else {
-                            if (isArabic) "شراء نقدي (كاش)" else "Cash Purchase"
-                        }
-
+                        val isPayment = ReportPresentationUtils.isPaymentTransaction(tx)
+                        val isDebt = ReportPresentationUtils.isDebtTransaction(tx)
+                        val typeLabel = ReportPresentationUtils.getTransactionTypeLabel(
+                            tx = tx,
+                            isArabic = isArabic,
+                            shortLabel = false
+                        )
                         val typeColor = if (isPayment) StatusBlue else if (isDebt) StatusAmber else StatusGreen
 
                         Row(

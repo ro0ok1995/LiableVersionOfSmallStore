@@ -89,7 +89,7 @@ fun ArchivedTransactionCard(
                         text = AppCurrency.formatAmountWithDecimals(transaction.amount, isArabic),
                         fontWeight = FontWeight.Bold,
                         style = MaterialTheme.typography.titleMedium,
-                        color = if (transaction.isCredit) MaterialTheme.colorScheme.error else StatusGreen
+                        color = if (isDebt) MaterialTheme.colorScheme.error else StatusGreen
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
@@ -117,11 +117,11 @@ fun ArchivedTransactionCard(
                 ) {
                     // Type Tag
                     Surface(
-                        color = if (transaction.isCredit) StatusAmberBg else StatusGreenBg,
+                        color = if (isDebt) StatusAmberBg else StatusGreenBg,
                         shape = RoundedCornerShape(6.dp),
                         modifier = Modifier.border(
                             1.dp,
-                            (if (transaction.isCredit) StatusAmber else StatusGreen).copy(alpha = 0.3f),
+                            (if (isDebt) StatusAmber else StatusGreen).copy(alpha = 0.3f),
                             RoundedCornerShape(6.dp)
                         )
                     ) {
@@ -129,7 +129,7 @@ fun ArchivedTransactionCard(
                             text = transaction.activityType,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = if (transaction.isCredit) StatusAmber else StatusGreen,
+                            color = if (isDebt) StatusAmber else StatusGreen,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                         )
                     }

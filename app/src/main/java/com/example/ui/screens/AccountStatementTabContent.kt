@@ -48,6 +48,7 @@ import com.example.ui.theme.StatusGreenBg
 import com.example.ui.theme.StatusRed
 import com.example.ui.theme.StatusRedBg
 import com.example.util.StatementRow
+import com.example.accounting.FinancialReportCalculator
 import com.example.viewmodel.AnalysisCenterUiState
 import com.example.viewmodel.AnalysisCenterViewModel
 import com.example.viewmodel.DateFilterUtils
@@ -84,7 +85,8 @@ internal fun AccountStatementTabContent(
             filter = uiState.statementFilter,
             period = activePeriod,
             customStartDate = customStartDate,
-            customEndDate = customEndDate
+            customEndDate = customEndDate,
+            isArabic = isArabic
         )
     }
 
@@ -105,37 +107,22 @@ internal fun AccountStatementTabContent(
         }
     }
 
-    // Cash Sales for the period/customer in scope
-    val periodCashSales = remember(scopedTransactions) {
-        scopedTransactions
-            .filter { !it.isCredit && (it.activityType.contains("كاش") || it.activityType.contains("Cash") || (!it.activityType.contains("تسديد") && !it.activityType.contains("Payment") && !it.activityType.contains("آجل") && !it.activityType.contains("دين") && !it.activityType.contains("Debt"))) }
-            .sumOf { it.amount }
+    // All summary figures are derived from the typed accounting calculator.
+    val periodBreakdown = remember(scopedTransactions) {
+        FinancialReportCalculator.calculate(scopedTransactions)
     }
+    val periodCashSales = periodBreakdown.cashSales
+    val periodDebtSales = periodBreakdown.creditSales
+    val periodTotalSales = periodBreakdown.totalSales
+    val periodPayments = periodBreakdown.customerPayments
 
-    // Credit (Debt) Sales for the period/customer in scope
-    val periodDebtSales = remember(scopedTransactions) {
-        scopedTransactions
-            .filter { it.isCredit || it.activityType.contains("آجل") || it.activityType.contains("دين") || it.activityType.contains("Debt") }
-            .sumOf { it.amount }
-    }
-
-    // CRITICAL: Total Sales = Cash Sales + Credit Sales (Debt Sales) for the period/customer in scope (NOT Debt + Payments)
-    val periodTotalSales = periodCashSales + periodDebtSales
-
-    // Payments received toward debt reduction for the period/customer in scope
-    val periodPayments = remember(scopedTransactions) {
-        scopedTransactions
-            .filter { it.activityType.contains("تسديد") || it.activityType.contains("Payment") }
-            .sumOf { it.amount }
-    }
-
-    // Debt box = current outstanding balance right now (what is currently owed, not a period-summed figure)
+    // Current debt means current outstanding exposure, never historical cumulative credit sales.
     val currentDebtOwed = remember(uiState.selectedCustomer, customers) {
         if (uiState.selectedCustomer != null) {
             val liveCust = customers.find { it.id == uiState.selectedCustomer.id } ?: uiState.selectedCustomer
-            if (liveCust.totalDebt > 0) liveCust.totalDebt else liveCust.balance.coerceAtLeast(0.0)
+            liveCust.balance.coerceAtLeast(0.0)
         } else {
-            customers.sumOf { if (it.totalDebt > 0) it.totalDebt else it.balance.coerceAtLeast(0.0) }
+            customers.sumOf { it.balance.coerceAtLeast(0.0) }
         }
     }
 

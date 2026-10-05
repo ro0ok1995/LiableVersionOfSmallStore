@@ -104,8 +104,8 @@ internal fun StatisticsTabContent(
         }
     }
 
-    val statisticsBreakdown = remember(filteredTransactions) {
-        FinancialReportCalculator.calculate(filteredTransactions)
+    val statisticsBreakdown = remember(filteredTransactions, transactionLines) {
+        FinancialReportCalculator.calculate(filteredTransactions, transactionLines)
     }
     val totalCashSales = statisticsBreakdown.cashSales
     val totalDebtSales = statisticsBreakdown.creditSales
@@ -233,6 +233,26 @@ internal fun StatisticsTabContent(
                 value = String.format(Locale.US, "%,.2f %s", totalCashSales, currency),
                 color = StatusBlue,
                 testTag = "kpi_cash_sales",
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            KpiMetricCard(
+                title = if (isArabic) StoreStrings.STAT_GROSS_PROFIT_AR else StoreStrings.STAT_GROSS_PROFIT_EN,
+                value = String.format(Locale.US, "%,.2f %s", statisticsBreakdown.grossProfit, currency),
+                color = if (statisticsBreakdown.grossProfit >= 0.0) StatusGreen else StatusRed,
+                testTag = "kpi_gross_profit",
+                modifier = Modifier.weight(1f)
+            )
+            KpiMetricCard(
+                title = if (isArabic) StoreStrings.STAT_NET_PROFIT_AR else StoreStrings.STAT_NET_PROFIT_EN,
+                value = String.format(Locale.US, "%,.2f %s", statisticsBreakdown.netProfit, currency),
+                color = if (statisticsBreakdown.netProfit >= 0.0) StatusGreen else StatusRed,
+                testTag = "kpi_net_profit",
                 modifier = Modifier.weight(1f)
             )
         }

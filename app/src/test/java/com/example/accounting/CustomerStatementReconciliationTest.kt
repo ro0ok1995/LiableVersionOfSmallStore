@@ -488,7 +488,7 @@ class CustomerStatementReconciliationTest {
         )
 
         assertEquals(1, rows.size)
-        assertEquals(100.0, rows[0].amount, 0.0001)
+        assertEquals(40.0, rows[0].amount, 0.0001)
         // Customer receivable running balance must increase by ONLY 40.0, NOT 100.0
         assertEquals(40.0, rows[0].runningBalance, 0.0001)
     }

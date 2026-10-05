@@ -193,6 +193,34 @@ fun BackupRestoreScreen(
                 }
             }
 
+            // Version 2 accounting backup assurance
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("backup_v2_info_card")
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = if (isArabic) "نسخة محاسبية كاملة — الإصدار 2" else "Complete Accounting Backup — Version 2",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = if (isArabic) {
+                            "تشمل المبيعات والمرتجعات والتسويات والمدفوعات والموردين والمصاريف وحركات المخزون والحسابات المالية، مع الحفاظ على المعرّفات والروابط. بعد الاستعادة تتم مطابقة النتائج المحاسبية تلقائيًا."
+                        } else {
+                            "Includes sales, returns, payments, suppliers, expenses, inventory movements and financial accounts while preserving IDs and relationships. Restore performs an accounting reconciliation before completing."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 19.sp
+                    )
+                }
+            }
+
             // Danger Zone
             Card(
                 shape = RoundedCornerShape(14.dp),

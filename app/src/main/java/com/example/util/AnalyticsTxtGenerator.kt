@@ -102,6 +102,8 @@ object AnalyticsTxtGenerator {
 
         val payLabel = if (isArabic) "إجمالي المتحصلات (التسديد)" else "Payments"
         sb.appendLine("$payLabel: ${AppCurrency.formatAmountWithDecimals(data.metrics.totalPaymentsReceived, isArabic)}")
+        sb.appendLine("${if (isArabic) "إجمالي الربح" else "Gross Profit"}: ${AppCurrency.formatAmountWithDecimals(data.metrics.grossProfit, isArabic)}")
+        sb.appendLine("${if (isArabic) "صافي الربح" else "Net Profit"}: ${AppCurrency.formatAmountWithDecimals(data.metrics.netProfit, isArabic)}")
 
         if (data.scope == AnalyticsReportScope.ONE_SELECTED_CUSTOMER) {
             val periodNetLabel = if (isArabic) "صافي رصيد الفترة" else "Net Balance"

@@ -12,6 +12,9 @@ interface SupplierDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertSupplier(supplier: Supplier): Long
 
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertSuppliers(suppliers: List<Supplier>)
+
     @Update
     suspend fun updateSupplier(supplier: Supplier)
 
@@ -35,6 +38,9 @@ interface SupplierDao {
 interface PurchaseDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertPurchase(purchase: Purchase): Long
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertPurchases(purchases: List<Purchase>)
 
     @Update
     suspend fun updatePurchase(purchase: Purchase)
@@ -87,6 +93,9 @@ interface SupplierPaymentDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertPayment(payment: SupplierPayment): Long
 
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertPayments(payments: List<SupplierPayment>)
+
     @Update
     suspend fun updatePayment(payment: SupplierPayment)
 
@@ -113,6 +122,9 @@ interface SupplierPaymentDao {
 interface PurchaseReturnDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertReturn(purchaseReturn: PurchaseReturn): Long
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertReturns(purchaseReturns: List<PurchaseReturn>)
 
     @Update
     suspend fun updateReturn(purchaseReturn: PurchaseReturn)

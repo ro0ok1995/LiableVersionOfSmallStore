@@ -301,6 +301,9 @@ interface CustomerConflictDao {
     @Update
     suspend fun updateConflict(conflict: CustomerIdentityConflictEntity)
 
+    @Query("DELETE FROM customer_identity_conflicts")
+    suspend fun deleteAllConflicts()
+
     @Query("""
         UPDATE customer_identity_conflicts
         SET resolutionStatus = 'RESOLVED',
@@ -358,6 +361,9 @@ interface SaleDao {
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertSale(sale: Sale)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertSales(sales: List<Sale>)
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertSaleLines(lines: List<SaleLine>)
@@ -467,6 +473,9 @@ interface CustomerPaymentDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertPayment(payment: CustomerPayment)
 
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertPayments(payments: List<CustomerPayment>)
+
     @Update
     suspend fun updatePayment(payment: CustomerPayment)
 
@@ -532,6 +541,9 @@ interface AdjustmentDao {
 
     @Update
     suspend fun updateAdjustment(adjustment: Adjustment)
+
+    @Query("DELETE FROM adjustments")
+    suspend fun deleteAllAdjustments()
 }
 
 @Dao
@@ -553,6 +565,9 @@ interface ReversalDao {
 
     @Query("SELECT COUNT(*) FROM reversals WHERE originalTransactionId = :originalTransactionId AND status = 'ACTIVE'")
     suspend fun getActiveReversalCount(originalTransactionId: String): Int
+
+    @Query("DELETE FROM reversals")
+    suspend fun deleteAllReversals()
 }
 
 @Dao
@@ -580,6 +595,9 @@ interface SaleReturnDao {
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertReturn(saleReturn: SaleReturn)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertReturns(saleReturns: List<SaleReturn>)
 
     @Update
     suspend fun updateReturn(saleReturn: SaleReturn)
@@ -640,6 +658,9 @@ interface RefundDao {
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertRefund(refund: Refund)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertRefunds(refunds: List<Refund>)
 
     @Update
     suspend fun updateRefund(refund: Refund)

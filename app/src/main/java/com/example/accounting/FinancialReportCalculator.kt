@@ -5,6 +5,7 @@ import com.example.data.db.Sale
 import com.example.data.db.SaleLine
 import com.example.data.db.SaleReturn
 import com.example.data.db.SaleReturnLine
+import com.example.data.db.Refund
 import com.example.data.db.TransactionItemLineEntity
 import com.example.model.OperationStatus
 import com.example.model.SaleType
@@ -463,7 +464,7 @@ object FinancialReportCalculator {
      * - Line COGS = quantity * costPriceAtSale (frozen historical cost snapshot).
      * - Sale Return COGS reversed = quantity * costPriceAtReturn (via cogsReversed).
      * - REVERSED sales and REVERSED sale returns are strictly excluded.
-     * - Net COGS = max(0.0, activeSalesCogs - activeReturnsCogs).
+     * - Net COGS = activeSalesCogs - activeReturnsCogs; legitimate reversal effects are preserved.
      */
     fun calculateCogs(
         sales: List<Sale>,
@@ -493,7 +494,7 @@ object FinancialReportCalculator {
             .filter { it.saleReturnId !in reversedReturnIds }
             .sumOf { it.cogsReversed }
 
-        return (salesCogs - returnsCogs).coerceAtLeast(0.0)
+        return salesCogs - returnsCogs
     }
 
     /**
@@ -520,7 +521,7 @@ object FinancialReportCalculator {
             .filter { it.transactionId !in reversedTxIds && it.transactionId in returnTxIds }
             .sumOf { it.quantity * it.costPrice }
 
-        return (salesCogs - returnsCogs).coerceAtLeast(0.0)
+        return salesCogs - returnsCogs
     }
 
     /**
@@ -602,7 +603,8 @@ object FinancialReportCalculator {
         saleLines: List<SaleLine> = emptyList(),
         saleReturns: List<SaleReturn> = emptyList(),
         saleReturnLines: List<SaleReturnLine> = emptyList(),
-        expenses: List<Expense> = emptyList()
+        expenses: List<Expense> = emptyList(),
+        refunds: List<Refund> = emptyList()
     ): FinancialReportTotals {
         val decompositions = sales.map { saleToDecomposition(it) }
         val baseTotals = calculateTotalsFromDecompositions(decompositions)
@@ -612,6 +614,9 @@ object FinancialReportCalculator {
         val effectiveReturns = if (returnAmount > 0.0) returnAmount else baseTotals.saleReturns
         val netSales = baseTotals.totalSales - effectiveReturns
         val totalExpenses = calculateOperatingExpenses(expenses)
+        val activeRefunds = refunds
+            .filter { it.status != "REVERSED" }
+            .sumOf { it.amount }
 
         if (saleLines.isEmpty()) {
             val grossProfit = netSales
@@ -619,6 +624,7 @@ object FinancialReportCalculator {
             val netProfit = calculateNetProfit(grossProfit, totalExpenses)
             return baseTotals.copy(
                 saleReturns = effectiveReturns,
+                customerRefunds = activeRefunds,
                 grossProfit = grossProfit,
                 grossMargin = grossMargin,
                 expenses = totalExpenses,
@@ -633,6 +639,7 @@ object FinancialReportCalculator {
 
         return baseTotals.copy(
             saleReturns = effectiveReturns,
+            customerRefunds = activeRefunds,
             cogs = cogs,
             grossProfit = grossProfit,
             grossMargin = grossMargin,

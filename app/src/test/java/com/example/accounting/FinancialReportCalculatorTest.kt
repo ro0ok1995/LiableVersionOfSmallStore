@@ -4,6 +4,8 @@ import com.example.data.db.Sale
 import com.example.data.db.SaleLine
 import com.example.data.db.SaleReturn
 import com.example.data.db.SaleReturnLine
+import com.example.data.db.Expense
+import com.example.data.db.Refund
 import com.example.model.OperationStatus
 import com.example.model.SaleType
 import com.example.model.TransactionItem
@@ -1230,4 +1232,175 @@ class FinancialReportCalculatorTest {
         assertEquals("Reversed count must be 1", 1, totals.reversedTransactionCount)
         assertEquals("Reversed sales volume must be 200.0", 200.0, totals.reversedSalesVolume, 0.0001)
     }
+    @Test
+    fun testPhase6_saleReturnReversesRevenueAndHistoricalCogs() {
+        val sale = Sale(
+            id = "s_p6_return",
+            invoiceNumber = "INV-P6-007",
+            customerId = customerId,
+            saleType = "CASH",
+            totalAmount = 100.0,
+            paidAmount = 100.0,
+            creditAmount = 0.0,
+            paymentStatus = "PAID",
+            transactionDate = "2026-10-01",
+            status = "ACTIVE"
+        )
+        val line = SaleLine(
+            id = "sl_p6_return",
+            saleId = sale.id,
+            productId = "prod_p6_return",
+            productNameSnapshot = "Returned Item",
+            quantity = 2,
+            unitPrice = 50.0,
+            costPriceAtSale = 30.0,
+            subtotal = 100.0
+        )
+        val saleReturn = SaleReturn(
+            id = "sr_p6_return",
+            saleId = sale.id,
+            customerId = customerId,
+            returnDate = "2026-10-02",
+            reason = "Customer return",
+            amount = 40.0,
+            status = "ACTIVE"
+        )
+        val returnLine = SaleReturnLine(
+            id = "srl_p6_return",
+            saleReturnId = saleReturn.id,
+            saleLineId = line.id,
+            productId = line.productId ?: "prod_p6_return",
+            productNameSnapshot = line.productNameSnapshot,
+            quantity = 1,
+            unitPrice = 50.0,
+            costPriceAtReturn = 30.0,
+            subtotal = 50.0
+        )
+        val reversedReturn = saleReturn.copy(
+            id = "sr_p6_return_reversed",
+            amount = 25.0,
+            status = "REVERSED"
+        )
+        val reversedReturnLine = returnLine.copy(
+            id = "srl_p6_return_reversed",
+            saleReturnId = reversedReturn.id,
+            quantity = 1,
+            subtotal = 50.0
+        )
+
+        val totals = FinancialReportCalculator.calculateFromSales(
+            sales = listOf(sale),
+            saleLines = listOf(line),
+            saleReturns = listOf(saleReturn, reversedReturn),
+            saleReturnLines = listOf(returnLine, reversedReturnLine)
+        )
+
+        assertEquals(100.0, totals.totalSales, 0.0001)
+        assertEquals(60.0, totals.netSales, 0.0001)
+        assertEquals(30.0, totals.cogs, 0.0001)
+        assertEquals(30.0, totals.grossProfit, 0.0001)
+        assertEquals(40.0, totals.saleReturns, 0.0001)
+    }
+
+    @Test
+    fun testPhase6_refundDoesNotDoubleReduceRevenueAndReversedRefundIsIgnored() {
+        val sale = Sale(
+            id = "s_p6_refund",
+            invoiceNumber = "INV-P6-008",
+            customerId = customerId,
+            saleType = "CASH",
+            totalAmount = 100.0,
+            paidAmount = 100.0,
+            creditAmount = 0.0,
+            paymentStatus = "PAID",
+            transactionDate = "2026-10-01"
+        )
+        val line = SaleLine(
+            id = "sl_p6_refund",
+            saleId = sale.id,
+            productId = "prod_p6_refund",
+            productNameSnapshot = "Refunded Item",
+            quantity = 1,
+            unitPrice = 100.0,
+            costPriceAtSale = 60.0,
+            subtotal = 100.0
+        )
+        val activeRefund = Refund(
+            id = "refund_p6_active",
+            saleId = sale.id,
+            customerId = customerId,
+            amount = 20.0,
+            refundDate = "2026-10-02",
+            reason = "Cash refund",
+            status = "ACTIVE"
+        )
+        val reversedRefund = activeRefund.copy(
+            id = "refund_p6_reversed",
+            amount = 15.0,
+            status = "REVERSED"
+        )
+
+        val totals = FinancialReportCalculator.calculateFromSales(
+            sales = listOf(sale),
+            saleLines = listOf(line),
+            refunds = listOf(activeRefund, reversedRefund)
+        )
+
+        assertEquals(100.0, totals.netSales, 0.0001)
+        assertEquals(60.0, totals.cogs, 0.0001)
+        assertEquals(40.0, totals.grossProfit, 0.0001)
+        assertEquals(20.0, totals.customerRefunds, 0.0001)
+    }
+
+    @Test
+    fun testPhase6_expenseAndReversalAffectNetProfitOnly() {
+        val sale = Sale(
+            id = "s_p6_expense",
+            invoiceNumber = "INV-P6-009",
+            customerId = customerId,
+            saleType = "CASH",
+            totalAmount = 100.0,
+            paidAmount = 100.0,
+            creditAmount = 0.0,
+            paymentStatus = "PAID",
+            transactionDate = "2026-10-01"
+        )
+        val line = SaleLine(
+            id = "sl_p6_expense",
+            saleId = sale.id,
+            productId = "prod_p6_expense",
+            productNameSnapshot = "Expense Test Item",
+            quantity = 1,
+            unitPrice = 100.0,
+            costPriceAtSale = 60.0,
+            subtotal = 100.0
+        )
+        val categoryId = "cat_p6_expense"
+        val accountId = "account_p6_expense"
+        val activeExpense = Expense(
+            id = "expense_p6_active",
+            categoryId = categoryId,
+            amount = 10.0,
+            financialAccountId = accountId,
+            date = "2026-10-02",
+            description = "Operating expense",
+            status = "ACTIVE"
+        )
+        val reversedExpense = activeExpense.copy(
+            id = "expense_p6_reversed",
+            amount = 25.0,
+            status = "REVERSED"
+        )
+
+        val totals = FinancialReportCalculator.calculateFromSales(
+            sales = listOf(sale),
+            saleLines = listOf(line),
+            expenses = listOf(activeExpense, reversedExpense)
+        )
+
+        assertEquals(40.0, totals.grossProfit, 0.0001)
+        assertEquals(10.0, totals.expenses, 0.0001)
+        assertEquals(30.0, totals.netProfit, 0.0001)
+    }
+
 }

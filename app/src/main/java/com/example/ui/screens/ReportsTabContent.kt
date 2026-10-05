@@ -71,6 +71,7 @@ import com.example.ui.theme.StatusRed
 import com.example.ui.theme.StatusRedBg
 import com.example.util.ReportExporter
 import com.example.util.ReportPreviewRow
+import com.example.util.ReportPresentationUtils
 import com.example.viewmodel.AnalysisCenterUiState
 import com.example.viewmodel.AnalysisCenterViewModel
 import com.example.viewmodel.DateFilterUtils
@@ -153,20 +154,10 @@ internal fun ReportsTabContent(
         FinancialReportCalculator.calculate(periodTransactions, transactionLines)
     }
     val cashSalesInvoices = remember(periodTransactions) {
-        periodTransactions.filter { tx ->
-            val saleType = tx.typedSaleType
-            val txType = tx.typedTransactionType
-            (txType == TransactionType.SALE && (saleType == SaleType.CASH || saleType == SaleType.MIXED || tx.paidAmount > 0.0 || (!tx.isCredit && tx.creditAmount == 0.0))) ||
-            (!tx.isCredit && (tx.activityType.contains("كاش") || tx.activityType.contains("Cash") || (!tx.activityType.contains("تسديد") && !tx.activityType.contains("Payment") && !tx.activityType.contains("آجل") && !tx.activityType.contains("دين") && !tx.activityType.contains("Debt"))))
-        }
+        periodTransactions.filter { ReportPresentationUtils.cashSalesAmount(it) > FinancialReportCalculator.EPSILON }
     }
     val debtSalesInvoices = remember(periodTransactions) {
-        periodTransactions.filter { tx ->
-            val saleType = tx.typedSaleType
-            val txType = tx.typedTransactionType
-            (txType == TransactionType.SALE && (saleType == SaleType.CREDIT || saleType == SaleType.MIXED || tx.creditAmount > 0.0 || tx.isCredit)) ||
-            (tx.isCredit || tx.activityType.contains("آجل") || tx.activityType.contains("دين") || tx.activityType.contains("Debt") || tx.activityType.contains("شراء بالدين"))
-        }
+        periodTransactions.filter { ReportPresentationUtils.creditSalesAmount(it) > FinancialReportCalculator.EPSILON }
     }
     val totalCashSalesAmount = salesBreakdown.cashSales
     val totalDebtSalesAmount = salesBreakdown.creditSales
@@ -320,28 +311,11 @@ internal fun ReportsTabContent(
             }
             ReportType.TRANSACTIONS -> {
                 sortedTransactions.map { tx ->
-                    val txType = tx.typedTransactionType
-                    val saleType = tx.typedSaleType
-                    val typeLabel = when (txType) {
-                        TransactionType.CUSTOMER_PAYMENT -> if (isArabic) "تسديد (دفعة)" else "Payment"
-                        TransactionType.SALE -> when (saleType) {
-                            SaleType.CASH -> if (isArabic) "شراء نقدي (كاش)" else "Cash Purchase"
-                            SaleType.CREDIT -> if (isArabic) "شراء آجل (دين)" else "Debt Purchase"
-                            SaleType.MIXED -> if (isArabic) "شراء مختلط" else "Mixed Purchase"
-                            null -> if (tx.isCredit) (if (isArabic) "شراء آجل (دين)" else "Debt Purchase") else (if (isArabic) "شراء نقدي (كاش)" else "Cash Purchase")
-                        }
-                        TransactionType.SALE_RETURN -> if (isArabic) "مرتجع مبيعات" else "Sale Return"
-                        TransactionType.CUSTOMER_REFUND -> if (isArabic) "استرداد نقدي" else "Customer Refund"
-                        TransactionType.BALANCE_ADJUSTMENT -> if (isArabic) "تعديل رصيد" else "Balance Adjustment"
-                        TransactionType.REVERSAL -> if (isArabic) "إلغاء معاملة" else "Reversal"
-                        else -> if (tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")) {
-                            if (isArabic) "تسديد (دفعة)" else "Payment"
-                        } else if (tx.isCredit || tx.activityType.contains("آجل") || tx.activityType.contains("دين") || tx.activityType.contains("Debt") || tx.activityType.contains("شراء بالدين")) {
-                            if (isArabic) "شراء آجل (دين)" else "Debt Purchase"
-                        } else {
-                            if (isArabic) "شراء نقدي (كاش)" else "Cash Purchase"
-                        }
-                    }
+                    val typeLabel = ReportPresentationUtils.getTransactionTypeLabel(
+                        tx = tx,
+                        isArabic = isArabic,
+                        shortLabel = false
+                    )
                     ReportPreviewRow(
                         col1 = tx.date,
                         col2 = tx.customerName,
@@ -354,28 +328,11 @@ internal fun ReportsTabContent(
                 if (selectedCustomer == null) emptyList()
                 else customerTransactions.map { tx ->
                     val desc = tx.notes.ifBlank { tx.activityType }
-                    val txType = tx.typedTransactionType
-                    val saleType = tx.typedSaleType
-                    val typeLabel = when (txType) {
-                        TransactionType.CUSTOMER_PAYMENT -> if (isArabic) "تسديد" else "Payment"
-                        TransactionType.SALE -> when (saleType) {
-                            SaleType.CASH -> if (isArabic) "شراء كاش" else "Cash"
-                            SaleType.CREDIT -> if (isArabic) "شراء آجل" else "Debt"
-                            SaleType.MIXED -> if (isArabic) "شراء مختلط" else "Mixed"
-                            null -> if (tx.isCredit) (if (isArabic) "شراء آجل" else "Debt") else (if (isArabic) "شراء كاش" else "Cash")
-                        }
-                        TransactionType.SALE_RETURN -> if (isArabic) "مرتجع" else "Return"
-                        TransactionType.CUSTOMER_REFUND -> if (isArabic) "استرداد" else "Refund"
-                        TransactionType.BALANCE_ADJUSTMENT -> if (isArabic) "تعديل رصيد" else "Adjustment"
-                        TransactionType.REVERSAL -> if (isArabic) "إلغاء" else "Reversal"
-                        else -> if (tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")) {
-                            if (isArabic) "تسديد" else "Payment"
-                        } else if (tx.isCredit || tx.activityType.contains("آجل") || tx.activityType.contains("دين") || tx.activityType.contains("Debt") || tx.activityType.contains("شراء بالدين")) {
-                            if (isArabic) "شراء آجل" else "Debt"
-                        } else {
-                            if (isArabic) "شراء كاش" else "Cash"
-                        }
-                    }
+                    val typeLabel = ReportPresentationUtils.getTransactionTypeLabel(
+                        tx = tx,
+                        isArabic = isArabic,
+                        shortLabel = true
+                    )
                     ReportPreviewRow(
                         col1 = tx.date,
                         col2 = desc,
