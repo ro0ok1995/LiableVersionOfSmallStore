@@ -359,6 +359,8 @@ object AnalyticsPdfGenerator {
         kpiList.add((if (isArabic) "مبيعات الآجل" else "Debt Sales") to AppCurrency.formatAmountWithDecimals(data.metrics.totalDebtSales, isArabic))
         kpiList.add((if (isArabic) "مبيعات كاش" else "Cash Sales") to AppCurrency.formatAmountWithDecimals(data.metrics.totalCashSales, isArabic))
         kpiList.add((if (isArabic) "المتحصلات" else "Payments Received") to AppCurrency.formatAmountWithDecimals(data.metrics.totalPaymentsReceived, isArabic))
+        kpiList.add((if (isArabic) "إجمالي الربح" else "Gross Profit") to AppCurrency.formatAmountWithDecimals(data.metrics.grossProfit, isArabic))
+        kpiList.add((if (isArabic) "صافي الربح" else "Net Profit") to AppCurrency.formatAmountWithDecimals(data.metrics.netProfit, isArabic))
         kpiList.add((if (isArabic) "تسديد كامل" else "Full Settlement") to AppCurrency.formatAmountWithDecimals(data.metrics.fullSettlementAmount, isArabic))
         kpiList.add((if (isArabic) "تسديد جزئي" else "Partial Settlement") to AppCurrency.formatAmountWithDecimals(data.metrics.partialSettlementAmount, isArabic))
         kpiList.add((if (isArabic) "الصافي المتبقي" else "Net Outstanding") to AppCurrency.formatAmountWithDecimals(data.metrics.netOutstandingBalance, isArabic))
@@ -372,9 +374,10 @@ object AnalyticsPdfGenerator {
         val kpiCardW = (CONTENT_WIDTH - ((kpiCols - 1) * kpiGap)) / kpiCols
         val kpiCardH = 38f
 
-        kpiList.chunked(kpiCols).forEach { rowKpis ->
+        kpiList.withIndex().chunked(kpiCols).forEach { rowKpis ->
             for (c in rowKpis.indices) {
-                val item = rowKpis[c]
+                val indexedItem = rowKpis[c]
+                val item = indexedItem.value
                 val cardX = if (isArabic) {
                     MARGIN + CONTENT_WIDTH - ((c + 1) * kpiCardW) - (c * kpiGap)
                 } else {
@@ -404,12 +407,13 @@ object AnalyticsPdfGenerator {
                 }
 
                 // Value
-                paint.color = if (item.first.contains("آجل") || item.first.contains("Debt") || item.first.contains("الصافي") || item.first.contains("Net")) {
-                    primaryColor
-                } else if (item.first.contains("كاش") || item.first.contains("Cash") || item.first.contains("كامل") || item.first.contains("المتحصلات")) {
-                    greenTextColor
-                } else {
-                    darkTextColor
+                // KPI styling is positional/typed, never inferred by parsing localized labels.
+                paint.color = when (indexedItem.index) {
+                    0 -> primaryColor
+                    1, 2, 3 -> greenTextColor
+                    4 -> if (data.metrics.grossProfit >= 0.0) greenTextColor else 0xFFC62828.toInt()
+                    5 -> if (data.metrics.netProfit >= 0.0) greenTextColor else 0xFFC62828.toInt()
+                    else -> darkTextColor
                 }
                 paint.textSize = 10f
                 paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)

@@ -3,6 +3,27 @@ package com.example.data.backup
 import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
+import com.example.data.db.Adjustment
+import com.example.data.db.CustomerEntity
+import com.example.data.db.CustomerIdentityConflictEntity
+import com.example.data.db.CustomerPayment
+import com.example.data.db.Expense
+import com.example.data.db.ExpenseCategory
+import com.example.data.db.FinancialAccount
+import com.example.data.db.OpeningBalance
+import com.example.data.db.PaymentMethod
+import com.example.data.db.Purchase
+import com.example.data.db.PurchaseLine
+import com.example.data.db.PurchaseReturn
+import com.example.data.db.Refund
+import com.example.data.db.Reversal
+import com.example.data.db.Sale
+import com.example.data.db.SaleLine
+import com.example.data.db.SaleReturn
+import com.example.data.db.SaleReturnLine
+import com.example.data.db.StockMovementEntity
+import com.example.data.db.Supplier
+import com.example.data.db.SupplierPayment
 import com.example.data.db.TransactionItemLineEntity
 import com.example.model.CustomerAccount
 import com.example.model.NotificationItem
@@ -13,22 +34,66 @@ import com.example.model.TransactionItem
 import com.example.util.ProductImageHelper
 import org.json.JSONArray
 import org.json.JSONObject
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.Types
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 
 data class BackupPayload(
-    val version: Int = 1,
+    val version: Int = 2,
     val backupTimestamp: Long = System.currentTimeMillis(),
     val storeInfoAtBackupTime: StoreInfo,
     val customers: List<CustomerAccount>,
     val products: List<ProductItem>,
     val transactions: List<TransactionItem>,
     val transactionItemLines: List<TransactionItemLineEntity> = emptyList(),
-    val notifications: List<NotificationItem>
+    val notifications: List<NotificationItem>,
+    // Version 2 authoritative accounting snapshot. Legacy fields above remain for backward compatibility.
+    val customerEntities: List<CustomerEntity> = emptyList(),
+    val customerIdentityConflicts: List<CustomerIdentityConflictEntity> = emptyList(),
+    val sales: List<Sale> = emptyList(),
+    val saleLines: List<SaleLine> = emptyList(),
+    val financialAccounts: List<FinancialAccount> = emptyList(),
+    val paymentMethods: List<PaymentMethod> = emptyList(),
+    val customerPayments: List<CustomerPayment> = emptyList(),
+    val openingBalances: List<OpeningBalance> = emptyList(),
+    val adjustments: List<Adjustment> = emptyList(),
+    val reversals: List<Reversal> = emptyList(),
+    val saleReturns: List<SaleReturn> = emptyList(),
+    val saleReturnLines: List<SaleReturnLine> = emptyList(),
+    val refunds: List<Refund> = emptyList(),
+    val suppliers: List<Supplier> = emptyList(),
+    val purchases: List<Purchase> = emptyList(),
+    val purchaseLines: List<PurchaseLine> = emptyList(),
+    val supplierPayments: List<SupplierPayment> = emptyList(),
+    val purchaseReturns: List<PurchaseReturn> = emptyList(),
+    val expenseCategories: List<ExpenseCategory> = emptyList(),
+    val expenses: List<Expense> = emptyList(),
+    val stockMovements: List<StockMovementEntity> = emptyList()
 )
 
 object BackupManager {
+
+    private val moshi: Moshi = Moshi.Builder()
+        .add(KotlinJsonAdapterFactory())
+        .build()
+
+    private fun <T> encodeList(value: List<T>, elementClass: Class<T>): JSONArray {
+        val type = Types.newParameterizedType(List::class.java, elementClass)
+        val adapter = moshi.adapter<List<T>>(type)
+        return JSONArray(adapter.toJson(value))
+    }
+
+    private fun <T> decodeList(root: JSONObject, key: String, elementClass: Class<T>): List<T> {
+        val array = root.optJSONArray(key) ?: return emptyList()
+        val type = Types.newParameterizedType(List::class.java, elementClass)
+        return runCatching {
+            moshi.adapter<List<T>>(type).fromJson(array.toString()) ?: emptyList()
+        }.getOrDefault(emptyList())
+    }
+
 
     fun serialize(payload: BackupPayload): String {
         val root = JSONObject()
@@ -165,6 +230,32 @@ object BackupManager {
             notifArray.put(obj)
         }
         root.put("notifications", notifArray)
+
+        // Version 2: preserve the complete authoritative accounting state.
+        val modern = JSONObject().apply {
+            put("customerEntities", encodeList(payload.customerEntities, CustomerEntity::class.java))
+            put("customerIdentityConflicts", encodeList(payload.customerIdentityConflicts, CustomerIdentityConflictEntity::class.java))
+            put("sales", encodeList(payload.sales, Sale::class.java))
+            put("saleLines", encodeList(payload.saleLines, SaleLine::class.java))
+            put("financialAccounts", encodeList(payload.financialAccounts, FinancialAccount::class.java))
+            put("paymentMethods", encodeList(payload.paymentMethods, PaymentMethod::class.java))
+            put("customerPayments", encodeList(payload.customerPayments, CustomerPayment::class.java))
+            put("openingBalances", encodeList(payload.openingBalances, OpeningBalance::class.java))
+            put("adjustments", encodeList(payload.adjustments, Adjustment::class.java))
+            put("reversals", encodeList(payload.reversals, Reversal::class.java))
+            put("saleReturns", encodeList(payload.saleReturns, SaleReturn::class.java))
+            put("saleReturnLines", encodeList(payload.saleReturnLines, SaleReturnLine::class.java))
+            put("refunds", encodeList(payload.refunds, Refund::class.java))
+            put("suppliers", encodeList(payload.suppliers, Supplier::class.java))
+            put("purchases", encodeList(payload.purchases, Purchase::class.java))
+            put("purchaseLines", encodeList(payload.purchaseLines, PurchaseLine::class.java))
+            put("supplierPayments", encodeList(payload.supplierPayments, SupplierPayment::class.java))
+            put("purchaseReturns", encodeList(payload.purchaseReturns, PurchaseReturn::class.java))
+            put("expenseCategories", encodeList(payload.expenseCategories, ExpenseCategory::class.java))
+            put("expenses", encodeList(payload.expenses, Expense::class.java))
+            put("stockMovements", encodeList(payload.stockMovements, StockMovementEntity::class.java))
+        }
+        root.put("modernAccounting", modern)
 
         return root.toString(2)
     }
@@ -322,6 +413,29 @@ object BackupManager {
             )
         }
 
+        val modern = root.optJSONObject("modernAccounting")
+        val modernCustomerEntities = modern?.let { decodeList(it, "customerEntities", CustomerEntity::class.java) } ?: emptyList()
+        val modernConflicts = modern?.let { decodeList(it, "customerIdentityConflicts", CustomerIdentityConflictEntity::class.java) } ?: emptyList()
+        val modernSales = modern?.let { decodeList(it, "sales", Sale::class.java) } ?: emptyList()
+        val modernSaleLines = modern?.let { decodeList(it, "saleLines", SaleLine::class.java) } ?: emptyList()
+        val modernAccounts = modern?.let { decodeList(it, "financialAccounts", FinancialAccount::class.java) } ?: emptyList()
+        val modernPaymentMethods = modern?.let { decodeList(it, "paymentMethods", PaymentMethod::class.java) } ?: emptyList()
+        val modernCustomerPayments = modern?.let { decodeList(it, "customerPayments", CustomerPayment::class.java) } ?: emptyList()
+        val modernOpeningBalances = modern?.let { decodeList(it, "openingBalances", OpeningBalance::class.java) } ?: emptyList()
+        val modernAdjustments = modern?.let { decodeList(it, "adjustments", Adjustment::class.java) } ?: emptyList()
+        val modernReversals = modern?.let { decodeList(it, "reversals", Reversal::class.java) } ?: emptyList()
+        val modernSaleReturns = modern?.let { decodeList(it, "saleReturns", SaleReturn::class.java) } ?: emptyList()
+        val modernSaleReturnLines = modern?.let { decodeList(it, "saleReturnLines", SaleReturnLine::class.java) } ?: emptyList()
+        val modernRefunds = modern?.let { decodeList(it, "refunds", Refund::class.java) } ?: emptyList()
+        val modernSuppliers = modern?.let { decodeList(it, "suppliers", Supplier::class.java) } ?: emptyList()
+        val modernPurchases = modern?.let { decodeList(it, "purchases", Purchase::class.java) } ?: emptyList()
+        val modernPurchaseLines = modern?.let { decodeList(it, "purchaseLines", PurchaseLine::class.java) } ?: emptyList()
+        val modernSupplierPayments = modern?.let { decodeList(it, "supplierPayments", SupplierPayment::class.java) } ?: emptyList()
+        val modernPurchaseReturns = modern?.let { decodeList(it, "purchaseReturns", PurchaseReturn::class.java) } ?: emptyList()
+        val modernExpenseCategories = modern?.let { decodeList(it, "expenseCategories", ExpenseCategory::class.java) } ?: emptyList()
+        val modernExpenses = modern?.let { decodeList(it, "expenses", Expense::class.java) } ?: emptyList()
+        val modernStockMovements = modern?.let { decodeList(it, "stockMovements", StockMovementEntity::class.java) } ?: emptyList()
+
         return BackupPayload(
             version = version,
             backupTimestamp = timestamp,
@@ -330,7 +444,28 @@ object BackupManager {
             products = products,
             transactions = transactions,
             transactionItemLines = lines,
-            notifications = notifications
+            notifications = notifications,
+            customerEntities = modernCustomerEntities,
+            customerIdentityConflicts = modernConflicts,
+            sales = modernSales,
+            saleLines = modernSaleLines,
+            financialAccounts = modernAccounts,
+            paymentMethods = modernPaymentMethods,
+            customerPayments = modernCustomerPayments,
+            openingBalances = modernOpeningBalances,
+            adjustments = modernAdjustments,
+            reversals = modernReversals,
+            saleReturns = modernSaleReturns,
+            saleReturnLines = modernSaleReturnLines,
+            refunds = modernRefunds,
+            suppliers = modernSuppliers,
+            purchases = modernPurchases,
+            purchaseLines = modernPurchaseLines,
+            supplierPayments = modernSupplierPayments,
+            purchaseReturns = modernPurchaseReturns,
+            expenseCategories = modernExpenseCategories,
+            expenses = modernExpenses,
+            stockMovements = modernStockMovements
         )
     }
 

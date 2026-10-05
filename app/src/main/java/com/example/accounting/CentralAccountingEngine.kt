@@ -332,14 +332,16 @@ object CentralAccountingEngine {
         saleLines: List<SaleLine> = emptyList(),
         saleReturns: List<SaleReturn> = emptyList(),
         saleReturnLines: List<SaleReturnLine> = emptyList(),
-        expenses: List<Expense> = emptyList()
+        expenses: List<Expense> = emptyList(),
+        refunds: List<Refund> = emptyList()
     ): FinancialReportTotals {
         return FinancialReportCalculator.calculateFromSales(
             sales = sales,
             saleLines = saleLines,
             saleReturns = saleReturns,
             saleReturnLines = saleReturnLines,
-            expenses = expenses
+            expenses = expenses,
+            refunds = refunds
         )
     }
 
@@ -406,42 +408,17 @@ object CentralAccountingEngine {
         supplierPayments: List<SupplierPayment> = emptyList(),
         expenses: List<Expense> = emptyList()
     ): Double {
-        val activeSalesInflow = sales
-            .filter { (it.financialAccountId ?: "acc_cash") == accountId && it.status != "REVERSED" }
-            .sumOf { it.paidAmount }
-
-        val activeCustomerPaymentsInflow = customerPayments
-            .filter { (it.financialAccountId ?: "acc_cash") == accountId && it.status != "REVERSED" }
-            .sumOf { it.amount }
-
-        val openingBalancesInflow = openingBalances
-            .filter { it.entityType == "FINANCIAL_ACCOUNT" && it.entityId == accountId }
-            .sumOf { if (it.direction == "DEBIT") it.amount else -it.amount }
-
-        val activeAdjustmentsInflow = adjustments
-            .filter { it.entityType == "FINANCIAL_ACCOUNT" && it.entityId == accountId && it.status != "REVERSED" }
-            .sumOf { if (it.direction == "DEBIT") it.amount else -it.amount }
-
-        val activeRefundsOutflow = refunds
-            .filter { (it.financialAccountId ?: "acc_cash") == accountId && it.status != "REVERSED" }
-            .sumOf { it.amount }
-
-        val activePurchasesOutflow = purchases
-            .filter { (it.financialAccountId ?: "acc_cash") == accountId && it.status != "REVERSED" }
-            .sumOf { it.paidAmount }
-
-        val activeSupplierPaymentsOutflow = supplierPayments
-            .filter { (it.financialAccountId ?: "acc_cash") == accountId && it.status != "REVERSED" }
-            .sumOf { it.amount }
-
-        val activeExpensesOutflow = expenses
-            .filter { (it.financialAccountId ?: "acc_cash") == accountId && it.status != "REVERSED" }
-            .sumOf { it.amount }
-
-        val totalInflows = activeSalesInflow + activeCustomerPaymentsInflow + openingBalancesInflow + activeAdjustmentsInflow
-        val totalOutflows = activeRefundsOutflow + activePurchasesOutflow + activeSupplierPaymentsOutflow + activeExpensesOutflow
-
-        return totalInflows - totalOutflows
+        return FinancialAccountLedgerCalculator.calculateAccountBalance(
+            accountId = accountId,
+            sales = sales,
+            customerPayments = customerPayments,
+            openingBalances = openingBalances,
+            adjustments = adjustments,
+            refunds = refunds,
+            purchases = purchases,
+            supplierPayments = supplierPayments,
+            expenses = expenses
+        )
     }
 
     /**

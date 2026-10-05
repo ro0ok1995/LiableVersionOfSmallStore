@@ -51,6 +51,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.accounting.FinancialReportCalculator
 import com.example.model.AppCurrency
 import com.example.model.StoreInfo
 import com.example.model.StoreStrings
@@ -63,6 +64,7 @@ import com.example.ui.theme.StatusGreen
 import com.example.ui.theme.StatusGreenBg
 import com.example.ui.theme.StatusRed
 import com.example.util.ReportPreviewRow
+import com.example.util.ReportPresentationUtils
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -1005,25 +1007,30 @@ fun SalesReportPresentation(
                                     modifier = Modifier.weight(0.85f),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    val isCash = !invoice.isCredit && (
-                                        invoice.activityType.contains("كاش") ||
-                                        invoice.activityType.contains("Cash") ||
-                                        (!invoice.activityType.contains("تسديد") &&
-                                         !invoice.activityType.contains("Payment") &&
-                                         !invoice.activityType.contains("آجل") &&
-                                         !invoice.activityType.contains("دين"))
-                                    )
+                                    val saleType = invoice.typedSaleType
+                                    val typeLabel = when (saleType) {
+                                        com.example.model.SaleType.CASH -> if (isArabic) "كاش" else "Cash"
+                                        com.example.model.SaleType.CREDIT -> if (isArabic) "آجل" else "Credit"
+                                        com.example.model.SaleType.MIXED -> if (isArabic) "مختلط" else "Mixed"
+                                        null -> if (ReportPresentationUtils.creditSalesAmount(invoice) > FinancialReportCalculator.EPSILON) {
+                                            if (isArabic) "آجل" else "Credit"
+                                        } else {
+                                            if (isArabic) "كاش" else "Cash"
+                                        }
+                                    }
+                                    val isMixed = saleType == com.example.model.SaleType.MIXED
+                                    val isCash = saleType == com.example.model.SaleType.CASH || (saleType == null && ReportPresentationUtils.creditSalesAmount(invoice) <= FinancialReportCalculator.EPSILON)
+                                    val chipColor = if (isMixed) GeoPrimary else if (isCash) StatusGreen else StatusAmber
                                     Surface(
                                         shape = RoundedCornerShape(6.dp),
-                                        color = if (isCash) StatusGreen.copy(alpha = 0.12f) else StatusAmber.copy(alpha = 0.12f),
+                                        color = chipColor.copy(alpha = 0.12f),
                                         border = BorderStroke(
                                             0.5.dp,
-                                            if (isCash) StatusGreen.copy(alpha = 0.3f) else StatusAmber.copy(alpha = 0.3f)
+                                            chipColor.copy(alpha = 0.3f)
                                         )
                                     ) {
                                         Text(
-                                            text = if (isCash) (if (isArabic) "كاش" else "Cash")
-                                            else (if (isArabic) "آجل" else "Debt"),
+                                            text = typeLabel,
                                             style = MaterialTheme.typography.labelSmall.copy(
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 10.sp

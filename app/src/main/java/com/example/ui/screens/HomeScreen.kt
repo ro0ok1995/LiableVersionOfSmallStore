@@ -298,7 +298,7 @@ fun HomeScreen(
             }
             val cashSalesAmount = homeBreakdown.cashSales
             val fullSettlementAmount = homeBreakdown.fullSettlementAmount
-            val debtAmount = if (selectedCustomer != null) selectedCustomer.balance else totalDebt
+            val debtAmount = if (selectedCustomer != null) selectedCustomer.balance.coerceAtLeast(0.0) else if (allCustomers.isNotEmpty()) allCustomers.sumOf { it.balance.coerceAtLeast(0.0) } else totalDebt.coerceAtLeast(0.0)
             val totalActivity = debtAmount + cashSalesAmount + fullSettlementAmount
             val debtPercent = if (totalActivity > 0) ((debtAmount / totalActivity) * 100).roundToInt() else 0
             val cashPercent = if (totalActivity > 0) ((cashSalesAmount / totalActivity) * 100).roundToInt() else 0
@@ -719,12 +719,17 @@ private fun ActivityRowCard(
     onReverseClick: (() -> Unit)? = null,
     onReturnClick: (() -> Unit)? = null
 ) {
-    val isCredit = transaction.isCredit
-    val isPayment = transaction.typedTransactionType == TransactionType.CUSTOMER_PAYMENT
+    val type = transaction.typedTransactionType
+    val isPositiveMovement = when (type) {
+        TransactionType.SALE,
+        TransactionType.CUSTOMER_PAYMENT,
+        TransactionType.PURCHASE_RETURN -> true
+        else -> false
+    }
     val isReversed = transaction.typedOperationStatus == OperationStatus.REVERSED
-    val badgeBg = if (isPayment || isCredit) MaterialTheme.colorScheme.statusGreenContainer else MaterialTheme.colorScheme.statusRedContainer
-    val badgeTint = if (isPayment || isCredit) MaterialTheme.colorScheme.statusGreen else MaterialTheme.colorScheme.statusRed
-    val iconVector = if (isPayment || isCredit) Icons.Default.Add else Icons.Default.Remove
+    val badgeBg = if (isPositiveMovement) MaterialTheme.colorScheme.statusGreenContainer else MaterialTheme.colorScheme.statusRedContainer
+    val badgeTint = if (isPositiveMovement) MaterialTheme.colorScheme.statusGreen else MaterialTheme.colorScheme.statusRed
+    val iconVector = if (isPositiveMovement) Icons.Default.Add else Icons.Default.Remove
 
     Card(
         onClick = { onClick?.invoke() },
@@ -834,7 +839,7 @@ private fun ActivityRowCard(
                     text = String.format(
                         Locale.US,
                         "%s%,.2f %s",
-                        if (isPayment || isCredit) "+" else "-",
+                        if (isPositiveMovement) "+" else "-",
                         transaction.amount,
                         currency
                     ),
@@ -842,7 +847,7 @@ private fun ActivityRowCard(
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
                     ),
-                    color = if (isPayment || isCredit) MaterialTheme.colorScheme.statusGreen else MaterialTheme.colorScheme.statusRed
+                    color = if (isPositiveMovement) MaterialTheme.colorScheme.statusGreen else MaterialTheme.colorScheme.statusRed
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(

@@ -429,7 +429,7 @@ fun CustomerProfileScreen(
 
                             Column(horizontalAlignment = Alignment.End) {
                                 Text(
-                                    text = if (isArabic) StoreStrings.TOTAL_DEBT_AR else StoreStrings.TOTAL_DEBT_EN,
+                                    text = if (isArabic) StoreStrings.HISTORICAL_CREDIT_SALES_AR else StoreStrings.HISTORICAL_CREDIT_SALES_EN,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -441,7 +441,7 @@ fun CustomerProfileScreen(
                                         fontSize = 17.sp
                                     ),
                                     color = MaterialTheme.colorScheme.statusRed,
-                                    modifier = Modifier.testTag("customer_profile_debt")
+                                    modifier = Modifier.testTag("customer_profile_historical_credit_sales")
                                 )
                             }
                         }

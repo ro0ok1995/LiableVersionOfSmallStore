@@ -47,20 +47,64 @@ data class ReportPreviewRow(
  */
 object ReportPresentationUtils {
 
+    fun isActiveAccountingTransaction(tx: TransactionItem): Boolean =
+        tx.typedOperationStatus != OperationStatus.REVERSED
+
+    fun isSaleTransaction(tx: TransactionItem): Boolean =
+        isActiveAccountingTransaction(tx) && tx.typedTransactionType == TransactionType.SALE
+
+    fun cashSalesAmount(tx: TransactionItem): Double {
+        if (!isSaleTransaction(tx)) return 0.0
+        return when (tx.typedSaleType) {
+            SaleType.CASH -> tx.amount
+            SaleType.CREDIT -> 0.0
+            SaleType.MIXED -> tx.paidAmount.coerceAtLeast(0.0)
+            null -> {
+                when {
+                    tx.paidAmount > 0.0 -> tx.paidAmount
+                    tx.creditAmount > 0.0 -> (tx.amount - tx.creditAmount).coerceAtLeast(0.0)
+                    !tx.isCredit -> tx.amount
+                    else -> 0.0
+                }
+            }
+        }
+    }
+
+    fun creditSalesAmount(tx: TransactionItem): Double {
+        if (!isSaleTransaction(tx)) return 0.0
+        return when (tx.typedSaleType) {
+            SaleType.CASH -> 0.0
+            SaleType.CREDIT -> if (tx.creditAmount > 0.0) tx.creditAmount else tx.amount
+            SaleType.MIXED -> tx.creditAmount.coerceAtLeast(0.0)
+            null -> {
+                when {
+                    tx.creditAmount > 0.0 -> tx.creditAmount
+                    tx.isCredit -> (tx.amount - tx.paidAmount).coerceAtLeast(0.0)
+                    else -> 0.0
+                }
+            }
+        }
+    }
+
+    fun customerPaymentAmount(tx: TransactionItem): Double =
+        if (isActiveAccountingTransaction(tx) && tx.typedTransactionType == TransactionType.CUSTOMER_PAYMENT) {
+            tx.amount.coerceAtLeast(0.0)
+        } else 0.0
+
+
     fun isPaymentTransaction(tx: TransactionItem): Boolean {
-        if ((tx.operationStatus ?: tx.typedOperationStatus) == OperationStatus.REVERSED) return false
-        val type = tx.transactionType ?: tx.typedTransactionType
+        if (!isActiveAccountingTransaction(tx)) return false
+        val type = tx.typedTransactionType
         return type == TransactionType.CUSTOMER_PAYMENT || type == TransactionType.SALE_RETURN
     }
 
     fun isDebtTransaction(tx: TransactionItem): Boolean {
-        if ((tx.operationStatus ?: tx.typedOperationStatus) == OperationStatus.REVERSED) return false
+        if (!isActiveAccountingTransaction(tx)) return false
         if (isPaymentTransaction(tx)) return false
-        val saleType = tx.saleType ?: tx.typedSaleType
-        val type = tx.transactionType ?: tx.typedTransactionType
-        return saleType == SaleType.CREDIT || saleType == SaleType.MIXED ||
-            (type == TransactionType.SALE && (tx.creditAmount > 0.0 || tx.isCredit)) ||
-            (type == null && (tx.creditAmount > 0.0 || tx.isCredit))
+        val type = tx.typedTransactionType
+        return creditSalesAmount(tx) > FinancialReportCalculator.EPSILON ||
+            type == TransactionType.CUSTOMER_REFUND ||
+            type == TransactionType.BALANCE_ADJUSTMENT && tx.isCredit
     }
 
     fun getInvoiceTypeLabel(inv: TransactionItem, isArabic: Boolean): String {
@@ -95,6 +139,11 @@ object ReportPresentationUtils {
             }
             TransactionType.SALE_RETURN -> if (isArabic) "مرتجع مبيعات" else "Sale Return"
             TransactionType.CUSTOMER_REFUND -> if (isArabic) "استرداد نقدي" else "Customer Refund"
+            TransactionType.PURCHASE -> if (isArabic) "مشتريات" else "Purchase"
+            TransactionType.SUPPLIER_PAYMENT -> if (isArabic) "سداد مورد" else "Supplier Payment"
+            TransactionType.PURCHASE_RETURN -> if (isArabic) "مرتجع مشتريات" else "Purchase Return"
+            TransactionType.EXPENSE -> if (isArabic) "مصروف" else "Expense"
+            TransactionType.STOCK_ADJUSTMENT -> if (isArabic) "تسوية مخزون" else "Stock Adjustment"
             TransactionType.BALANCE_ADJUSTMENT -> if (isArabic) (if (shortLabel) "تعديل رصيد" else "تعديل رصيد") else "Balance Adjustment"
             TransactionType.REVERSAL -> if (isArabic) (if (shortLabel) "إلغاء" else "إلغاء معاملة") else "Reversal"
             TransactionType.OPENING_BALANCE -> if (isArabic) "رصيد افتتاحي" else "Opening Balance"
@@ -226,8 +275,8 @@ object ReportPresentationUtils {
 
         for (tx in sortedList) {
             val decomp = FinancialReportCalculator.decomposeTransaction(tx)
-            val isPayment = decomp.customerPayments > 0.0 || tx.typedTransactionType == TransactionType.SALE_RETURN
-            val isDebtPurchase = decomp.creditSales > 0.0
+            val isPayment = isPaymentTransaction(tx)
+            val isDebtPurchase = isDebtTransaction(tx)
 
             val impact = decomp.receivableChange
             running += impact
@@ -244,7 +293,7 @@ object ReportPresentationUtils {
                     type = typeDesc,
                     isPayment = isPayment,
                     isCreditDebt = isDebtPurchase,
-                    amount = tx.amount,
+                    amount = kotlin.math.abs(impact),
                     runningBalance = running,
                     isArchived = tx.isArchived || decomp.isReversed
                 )

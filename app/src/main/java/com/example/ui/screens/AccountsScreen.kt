@@ -72,7 +72,6 @@ import com.example.model.LanguageMode
 import com.example.model.SettlementType
 import com.example.model.StoreStrings
 import com.example.model.TransactionItem
-import com.example.accounting.CustomerLedgerCalculator
 import com.example.accounting.FinancialReportCalculator
 import com.example.ui.components.CustomerSearchField
 import com.example.ui.theme.GeoOutline
@@ -122,10 +121,8 @@ fun AccountsScreen(
         }
     }
 
-    val customerBalances = remember(transactions) {
-        transactions.groupBy { it.customerId }.mapValues { (custId, txs) ->
-            if (custId != null) CustomerLedgerCalculator.calculateCustomerBalance(custId, txs).balance else 0.0
-        }
+    val customerBalances = remember(accounts) {
+        accounts.associate { customer -> customer.id to customer.balance }
     }
 
     val sortedAccounts = remember(accounts, sortOption, customerCashTotals, customerBalances) {

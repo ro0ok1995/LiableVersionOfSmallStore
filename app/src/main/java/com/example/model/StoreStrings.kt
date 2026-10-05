@@ -290,6 +290,8 @@ object StoreStrings {
     const val TOTAL_BALANCE_AR = "إجمالي الرصيد"
     const val TOTAL_DEBT_EN = "Total Debt"
     const val TOTAL_DEBT_AR = "إجمالي الديون"
+    const val HISTORICAL_CREDIT_SALES_EN = "Historical Credit Sales"
+    const val HISTORICAL_CREDIT_SALES_AR = "إجمالي المبيعات الآجلة التاريخية"
     const val TODAY_TRANSACTIONS_EN = "Today's Transactions"
     const val TODAY_TRANSACTIONS_AR = "معاملات اليوم"
     const val PERIOD_ALL_EN = "All"

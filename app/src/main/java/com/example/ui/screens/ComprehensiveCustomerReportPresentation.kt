@@ -68,6 +68,7 @@ import com.example.ui.theme.StatusGreenBg
 import com.example.ui.theme.StatusRed
 import com.example.ui.theme.StatusRedBg
 import com.example.util.ReportPreviewRow
+import com.example.util.ReportPresentationUtils
 import com.example.viewmodel.CustomerDebtAgingResult
 
 /**
@@ -177,26 +178,20 @@ fun ComprehensiveCustomerReportPresentation(
 
     var filterMode by remember { mutableStateOf(CustomerTxFilterMode.ALL) }
 
-    // Categorized transaction lists for this customer
+    // Categorized transaction lists are derived from typed accounting semantics.
     val cashTxList = remember(customerTransactions) {
-        customerTransactions.filter { tx ->
-            !tx.isCredit && (tx.activityType.contains("كاش") || tx.activityType.contains("Cash") ||
-                (!tx.activityType.contains("تسديد") && !tx.activityType.contains("Payment") &&
-                    !tx.activityType.contains("آجل") && !tx.activityType.contains("دين") && !tx.activityType.contains("Debt")))
-        }
+        customerTransactions.filter { ReportPresentationUtils.cashSalesAmount(it) > FinancialReportCalculator.EPSILON }
     }
 
     val debtTxList = remember(customerTransactions) {
-        customerTransactions.filter { tx ->
-            tx.isCredit || tx.activityType.contains("آجل") || tx.activityType.contains("دين") ||
-                tx.activityType.contains("Debt") || tx.activityType.contains("شراء بالدين")
+        customerTransactions.filter {
+            ReportPresentationUtils.creditSalesAmount(it) > FinancialReportCalculator.EPSILON ||
+                it.typedTransactionType == TransactionType.CUSTOMER_REFUND
         }
     }
 
     val paymentsTxList = remember(customerTransactions) {
-        customerTransactions.filter { tx ->
-            tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
-        }
+        customerTransactions.filter { ReportPresentationUtils.isPaymentTransaction(it) }
     }
 
     // Filtered transaction list for the detailed table
@@ -1168,15 +1163,14 @@ private fun CustomerDetailedTransactionsTable(
                 }
             } else {
                 displayedTransactions.forEachIndexed { idx, tx ->
-                    val isPayment = tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
-                    val isCredit = tx.isCredit || tx.activityType.contains("آجل") || tx.activityType.contains("دين") ||
-                        tx.activityType.contains("Debt") || tx.activityType.contains("شراء بالدين")
+                    val isPayment = ReportPresentationUtils.isPaymentTransaction(tx)
+                    val isCredit = ReportPresentationUtils.isDebtTransaction(tx)
 
-                    val typeLabel = when {
-                        isPayment -> if (isArabic) "تسديد" else "Payment"
-                        isCredit -> if (isArabic) "شراء آجل" else "Credit"
-                        else -> if (isArabic) "شراء كاش" else "Cash"
-                    }
+                    val typeLabel = ReportPresentationUtils.getTransactionTypeLabel(
+                        tx = tx,
+                        isArabic = isArabic,
+                        shortLabel = true
+                    )
 
                     val typeColor = when {
                         isPayment -> StatusBlue
