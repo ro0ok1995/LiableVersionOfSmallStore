@@ -5,7 +5,6 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.data.backup.BackupManager
 import com.example.data.backup.BackupPayload
 import com.example.data.db.Sale
 import com.example.data.db.SaleLine
@@ -144,9 +143,15 @@ class MainViewModel @JvmOverloads constructor(
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
 
+    val backupRestoreViewModel = BackupRestoreViewModel(application, repository)
+    val expenseViewModel = ExpenseViewModel(application, repository)
+    val supplierPurchaseViewModel = SupplierPurchaseViewModel(application, repository)
+    val inventoryViewModel = InventoryViewModel(application, repository)
+    val customerViewModel = CustomerViewModel(application, repository)
+
     // Backup & Restore conflict handling
-    val pendingRestorePayload = MutableStateFlow<BackupPayload?>(null)
-    val showRestoreConflictSheet = MutableStateFlow(false)
+    val pendingRestorePayload: MutableStateFlow<BackupPayload?> = backupRestoreViewModel.pendingRestorePayload
+    val showRestoreConflictSheet: MutableStateFlow<Boolean> = backupRestoreViewModel.showRestoreConflictSheet
 
     // StoreInfo status
     val isStoreInfoSaved = MutableStateFlow<Boolean?>(null)
@@ -164,18 +169,56 @@ class MainViewModel @JvmOverloads constructor(
         }
 
         viewModelScope.launch {
-            repository.customers.collect { list ->
+            customerViewModel.customers.collect { list ->
                 _uiState.update { it.copy(customers = list) }
             }
         }
 
         viewModelScope.launch {
-            repository.archivedCustomers.collect { list ->
+            customerViewModel.archivedCustomers.collect { list ->
                 _uiState.update {
                     it.copy(
                         archivedCustomers = list,
                         archivedCustomerIds = list.map { c -> c.id }.toSet()
                     )
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            customerViewModel.accountsSearchQuery.collect { query ->
+                _uiState.update { it.copy(accountsSearchQuery = query) }
+            }
+        }
+
+        viewModelScope.launch {
+            customerViewModel.accountsFilter.collect { filter ->
+                _uiState.update { it.copy(accountsFilter = filter) }
+            }
+        }
+
+        viewModelScope.launch {
+            customerViewModel.accountsSelectedCustomerDetails.collect { customer ->
+                _uiState.update { it.copy(accountsSelectedCustomerDetails = customer) }
+            }
+        }
+
+        viewModelScope.launch {
+            customerViewModel.customerDetailsPreviousDestination.collect { prev ->
+                _uiState.update { it.copy(customerDetailsPreviousDestination = prev) }
+            }
+        }
+
+        viewModelScope.launch {
+            customerViewModel.showAddCustomerDialog.collect { show ->
+                _uiState.update { it.copy(showAddCustomerDialog = show) }
+            }
+        }
+
+        viewModelScope.launch {
+            customerViewModel.pendingCustomerConflict.collect { conflict ->
+                if (conflict != null) {
+                    _uiState.update { it.copy(pendingArchiveConflict = conflict) }
                 }
             }
         }
@@ -199,19 +242,31 @@ class MainViewModel @JvmOverloads constructor(
         }
 
         viewModelScope.launch {
-            repository.products.collect { list ->
+            inventoryViewModel.products.collect { list ->
                 _uiState.update { it.copy(products = list) }
             }
         }
 
         viewModelScope.launch {
-            repository.archivedProducts.collect { list ->
+            inventoryViewModel.archivedProducts.collect { list ->
                 _uiState.update {
                     it.copy(
                         archivedProducts = list,
                         archivedProductIds = list.map { p -> p.id }.toSet()
                     )
                 }
+            }
+        }
+
+        viewModelScope.launch {
+            inventoryViewModel.productStockMap.collect { map ->
+                _uiState.update { it.copy(productStockMap = map) }
+            }
+        }
+
+        viewModelScope.launch {
+            inventoryViewModel.totalInventoryValuation.collect { valuation ->
+                _uiState.update { it.copy(totalInventoryValuation = valuation) }
             }
         }
 
@@ -246,31 +301,31 @@ class MainViewModel @JvmOverloads constructor(
         }
 
         viewModelScope.launch {
-            repository.allSuppliers.collect { list ->
+            supplierPurchaseViewModel.suppliers.collect { list ->
                 _uiState.update { it.copy(suppliers = list) }
             }
         }
 
         viewModelScope.launch {
-            repository.allPurchases.collect { list ->
+            supplierPurchaseViewModel.purchases.collect { list ->
                 _uiState.update { it.copy(purchases = list) }
             }
         }
 
         viewModelScope.launch {
-            repository.allSupplierPayments.collect { list ->
+            supplierPurchaseViewModel.supplierPayments.collect { list ->
                 _uiState.update { it.copy(supplierPayments = list) }
             }
         }
 
         viewModelScope.launch {
-            repository.allExpenseCategories.collect { list ->
+            expenseViewModel.expenseCategories.collect { list ->
                 _uiState.update { it.copy(expenseCategories = list) }
             }
         }
 
         viewModelScope.launch {
-            repository.allExpenses.collect { list ->
+            expenseViewModel.expenses.collect { list ->
                 _uiState.update { it.copy(expenses = list) }
             }
         }
@@ -428,21 +483,22 @@ class MainViewModel @JvmOverloads constructor(
 
     // ACCOUNTS SCREEN
     fun setAccountsSearchQuery(query: String) {
-        _uiState.update { it.copy(accountsSearchQuery = query) }
+        customerViewModel.setAccountsSearchQuery(query)
     }
 
     fun setAccountsFilter(filter: AccountFilter) {
-        _uiState.update { it.copy(accountsFilter = filter) }
+        customerViewModel.setAccountsFilter(filter)
     }
 
     fun selectCustomerDetails(customer: CustomerAccount?) {
-        _uiState.update { it.copy(accountsSelectedCustomerDetails = customer) }
+        customerViewModel.selectCustomerDetails(customer)
     }
 
     fun openCustomerDetailsFromAccounts(customer: CustomerAccount) {
-        selectCustomerDetails(customer)
+        customerViewModel.openCustomerDetailsFromAccounts(customer)
         _uiState.update {
             it.copy(
+                accountsSelectedCustomerDetails = customer,
                 customerDetailsPreviousDestination = NavDestination.ACCOUNTS,
                 currentDestination = NavDestination.CUSTOMER_DETAILS
             )
@@ -453,9 +509,10 @@ class MainViewModel @JvmOverloads constructor(
         val state = _uiState.value
         val customer = resolveCustomerForTransaction(state.customers, transaction)
         if (customer != null) {
-            selectCustomerDetails(customer)
+            customerViewModel.selectCustomerDetails(customer)
             _uiState.update {
                 it.copy(
+                    accountsSelectedCustomerDetails = customer,
                     customerDetailsPreviousDestination = NavDestination.HOME,
                     currentDestination = NavDestination.CUSTOMER_DETAILS
                 )
@@ -468,59 +525,35 @@ class MainViewModel @JvmOverloads constructor(
             customers: List<CustomerAccount>,
             transaction: TransactionItem
         ): CustomerAccount? {
-            // Strict customer identity by persistent ID (Phase 2):
-            if (!transaction.customerId.isNullOrBlank()) {
-                return customers.firstOrNull { it.id == transaction.customerId }
-            }
-            // If customerId is null, do NOT guess using customerName.
-            // Return null / unresolved state.
-            return null
+            return CustomerViewModel.resolveCustomerForTransaction(customers, transaction)
         }
     }
 
     fun navigateBackFromCustomerDetails() {
-        val prev = _uiState.value.customerDetailsPreviousDestination
+        val prev = customerViewModel.customerDetailsPreviousDestination.value
         navigateTo(prev)
     }
 
     fun openAddCustomerDialog() {
-        _uiState.update { it.copy(showAddCustomerDialog = true) }
+        customerViewModel.openAddCustomerDialog()
     }
 
     fun closeAddCustomerDialog() {
-        _uiState.update { it.copy(showAddCustomerDialog = false) }
+        customerViewModel.closeAddCustomerDialog()
     }
 
     fun addCustomer(name: String, phone: String) {
-        val newCustomer = CustomerAccount(
-            id = "c_${System.currentTimeMillis()}",
-            customerName = name.trim(),
-            phone = phone.trim(),
-            balance = 0.0,
-            totalDebt = 0.0,
-            hasRecentActivity = true
-        )
-        _uiState.update { it.copy(showAddCustomerDialog = false) }
-        viewModelScope.launch {
-            repository.addCustomer(newCustomer)
-        }
+        customerViewModel.addCustomer(name, phone)
     }
 
     fun addCustomer(name: String, phone: String, initialDebt: Double) {
-        addCustomer(name, phone)
+        customerViewModel.addCustomer(name, phone, initialDebt)
     }
 
     fun updateCustomer(customer: CustomerAccount) {
-        viewModelScope.launch {
-            repository.updateCustomer(customer)
-        }
+        customerViewModel.updateCustomer(customer)
     }
 
-    /**
-     * Phase 6: Records a documented accounting adjustment for a customer.
-     * Enforces that the customer's balance is derived through the Customer Ledger
-     * rather than directly mutating the stored balance.
-     */
     fun recordCustomerAdjustment(
         customerId: String,
         amount: Double,
@@ -529,17 +562,7 @@ class MainViewModel @JvmOverloads constructor(
         reason: String,
         reference: String? = null
     ) {
-        viewModelScope.launch {
-            repository.recordAdjustment(
-                entityType = "CUSTOMER",
-                entityId = customerId,
-                amount = amount,
-                direction = direction,
-                date = date,
-                reason = reason,
-                reference = reference
-            )
-        }
+        customerViewModel.recordCustomerAdjustment(customerId, amount, direction, date, reason, reference)
     }
 
     // Phase 7: Reversal Engine
@@ -569,7 +592,7 @@ class MainViewModel @JvmOverloads constructor(
     ) {
         viewModelScope.launch {
             try {
-                val result = repository.recordSaleReturn(
+                val result = repository.saleReturnRepository.recordSaleReturn(
                     saleId = saleId,
                     returnLines = returnLines,
                     reason = reason,
@@ -584,19 +607,19 @@ class MainViewModel @JvmOverloads constructor(
     }
 
     suspend fun getRemainingReturnableQuantities(saleId: String): Map<String, Int> {
-        return repository.getRemainingReturnableQuantities(saleId)
+        return repository.saleReturnRepository.getRemainingReturnableQuantities(saleId)
     }
 
     suspend fun getSaleLinesForSale(saleId: String): List<SaleLine> {
-        return repository.getSaleLines(saleId)
+        return repository.salesRepository.getSaleLines(saleId)
     }
 
     suspend fun getReturnsForSale(saleId: String): List<SaleReturn> {
-        return repository.getReturnsForSale(saleId)
+        return repository.saleReturnRepository.getReturnsForSale(saleId)
     }
 
     suspend fun getSaleById(saleId: String): Sale? {
-        return repository.getSaleById(saleId)
+        return repository.salesRepository.getSaleById(saleId)
     }
 
     // Phase 9: Suppliers & Purchases
@@ -607,22 +630,7 @@ class MainViewModel @JvmOverloads constructor(
         notes: String? = null,
         onComplete: (Result<Supplier>) -> Unit = {}
     ) {
-        viewModelScope.launch {
-            try {
-                val supplier = Supplier(
-                    id = "sup_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(6)}",
-                    name = name.trim(),
-                    phone = phone.trim(),
-                    address = address?.trim(),
-                    notes = notes?.trim(),
-                    isArchived = false
-                )
-                val inserted = repository.insertSupplier(supplier)
-                onComplete(Result.success(inserted))
-            } catch (e: Exception) {
-                onComplete(Result.failure(e))
-            }
-        }
+        supplierPurchaseViewModel.addSupplier(name, phone, address, notes, onComplete)
     }
 
     fun recordPurchase(
@@ -634,21 +642,15 @@ class MainViewModel @JvmOverloads constructor(
         purchaseDate: String = getCurrentDateString(),
         onComplete: (Result<PurchaseResult>) -> Unit = {}
     ) {
-        viewModelScope.launch {
-            try {
-                val result = repository.recordPurchase(
-                    supplierId = supplierId,
-                    lines = lines,
-                    purchaseDate = purchaseDate,
-                    paidAmount = paidAmount,
-                    financialAccountId = financialAccountId,
-                    notes = notes
-                )
-                onComplete(Result.success(result))
-            } catch (e: Exception) {
-                onComplete(Result.failure(e))
-            }
-        }
+        supplierPurchaseViewModel.recordPurchase(
+            supplierId = supplierId,
+            lines = lines,
+            paidAmount = paidAmount,
+            financialAccountId = financialAccountId,
+            notes = notes,
+            purchaseDate = purchaseDate,
+            onComplete = onComplete
+        )
     }
 
     fun recordSupplierPayment(
@@ -659,20 +661,14 @@ class MainViewModel @JvmOverloads constructor(
         notes: String? = null,
         onComplete: (Result<SupplierPayment>) -> Unit = {}
     ) {
-        viewModelScope.launch {
-            try {
-                val result = repository.recordSupplierPayment(
-                    supplierId = supplierId,
-                    amount = amount,
-                    paymentDate = paymentDate,
-                    financialAccountId = financialAccountId,
-                    notes = notes
-                )
-                onComplete(Result.success(result))
-            } catch (e: Exception) {
-                onComplete(Result.failure(e))
-            }
-        }
+        supplierPurchaseViewModel.recordSupplierPayment(
+            supplierId = supplierId,
+            amount = amount,
+            paymentDate = paymentDate,
+            financialAccountId = financialAccountId,
+            notes = notes,
+            onComplete = onComplete
+        )
     }
 
     fun recordPurchaseReturn(
@@ -682,39 +678,33 @@ class MainViewModel @JvmOverloads constructor(
         returnDate: String = getCurrentDateString(),
         onComplete: (Result<PurchaseReturn>) -> Unit = {}
     ) {
-        viewModelScope.launch {
-            try {
-                val result = repository.recordPurchaseReturn(
-                    purchaseId = purchaseId,
-                    amount = amount,
-                    reason = reason,
-                    returnDate = returnDate
-                )
-                onComplete(Result.success(result))
-            } catch (e: Exception) {
-                onComplete(Result.failure(e))
-            }
-        }
+        supplierPurchaseViewModel.recordPurchaseReturn(
+            purchaseId = purchaseId,
+            amount = amount,
+            reason = reason,
+            returnDate = returnDate,
+            onComplete = onComplete
+        )
     }
 
     suspend fun getSupplierBalance(supplierId: String): SupplierBalanceSummary {
-        return repository.getSupplierBalance(supplierId)
+        return supplierPurchaseViewModel.getSupplierBalance(supplierId)
     }
 
     suspend fun getSupplierStatement(supplierId: String): List<SupplierLedgerEntry> {
-        return repository.getSupplierStatement(supplierId)
+        return supplierPurchaseViewModel.getSupplierStatement(supplierId)
     }
 
     suspend fun getPurchaseLines(purchaseId: String): List<PurchaseLine> {
-        return repository.getPurchaseLines(purchaseId)
+        return supplierPurchaseViewModel.getPurchaseLines(purchaseId)
     }
 
     suspend fun getPurchasesForSupplier(supplierId: String): List<Purchase> {
-        return repository.getPurchasesForSupplier(supplierId)
+        return supplierPurchaseViewModel.getPurchasesForSupplier(supplierId)
     }
 
     suspend fun getPaymentsForSupplier(supplierId: String): List<SupplierPayment> {
-        return repository.getPaymentsForSupplier(supplierId)
+        return supplierPurchaseViewModel.getPaymentsForSupplier(supplierId)
     }
 
     // EXPENSES (Phase 10 Core)
@@ -723,35 +713,14 @@ class MainViewModel @JvmOverloads constructor(
         description: String? = null,
         onComplete: (Result<ExpenseCategory>) -> Unit = {}
     ) {
-        viewModelScope.launch {
-            try {
-                val catId = "exp_cat_${System.currentTimeMillis()}"
-                val category = ExpenseCategory(
-                    id = catId,
-                    name = name.trim(),
-                    description = description?.trim(),
-                    isActive = true
-                )
-                val inserted = repository.insertExpenseCategory(category)
-                onComplete(Result.success(inserted))
-            } catch (e: Exception) {
-                onComplete(Result.failure(e))
-            }
-        }
+        expenseViewModel.addExpenseCategory(name, description, onComplete)
     }
 
     fun insertExpenseCategory(
         category: ExpenseCategory,
         onComplete: (Result<ExpenseCategory>) -> Unit = {}
     ) {
-        viewModelScope.launch {
-            try {
-                val inserted = repository.insertExpenseCategory(category)
-                onComplete(Result.success(inserted))
-            } catch (e: Exception) {
-                onComplete(Result.failure(e))
-            }
-        }
+        expenseViewModel.insertExpenseCategory(category, onComplete)
     }
 
     fun recordExpense(
@@ -763,21 +732,15 @@ class MainViewModel @JvmOverloads constructor(
         description: String,
         onComplete: (Result<Expense>) -> Unit = {}
     ) {
-        viewModelScope.launch {
-            try {
-                val expense = repository.recordExpense(
-                    categoryId = categoryId,
-                    amount = amount,
-                    financialAccountId = financialAccountId,
-                    paymentMethodId = paymentMethodId,
-                    date = date,
-                    description = description
-                )
-                onComplete(Result.success(expense))
-            } catch (e: Exception) {
-                onComplete(Result.failure(e))
-            }
-        }
+        expenseViewModel.recordExpense(
+            categoryId = categoryId,
+            amount = amount,
+            financialAccountId = financialAccountId,
+            paymentMethodId = paymentMethodId,
+            date = date,
+            description = description,
+            onComplete = onComplete
+        )
     }
 
     suspend fun getFinancialAccountBalance(accountId: String): Double {
@@ -785,39 +748,28 @@ class MainViewModel @JvmOverloads constructor(
     }
 
     suspend fun getAllExpenseCategories(): List<ExpenseCategory> {
-        return repository.getAllExpenseCategoriesSync()
+        return expenseViewModel.getAllExpenseCategories()
     }
 
     suspend fun getAllExpenses(): List<Expense> {
-        return repository.getAllExpensesSync()
+        return expenseViewModel.getAllExpenses()
     }
 
     // INVENTORY (Phase 11 Core)
     fun refreshInventory() {
-        viewModelScope.launch {
-            try {
-                val stockMap = repository.getAllProductsStock()
-                val valuation = repository.getTotalInventoryValuation()
-                _uiState.update {
-                    it.copy(
-                        productStockMap = stockMap,
-                        totalInventoryValuation = valuation
-                    )
-                }
-            } catch (_: Exception) {}
-        }
+        inventoryViewModel.refreshInventory()
     }
 
     suspend fun getProductStock(productId: String): ProductStockSummary {
-        return repository.getProductStock(productId)
+        return inventoryViewModel.getProductStock(productId)
     }
 
     suspend fun getInventoryStatement(productId: String): List<InventoryMovementEntry> {
-        return repository.getInventoryStatement(productId)
+        return inventoryViewModel.getInventoryStatement(productId)
     }
 
     suspend fun getStockMovements(productId: String): List<StockMovement> {
-        return repository.getStockMovements(productId)
+        return inventoryViewModel.getStockMovements(productId)
     }
 
     fun recordInventoryAdjustment(
@@ -827,15 +779,7 @@ class MainViewModel @JvmOverloads constructor(
         date: String? = null,
         onComplete: (Result<Adjustment>) -> Unit = {}
     ) {
-        viewModelScope.launch {
-            try {
-                val adj = repository.recordInventoryAdjustment(productId, quantityDelta, reason, date)
-                refreshInventory()
-                onComplete(Result.success(adj))
-            } catch (e: Exception) {
-                onComplete(Result.failure(e))
-            }
-        }
+        inventoryViewModel.recordInventoryAdjustment(productId, quantityDelta, reason, date, onComplete)
     }
 
     fun recordInventoryDamage(
@@ -845,15 +789,7 @@ class MainViewModel @JvmOverloads constructor(
         date: String? = null,
         onComplete: (Result<Adjustment>) -> Unit = {}
     ) {
-        viewModelScope.launch {
-            try {
-                val adj = repository.recordInventoryDamage(productId, quantity, reason, date)
-                refreshInventory()
-                onComplete(Result.success(adj))
-            } catch (e: Exception) {
-                onComplete(Result.failure(e))
-            }
-        }
+        inventoryViewModel.recordInventoryDamage(productId, quantity, reason, date, onComplete)
     }
 
     private fun getCurrentDateString(): String {
@@ -870,9 +806,7 @@ class MainViewModel @JvmOverloads constructor(
                 quickPaymentCustomer = if (state.quickPaymentCustomer?.id == customerId) null else state.quickPaymentCustomer
             )
         }
-        viewModelScope.launch {
-            repository.archiveCustomer(customerId, date)
-        }
+        customerViewModel.archiveCustomer(customerId, date)
     }
 
     fun unarchiveCustomer(customerId: String) {
@@ -880,9 +814,7 @@ class MainViewModel @JvmOverloads constructor(
         if (customer != null) {
             requestRestoreCustomer(customer)
         } else {
-            viewModelScope.launch {
-                repository.restoreCustomer(customerId)
-            }
+            customerViewModel.unarchiveCustomer(customerId)
         }
     }
 
@@ -892,61 +824,26 @@ class MainViewModel @JvmOverloads constructor(
         onConflict: ((ArchiveConflict.CustomerConflict) -> Unit)? = null,
         onSuccess: (() -> Unit)? = null
     ) {
-        val conflict = checkCustomerConflict(customer, activeList)
-        if (conflict != null) {
-            _uiState.update { it.copy(pendingArchiveConflict = conflict) }
-            onConflict?.invoke(conflict)
-        } else {
-            viewModelScope.launch {
-                repository.restoreCustomer(customer.id)
-                onSuccess?.invoke()
-            }
-        }
+        customerViewModel.requestRestoreCustomer(
+            customer = customer,
+            activeList = activeList,
+            onConflict = { conflict ->
+                _uiState.update { it.copy(pendingArchiveConflict = conflict) }
+                onConflict?.invoke(conflict)
+            },
+            onSuccess = onSuccess
+        )
     }
 
     fun checkCustomerConflict(
         customer: CustomerAccount,
         activeList: List<CustomerAccount> = _uiState.value.customers
     ): ArchiveConflict.CustomerConflict? {
-        // 1. Same ID
-        val idMatch = activeList.firstOrNull { it.id == customer.id }
-        if (idMatch != null) {
-            return ArchiveConflict.CustomerConflict(
-                archivedCustomer = customer,
-                conflictingCustomer = idMatch,
-                descriptionAr = "يوجد عميل نشط بنفس المعرّف (${idMatch.customerName})",
-                descriptionEn = "An active customer already exists with the same ID (${idMatch.customerName})"
-            )
-        }
-
-        // 2. Intelligent check: Same name with different phone number is NOT treated as an identical conflict
-        val cleanName = customer.customerName.trim().lowercase()
-        val cleanPhone = customer.phone.trim()
-
-        val nameAndPhoneMatch = activeList.firstOrNull { active ->
-            active.customerName.trim().lowercase() == cleanName &&
-            ((cleanPhone.isNotEmpty() && active.phone.trim() == cleanPhone) ||
-             (cleanPhone.isEmpty() && active.phone.trim().isEmpty()))
-        }
-
-        if (nameAndPhoneMatch != null) {
-            val phoneInfo = if (nameAndPhoneMatch.phone.isNotBlank()) " - ${nameAndPhoneMatch.phone}" else ""
-            return ArchiveConflict.CustomerConflict(
-                archivedCustomer = customer,
-                conflictingCustomer = nameAndPhoneMatch,
-                descriptionAr = "يوجد عميل نشط متطابق بنفس الاسم ورقم الهاتف (${nameAndPhoneMatch.customerName}$phoneInfo)",
-                descriptionEn = "An active customer exists with the identical name and phone (${nameAndPhoneMatch.customerName}$phoneInfo)"
-            )
-        }
-
-        return null
+        return customerViewModel.checkCustomerConflict(customer, activeList)
     }
 
     fun deleteCustomerPermanently(customer: CustomerAccount, onComplete: (() -> Unit)? = null) {
-        viewModelScope.launch {
-            repository.deleteCustomerPermanently(customer.id)
-            onComplete?.invoke()
-        }
+        customerViewModel.deleteCustomerPermanently(customer, onComplete)
     }
 
     // PRODUCTS
@@ -958,30 +855,15 @@ class MainViewModel @JvmOverloads constructor(
         unit: String = "حبة",
         imageUri: String? = null
     ) {
-        viewModelScope.launch {
-            val newProduct = ProductItem(
-                id = "p_${System.currentTimeMillis()}",
-                name = name,
-                price = price,
-                costPrice = costPrice,
-                category = category,
-                unit = unit,
-                imageUri = imageUri
-            )
-            repository.addProduct(newProduct)
-        }
+        inventoryViewModel.addProduct(name, price, costPrice, category, unit, imageUri)
     }
 
     fun updateProduct(product: ProductItem) {
-        viewModelScope.launch {
-            repository.updateProduct(product)
-        }
+        inventoryViewModel.updateProduct(product)
     }
 
     fun archiveProduct(productId: String, date: String = getCurrentDateString()) {
-        viewModelScope.launch {
-            repository.archiveProduct(productId, date)
-        }
+        inventoryViewModel.archiveProduct(productId, date)
     }
 
     fun unarchiveProduct(productId: String) {
@@ -989,9 +871,7 @@ class MainViewModel @JvmOverloads constructor(
         if (product != null) {
             requestRestoreProduct(product)
         } else {
-            viewModelScope.launch {
-                repository.restoreProduct(productId)
-            }
+            inventoryViewModel.unarchiveProduct(productId)
         }
     }
 
@@ -1001,67 +881,26 @@ class MainViewModel @JvmOverloads constructor(
         onConflict: ((ArchiveConflict.ProductConflict) -> Unit)? = null,
         onSuccess: (() -> Unit)? = null
     ) {
-        val conflict = checkProductConflict(product, activeList)
-        if (conflict != null) {
-            _uiState.update { it.copy(pendingArchiveConflict = conflict) }
-            onConflict?.invoke(conflict)
-        } else {
-            viewModelScope.launch {
-                repository.restoreProduct(product.id)
-                onSuccess?.invoke()
-            }
-        }
+        inventoryViewModel.requestRestoreProduct(
+            product = product,
+            activeList = activeList,
+            onConflict = { conflict ->
+                _uiState.update { it.copy(pendingArchiveConflict = conflict) }
+                onConflict?.invoke(conflict)
+            },
+            onSuccess = onSuccess
+        )
     }
 
     fun checkProductConflict(
         product: ProductItem,
         activeList: List<ProductItem> = _uiState.value.products
     ): ArchiveConflict.ProductConflict? {
-        // 1. Same ID
-        val idMatch = activeList.firstOrNull { it.id == product.id }
-        if (idMatch != null) {
-            return ArchiveConflict.ProductConflict(
-                archivedProduct = product,
-                conflictingProduct = idMatch,
-                descriptionAr = "يوجد صنف نشط بنفس المعرّف (${idMatch.name})",
-                descriptionEn = "An active product already exists with the same ID (${idMatch.name})"
-            )
-        }
-
-        // 2. Same Name check with price/category differences highlighted
-        val cleanName = product.name.trim().lowercase()
-        val nameMatch = activeList.firstOrNull { it.name.trim().lowercase() == cleanName }
-        if (nameMatch != null) {
-            val diffPrice = Math.abs(nameMatch.price - product.price) > 0.001
-            val descAr = if (diffPrice) {
-                "يوجد صنف نشط بنفس الاسم ولكن بسعر مختلف (السعر الحالي: ₪${nameMatch.price} مقابل المؤرشف: ₪${product.price})"
-            } else {
-                "يوجد صنف نشط مطابق بنفس الاسم والسعر (₪${nameMatch.price})"
-            }
-            val descEn = if (diffPrice) {
-                "An active product exists with this name but a different price (Active: ₪${nameMatch.price} vs Archived: ₪${product.price})"
-            } else {
-                "An active product exists with the same name and price (₪${nameMatch.price})"
-            }
-            return ArchiveConflict.ProductConflict(
-                archivedProduct = product,
-                conflictingProduct = nameMatch,
-                descriptionAr = descAr,
-                descriptionEn = descEn
-            )
-        }
-
-        return null
+        return inventoryViewModel.checkProductConflict(product, activeList)
     }
 
     fun deleteProductPermanently(product: ProductItem, onComplete: (() -> Unit)? = null) {
-        viewModelScope.launch {
-            if (!product.imageUri.isNullOrBlank()) {
-                ProductImageHelper.deleteProductImage(product.imageUri)
-            }
-            repository.deleteProductPermanently(product.id)
-            onComplete?.invoke()
-        }
+        inventoryViewModel.deleteProductPermanently(product, onComplete)
     }
 
     // TRANSACTIONS ARCHIVE / RESTORE / DELETE
@@ -1234,6 +1073,8 @@ class MainViewModel @JvmOverloads constructor(
     }
 
     fun dismissArchiveConflict() {
+        customerViewModel.clearPendingCustomerConflict()
+        inventoryViewModel.clearPendingProductConflict()
         _uiState.update { it.copy(pendingArchiveConflict = null) }
     }
 
@@ -1308,7 +1149,7 @@ class MainViewModel @JvmOverloads constructor(
         _uiState.update { it.copy(showSettlementSheet = false) }
     }
 
-    fun completeSettlement(cashAmount: Double, debtAmount: Double, notes: String) {
+    fun completeSettlement(cashAmount: Double, debtAmount: Double, notes: String, financialAccountId: String? = null) {
         val state = _uiState.value
         val customer = state.purchasesCustomer ?: state.customers.firstOrNull() ?: return
         if (customer.isArchived || (state.customers.isNotEmpty() && state.customers.none { it.id == customer.id })) return
@@ -1363,7 +1204,7 @@ class MainViewModel @JvmOverloads constructor(
         }
 
         viewModelScope.launch {
-            val invoiceNumber = repository.getNextInvoiceNumber()
+            val invoiceNumber = repository.salesRepository.getNextInvoiceNumber()
             val sale = Sale(
                 id = txId,
                 invoiceNumber = invoiceNumber,
@@ -1376,7 +1217,8 @@ class MainViewModel @JvmOverloads constructor(
                 transactionDate = todayDate,
                 createdAt = System.currentTimeMillis(),
                 updatedAt = System.currentTimeMillis(),
-                status = "ACTIVE"
+                status = "ACTIVE",
+                financialAccountId = financialAccountId ?: "acc_cash"
             )
 
             val saleLines = cartSnapshot.mapIndexed { index, cartItem ->
@@ -1392,7 +1234,7 @@ class MainViewModel @JvmOverloads constructor(
                 )
             }
 
-            repository.createSale(
+            repository.salesRepository.createSale(
                 sale = sale,
                 lines = saleLines,
                 customerNameSnapshot = customer.customerName,
@@ -1482,6 +1324,18 @@ class MainViewModel @JvmOverloads constructor(
             transactionId = txId
         )
 
+        val newPayment = com.example.data.db.CustomerPayment(
+            id = "cp_${txId}",
+            customerId = customer.id,
+            amount = amount,
+            paymentMethodId = "pm_cash",
+            financialAccountId = "acc_cash",
+            transactionDate = todayDate,
+            createdAt = System.currentTimeMillis(),
+            notes = state.quickPaymentNotes.ifBlank { "تسديد دفعة سريعة" },
+            status = "ACTIVE"
+        )
+
         _uiState.update {
             it.copy(
                 quickPaymentCustomer = null,
@@ -1494,6 +1348,7 @@ class MainViewModel @JvmOverloads constructor(
 
         viewModelScope.launch {
             repository.addTransaction(newTx)
+            repository.recordCustomerPayment(newPayment)
             repository.updateCustomer(updatedCustomer)
             repository.addNotification(newNotif)
         }
@@ -1514,72 +1369,19 @@ class MainViewModel @JvmOverloads constructor(
 
     // BACKUP & RESTORE
     fun exportBackup(context: Context, uri: Uri, onResult: (Boolean) -> Unit) {
-        viewModelScope.launch {
-            try {
-                val payload = repository.getAllDataForBackup()
-                val jsonString = BackupManager.serialize(payload)
-                val success = BackupManager.writeToUri(context.contentResolver, uri, jsonString)
-                onResult(success)
-            } catch (e: Exception) {
-                e.printStackTrace()
-                onResult(false)
-            }
-        }
+        backupRestoreViewModel.exportBackup(context, uri, onResult)
     }
 
     fun prepareRestore(context: Context, uri: Uri, onError: () -> Unit, onSuccessSilent: () -> Unit) {
-        viewModelScope.launch {
-            try {
-                val jsonString = BackupManager.readFromUri(context.contentResolver, uri)
-                if (jsonString.isNullOrBlank()) {
-                    onError()
-                    return@launch
-                }
-                val payload = BackupManager.deserialize(jsonString, context)
-                val currentInfo = repository.getStoreInfoSnapshot()
-
-                val differs = isStoreInfoDifferent(payload.storeInfoAtBackupTime, currentInfo)
-                if (differs) {
-                    pendingRestorePayload.value = payload
-                    showRestoreConflictSheet.value = true
-                } else {
-                    repository.restoreDataFromBackup(payload, replaceStoreInfo = false)
-                    pendingRestorePayload.value = null
-                    showRestoreConflictSheet.value = false
-                    onSuccessSilent()
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                onError()
-            }
-        }
+        backupRestoreViewModel.prepareRestore(context, uri, onError, onSuccessSilent)
     }
 
     fun confirmRestore(replaceStoreInfo: Boolean, onComplete: () -> Unit) {
-        val payload = pendingRestorePayload.value ?: return
-        viewModelScope.launch {
-            try {
-                repository.restoreDataFromBackup(payload, replaceStoreInfo = replaceStoreInfo)
-                onComplete()
-            } finally {
-                pendingRestorePayload.value = null
-                showRestoreConflictSheet.value = false
-            }
-        }
+        backupRestoreViewModel.confirmRestore(replaceStoreInfo, onComplete)
     }
 
     fun cancelRestore() {
-        pendingRestorePayload.value = null
-        showRestoreConflictSheet.value = false
-    }
-
-    private fun isStoreInfoDifferent(backup: StoreInfo, current: StoreInfo): Boolean {
-        return backup.storeName.trim() != current.storeName.trim() ||
-                backup.ownerName.trim() != current.ownerName.trim() ||
-                backup.phone.trim() != current.phone.trim() ||
-                backup.address.trim() != current.address.trim() ||
-                backup.taxNumber.trim() != current.taxNumber.trim() ||
-                backup.crNumber.trim() != current.crNumber.trim()
+        backupRestoreViewModel.cancelRestore()
     }
 }
 

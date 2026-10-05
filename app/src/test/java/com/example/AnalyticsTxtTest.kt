@@ -6,9 +6,12 @@ import com.example.data.db.TransactionItemLineEntity
 import com.example.model.AnalyticsExportDataPreparer
 import com.example.model.AnalyticsReportScope
 import com.example.model.CustomerAccount
+import com.example.model.OperationStatus
 import com.example.model.PeriodFilter
+import com.example.model.SaleType
 import com.example.model.SettlementType
 import com.example.model.TransactionItem
+import com.example.model.TransactionType
 import com.example.ui.components.BreakdownChartType
 import com.example.util.AnalyticsTxtGenerator
 import com.example.util.ReportExporter
@@ -226,5 +229,140 @@ class AnalyticsTxtTest {
         assertTrue("File content contains Arabic title", content.contains("تقرير إحصائيات العميل"))
         assertTrue("File content contains customer name", content.contains("عمر الفاروق"))
         assertTrue("File content contains ₪", content.contains("₪"))
+    }
+
+    @Test
+    fun testTxtConsumesPreparedAccountingDataWithMixedSaleReversalAndConsistentTotals() {
+        val testDate = LocalDate.of(2026, 9, 15)
+        val customer = sampleCustomers[0] // c1
+
+        val mixedSale = TransactionItem(
+            id = "tx_txt_mixed",
+            title = "Mixed Sale",
+            customerName = customer.customerName,
+            activityType = "شراء مختلط",
+            amount = 100.0,
+            isCredit = true,
+            date = "2026-09-10",
+            relativeTime = "10:00",
+            customerId = customer.id,
+            paidAmount = 60.0,
+            creditAmount = 40.0,
+            transactionType = TransactionType.SALE,
+            saleType = SaleType.MIXED,
+            operationStatus = OperationStatus.ACTIVE
+        )
+        val creditSale = TransactionItem(
+            id = "tx_txt_credit",
+            title = "Credit Sale",
+            customerName = customer.customerName,
+            activityType = "شراء آجل",
+            amount = 200.0,
+            isCredit = true,
+            date = "2026-09-11",
+            relativeTime = "11:00",
+            customerId = customer.id,
+            paidAmount = 0.0,
+            creditAmount = 200.0,
+            transactionType = TransactionType.SALE,
+            saleType = SaleType.CREDIT,
+            operationStatus = OperationStatus.ACTIVE
+        )
+        val cashSale = TransactionItem(
+            id = "tx_txt_cash",
+            title = "Cash Sale",
+            customerName = customer.customerName,
+            activityType = "شراء نقدي",
+            amount = 150.0,
+            isCredit = false,
+            date = "2026-09-12",
+            relativeTime = "12:00",
+            customerId = customer.id,
+            paidAmount = 150.0,
+            creditAmount = 0.0,
+            transactionType = TransactionType.SALE,
+            saleType = SaleType.CASH,
+            operationStatus = OperationStatus.ACTIVE
+        )
+        val payment = TransactionItem(
+            id = "tx_txt_pay",
+            title = "Customer Payment",
+            customerName = customer.customerName,
+            activityType = "تسديد",
+            amount = 50.0,
+            isCredit = false,
+            date = "2026-09-13",
+            relativeTime = "13:00",
+            settlementType = SettlementType.PARTIAL,
+            customerId = customer.id,
+            paidAmount = 50.0,
+            creditAmount = 0.0,
+            transactionType = TransactionType.CUSTOMER_PAYMENT,
+            operationStatus = OperationStatus.ACTIVE
+        )
+        val reversedCreditSale = TransactionItem(
+            id = "tx_txt_rev_sale",
+            title = "Reversed Sale",
+            customerName = customer.customerName,
+            activityType = "شراء آجل ملغى",
+            amount = 500.0,
+            isCredit = true,
+            date = "2026-09-14",
+            relativeTime = "14:00",
+            customerId = customer.id,
+            paidAmount = 0.0,
+            creditAmount = 500.0,
+            transactionType = TransactionType.SALE,
+            saleType = SaleType.CREDIT,
+            operationStatus = OperationStatus.REVERSED
+        )
+        val reversedPayment = TransactionItem(
+            id = "tx_txt_rev_pay",
+            title = "Reversed Payment",
+            customerName = customer.customerName,
+            activityType = "تسديد ملغى",
+            amount = 100.0,
+            isCredit = false,
+            date = "2026-09-15",
+            relativeTime = "15:00",
+            settlementType = SettlementType.FULL,
+            customerId = customer.id,
+            paidAmount = 100.0,
+            creditAmount = 0.0,
+            transactionType = TransactionType.CUSTOMER_PAYMENT,
+            operationStatus = OperationStatus.REVERSED
+        )
+
+        val txs = listOf(mixedSale, creditSale, cashSale, payment, reversedCreditSale, reversedPayment)
+
+        val data = AnalyticsExportDataPreparer.prepareAnalyticsData(
+            transactions = txs,
+            allCustomers = sampleCustomers,
+            selectedCustomer = null,
+            activePeriod = PeriodFilter.ALL,
+            currency = "SAR",
+            today = testDate
+        )
+
+        // 1. Accounting Assertions
+        assertEquals(450.0, data.metrics.totalSales, 0.001) // 100 + 200 + 150 (reversed 500 excluded)
+        assertEquals(210.0, data.metrics.totalCashSales, 0.001) // 60 + 150
+        assertEquals(240.0, data.metrics.totalDebtSales, 0.001) // 40 + 200
+        assertEquals(50.0, data.metrics.totalPaymentsReceived, 0.001) // 50 (reversed 100 excluded)
+        assertEquals(190.0, data.metrics.netOutstandingBalance, 0.001) // 240 - 50
+
+        // 2. Exporter Output Assertions: Arabic & English TXT formats must reflect identical figures
+        val txtAr = AnalyticsTxtGenerator.generateAnalyticsTxt(data, isArabic = true)
+        val txtEn = AnalyticsTxtGenerator.generateAnalyticsTxt(data, isArabic = false)
+
+        assertTrue("Arabic TXT contains 450.0 total sales", txtAr.contains("450.00") || txtAr.contains("450"))
+        assertTrue("Arabic TXT contains 210.0 cash sales", txtAr.contains("210.00") || txtAr.contains("210"))
+        assertTrue("Arabic TXT contains 240.0 debt sales", txtAr.contains("240.00") || txtAr.contains("240"))
+        assertTrue("Arabic TXT contains 50.0 payments", txtAr.contains("50.00") || txtAr.contains("50"))
+
+        assertTrue("English TXT contains 450.0 total sales", txtEn.contains("450.00") || txtEn.contains("450"))
+        assertTrue("English TXT contains 210.0 cash sales", txtEn.contains("210.00") || txtEn.contains("210"))
+        assertTrue("English TXT contains 240.0 debt sales", txtEn.contains("240.00") || txtEn.contains("240"))
+        assertTrue("English TXT contains 50.0 payments", txtEn.contains("50.00") || txtEn.contains("50"))
     }
 }

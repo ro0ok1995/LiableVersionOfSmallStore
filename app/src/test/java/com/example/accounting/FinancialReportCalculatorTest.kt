@@ -910,4 +910,324 @@ class FinancialReportCalculatorTest {
         assertFalse(margin.isNaN())
         assertFalse(margin.isInfinite())
     }
+
+    // =========================================================================
+    // Phase 6: Revenue & Historical COGS Finalization Unit Tests
+    // =========================================================================
+
+    /**
+     * Requirement: Positive-margin sale.
+     * Net sales 100, COGS 60 -> Gross profit = 40.0, Margin = 40%.
+     */
+    @Test
+    fun testPhase6_positiveMarginSale() {
+        val sale = Sale(
+            id = "s_p6_pos",
+            invoiceNumber = "INV-P6-001",
+            customerId = customerId,
+            saleType = "CASH",
+            totalAmount = 100.0,
+            paidAmount = 100.0,
+            creditAmount = 0.0,
+            paymentStatus = "PAID",
+            transactionDate = "2026-10-01",
+            status = "ACTIVE"
+        )
+        val line = SaleLine(
+            id = "sl_p6_pos",
+            saleId = "s_p6_pos",
+            productId = "prod_p6_1",
+            productNameSnapshot = "Item Positive Margin",
+            quantity = 2,
+            unitPrice = 50.0,
+            costPriceAtSale = 30.0,
+            subtotal = 100.0
+        )
+
+        val totals = FinancialReportCalculator.calculateFromSales(
+            sales = listOf(sale),
+            saleLines = listOf(line)
+        )
+
+        assertEquals(100.0, totals.totalSales, 0.0001)
+        assertEquals(100.0, totals.netSales, 0.0001)
+        assertEquals(60.0, totals.cogs, 0.0001)
+        assertEquals(40.0, totals.grossProfit, 0.0001)
+        assertEquals(0.40, totals.grossMargin, 0.0001)
+        assertTrue("Gross profit must be strictly positive", totals.grossProfit > 0.0)
+    }
+
+    /**
+     * Requirement: Zero-margin sale.
+     * Net sales 100, COGS 100 -> Gross profit = 0.0, Margin = 0%.
+     */
+    @Test
+    fun testPhase6_zeroMarginSale() {
+        val sale = Sale(
+            id = "s_p6_zero",
+            invoiceNumber = "INV-P6-002",
+            customerId = customerId,
+            saleType = "CASH",
+            totalAmount = 100.0,
+            paidAmount = 100.0,
+            creditAmount = 0.0,
+            paymentStatus = "PAID",
+            transactionDate = "2026-10-01",
+            status = "ACTIVE"
+        )
+        val line = SaleLine(
+            id = "sl_p6_zero",
+            saleId = "s_p6_zero",
+            productId = "prod_p6_2",
+            productNameSnapshot = "At-Cost Item",
+            quantity = 2,
+            unitPrice = 50.0,
+            costPriceAtSale = 50.0,
+            subtotal = 100.0
+        )
+
+        val totals = FinancialReportCalculator.calculateFromSales(
+            sales = listOf(sale),
+            saleLines = listOf(line)
+        )
+
+        assertEquals(100.0, totals.totalSales, 0.0001)
+        assertEquals(100.0, totals.netSales, 0.0001)
+        assertEquals(100.0, totals.cogs, 0.0001)
+        assertEquals(0.0, totals.grossProfit, 0.0001)
+        assertEquals(0.0, totals.grossMargin, 0.0001)
+    }
+
+    /**
+     * Requirement: Negative-margin sale if supported by existing business rules.
+     * Net sales 100, COGS 125 -> Gross profit = -25.0 (UNCLAMPED), Margin = -25%.
+     */
+    @Test
+    fun testPhase6_negativeMarginSale() {
+        val sale = Sale(
+            id = "s_p6_neg",
+            invoiceNumber = "INV-P6-003",
+            customerId = customerId,
+            saleType = "CASH",
+            totalAmount = 100.0,
+            paidAmount = 100.0,
+            creditAmount = 0.0,
+            paymentStatus = "PAID",
+            transactionDate = "2026-10-01",
+            status = "ACTIVE"
+        )
+        val line = SaleLine(
+            id = "sl_p6_neg",
+            saleId = "s_p6_neg",
+            productId = "prod_p6_3",
+            productNameSnapshot = "Clearance Loss Leader",
+            quantity = 2,
+            unitPrice = 50.0,
+            costPriceAtSale = 62.5, // 2 * 62.5 = 125.0 COGS
+            subtotal = 100.0
+        )
+
+        val totals = FinancialReportCalculator.calculateFromSales(
+            sales = listOf(sale),
+            saleLines = listOf(line)
+        )
+
+        assertEquals(100.0, totals.totalSales, 0.0001)
+        assertEquals(100.0, totals.netSales, 0.0001)
+        assertEquals(125.0, totals.cogs, 0.0001)
+        assertEquals("Gross profit must not be clamped to zero", -25.0, totals.grossProfit, 0.0001)
+        assertEquals(-0.25, totals.grossMargin, 0.0001)
+        assertTrue("Gross profit must be strictly negative", totals.grossProfit < 0.0)
+    }
+
+    /**
+     * Requirement: Mixed sale where totalAmount differs from paidAmount.
+     * totalAmount 150 = paidAmount 60 (cash) + creditAmount 90 (receivable).
+     * COGS 80 -> Gross profit = 70.0.
+     * Revenue basis must be totalAmount (150), NOT paidAmount (60).
+     */
+    @Test
+    fun testPhase6_mixedSaleWhereTotalAmountDiffersFromPaidAmount() {
+        val mixedSale = Sale(
+            id = "s_p6_mixed",
+            invoiceNumber = "INV-P6-004",
+            customerId = customerId,
+            saleType = "MIXED",
+            totalAmount = 150.0,
+            paidAmount = 60.0,
+            creditAmount = 90.0,
+            paymentStatus = "PARTIAL",
+            transactionDate = "2026-10-01",
+            status = "ACTIVE"
+        )
+        val line = SaleLine(
+            id = "sl_p6_mixed",
+            saleId = "s_p6_mixed",
+            productId = "prod_p6_4",
+            productNameSnapshot = "Mixed Sale Item",
+            quantity = 3,
+            unitPrice = 50.0,
+            costPriceAtSale = 26.6667, // ~80 COGS
+            subtotal = 150.0
+        )
+
+        // Also add customer payment of 40.0 to verify collections do NOT increase revenue
+        val paymentTx = TransactionItem(
+            id = "tx_p6_pay",
+            amount = 40.0,
+            isCredit = false,
+            date = "2026-10-01",
+            relativeTime = "اليوم",
+            activityType = "تسديد",
+            customerId = customerId,
+            transactionType = TransactionType.CUSTOMER_PAYMENT,
+            paidAmount = 40.0,
+            creditAmount = 0.0,
+            operationStatus = OperationStatus.ACTIVE
+        )
+
+        val totals = FinancialReportCalculator.calculateFromSales(
+            sales = listOf(mixedSale),
+            saleLines = listOf(line)
+        )
+
+        // 1. Revenue basis is totalAmount (150), NOT paidAmount (60)
+        assertEquals(150.0, totals.totalSales, 0.0001)
+        assertEquals(150.0, totals.netSales, 0.0001)
+        assertEquals(60.0, totals.cashSales, 0.0001)
+        assertEquals(90.0, totals.creditSales, 0.0001)
+        assertEquals(90.0, totals.netReceivableIncrease, 0.0001)
+
+        // 2. COGS & profit
+        assertEquals(3 * 26.6667, totals.cogs, 0.001)
+        assertEquals(150.0 - (3 * 26.6667), totals.grossProfit, 0.001)
+
+        // 3. Customer payment collection added to transaction list does NOT increase totalSales
+        val txTotals = FinancialReportCalculator.calculate(
+            transactions = listOf(mixedSale.toTransactionItem(), paymentTx)
+        )
+        assertEquals("Total sales must still be 150.0 after payment collection", 150.0, txTotals.totalSales, 0.0001)
+        assertEquals("Customer collections must be 40.0", 40.0, txTotals.customerPayments, 0.0001)
+        // Net receivable: 90 (credit portion) - 40 (payment) = 50.0
+        assertEquals(50.0, txTotals.netReceivableIncrease, 0.0001)
+    }
+
+    /**
+     * Requirement: Historical sale cost differs from current product cost.
+     * Sale line was recorded when unit cost was 20.0 (COGS = 2 * 20 = 40.0).
+     * Even if product current purchase cost is 50.0, COGS must strictly use historical 20.0.
+     */
+    @Test
+    fun testPhase6_historicalSaleCostDiffersFromCurrentProductCost() {
+        val sale = Sale(
+            id = "s_p6_hist",
+            invoiceNumber = "INV-P6-005",
+            customerId = customerId,
+            saleType = "CASH",
+            totalAmount = 80.0,
+            paidAmount = 80.0,
+            creditAmount = 0.0,
+            paymentStatus = "PAID",
+            transactionDate = "2026-10-01",
+            status = "ACTIVE"
+        )
+        // Historical frozen cost = 20.0 per unit
+        val saleLine = SaleLine(
+            id = "sl_p6_hist",
+            saleId = "s_p6_hist",
+            productId = "prod_p6_hist",
+            productNameSnapshot = "Historical Cost Item",
+            quantity = 2,
+            unitPrice = 40.0,
+            costPriceAtSale = 20.0,
+            subtotal = 80.0
+        )
+
+        // Suppose current product cost is 55.0. calculateCogs MUST use costPriceAtSale (20.0).
+        val cogs = FinancialReportCalculator.calculateCogs(
+            sales = listOf(sale),
+            saleLines = listOf(saleLine)
+        )
+
+        assertEquals("COGS must use frozen historical cost (2 * 20 = 40)", 40.0, cogs, 0.0001)
+
+        val totals = FinancialReportCalculator.calculateFromSales(
+            sales = listOf(sale),
+            saleLines = listOf(saleLine)
+        )
+
+        assertEquals(80.0, totals.totalSales, 0.0001)
+        assertEquals(40.0, totals.cogs, 0.0001)
+        assertEquals(40.0, totals.grossProfit, 0.0001)
+        assertEquals(0.50, totals.grossMargin, 0.0001)
+    }
+
+    /**
+     * Requirement: Reversed sale contributes zero active revenue/COGS.
+     * Active sale 100 (COGS 60) + Reversed sale 200 (COGS 140).
+     * Totals must reflect only active sale (Revenue 100, COGS 60, Gross Profit 40).
+     */
+    @Test
+    fun testPhase6_reversedSale() {
+        val activeSale = Sale(
+            id = "s_p6_active",
+            invoiceNumber = "INV-P6-006A",
+            customerId = customerId,
+            saleType = "CASH",
+            totalAmount = 100.0,
+            paidAmount = 100.0,
+            creditAmount = 0.0,
+            paymentStatus = "PAID",
+            transactionDate = "2026-10-01",
+            status = "ACTIVE"
+        )
+        val activeLine = SaleLine(
+            id = "sl_p6_active",
+            saleId = "s_p6_active",
+            productId = "prod_p6_act",
+            productNameSnapshot = "Active Item",
+            quantity = 2,
+            unitPrice = 50.0,
+            costPriceAtSale = 30.0,
+            subtotal = 100.0
+        )
+
+        val reversedSale = Sale(
+            id = "s_p6_reversed",
+            invoiceNumber = "INV-P6-006B",
+            customerId = customerId,
+            saleType = "CREDIT",
+            totalAmount = 200.0,
+            paidAmount = 0.0,
+            creditAmount = 200.0,
+            paymentStatus = "UNPAID",
+            transactionDate = "2026-10-01",
+            status = "REVERSED"
+        )
+        val reversedLine = SaleLine(
+            id = "sl_p6_reversed",
+            saleId = "s_p6_reversed",
+            productId = "prod_p6_rev",
+            productNameSnapshot = "Reversed Item",
+            quantity = 4,
+            unitPrice = 50.0,
+            costPriceAtSale = 35.0, // 4 * 35 = 140 COGS
+            subtotal = 200.0
+        )
+
+        val totals = FinancialReportCalculator.calculateFromSales(
+            sales = listOf(activeSale, reversedSale),
+            saleLines = listOf(activeLine, reversedLine)
+        )
+
+        assertEquals("Active revenue must be 100.0", 100.0, totals.totalSales, 0.0001)
+        assertEquals("Active net sales must be 100.0", 100.0, totals.netSales, 0.0001)
+        assertEquals("Active COGS must be 60.0 (reversed 140 excluded)", 60.0, totals.cogs, 0.0001)
+        assertEquals("Active gross profit must be 40.0", 40.0, totals.grossProfit, 0.0001)
+        assertEquals(0.40, totals.grossMargin, 0.0001)
+
+        assertEquals("Active count must be 1", 1, totals.activeTransactionCount)
+        assertEquals("Reversed count must be 1", 1, totals.reversedTransactionCount)
+        assertEquals("Reversed sales volume must be 200.0", 200.0, totals.reversedSalesVolume, 0.0001)
+    }
 }

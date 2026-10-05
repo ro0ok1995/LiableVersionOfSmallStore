@@ -7,9 +7,12 @@ import com.example.model.AnalyticsChartType
 import com.example.model.AnalyticsExportDataPreparer
 import com.example.model.AnalyticsReportScope
 import com.example.model.CustomerAccount
+import com.example.model.OperationStatus
 import com.example.model.PeriodFilter
+import com.example.model.SaleType
 import com.example.model.SettlementType
 import com.example.model.TransactionItem
+import com.example.model.TransactionType
 import com.example.ui.components.BreakdownChartType
 import com.example.util.AnalyticsCsvGenerator
 import com.example.util.ReportExporter
@@ -205,5 +208,140 @@ class AnalyticsCsvTest {
         assertEquals(0xEF.toByte(), bytes[0])
         assertEquals(0xBB.toByte(), bytes[1])
         assertEquals(0xBF.toByte(), bytes[2])
+    }
+
+    @Test
+    fun testCsvConsumesPreparedAccountingDataWithMixedSaleReversalAndConsistentTotals() {
+        val testDate = LocalDate.of(2026, 9, 15)
+        val customer = sampleCustomers[0] // c1
+
+        val mixedSale = TransactionItem(
+            id = "tx_csv_mixed",
+            title = "Mixed Sale",
+            customerName = customer.customerName,
+            activityType = "شراء مختلط",
+            amount = 100.0,
+            isCredit = true,
+            date = "2026-09-10",
+            relativeTime = "10:00",
+            customerId = customer.id,
+            paidAmount = 60.0,
+            creditAmount = 40.0,
+            transactionType = TransactionType.SALE,
+            saleType = SaleType.MIXED,
+            operationStatus = OperationStatus.ACTIVE
+        )
+        val creditSale = TransactionItem(
+            id = "tx_csv_credit",
+            title = "Credit Sale",
+            customerName = customer.customerName,
+            activityType = "شراء آجل",
+            amount = 200.0,
+            isCredit = true,
+            date = "2026-09-11",
+            relativeTime = "11:00",
+            customerId = customer.id,
+            paidAmount = 0.0,
+            creditAmount = 200.0,
+            transactionType = TransactionType.SALE,
+            saleType = SaleType.CREDIT,
+            operationStatus = OperationStatus.ACTIVE
+        )
+        val cashSale = TransactionItem(
+            id = "tx_csv_cash",
+            title = "Cash Sale",
+            customerName = customer.customerName,
+            activityType = "شراء نقدي",
+            amount = 150.0,
+            isCredit = false,
+            date = "2026-09-12",
+            relativeTime = "12:00",
+            customerId = customer.id,
+            paidAmount = 150.0,
+            creditAmount = 0.0,
+            transactionType = TransactionType.SALE,
+            saleType = SaleType.CASH,
+            operationStatus = OperationStatus.ACTIVE
+        )
+        val payment = TransactionItem(
+            id = "tx_csv_pay",
+            title = "Customer Payment",
+            customerName = customer.customerName,
+            activityType = "تسديد",
+            amount = 50.0,
+            isCredit = false,
+            date = "2026-09-13",
+            relativeTime = "13:00",
+            settlementType = SettlementType.PARTIAL,
+            customerId = customer.id,
+            paidAmount = 50.0,
+            creditAmount = 0.0,
+            transactionType = TransactionType.CUSTOMER_PAYMENT,
+            operationStatus = OperationStatus.ACTIVE
+        )
+        val reversedCreditSale = TransactionItem(
+            id = "tx_csv_rev_sale",
+            title = "Reversed Sale",
+            customerName = customer.customerName,
+            activityType = "شراء آجل ملغى",
+            amount = 500.0,
+            isCredit = true,
+            date = "2026-09-14",
+            relativeTime = "14:00",
+            customerId = customer.id,
+            paidAmount = 0.0,
+            creditAmount = 500.0,
+            transactionType = TransactionType.SALE,
+            saleType = SaleType.CREDIT,
+            operationStatus = OperationStatus.REVERSED
+        )
+        val reversedPayment = TransactionItem(
+            id = "tx_csv_rev_pay",
+            title = "Reversed Payment",
+            customerName = customer.customerName,
+            activityType = "تسديد ملغى",
+            amount = 100.0,
+            isCredit = false,
+            date = "2026-09-15",
+            relativeTime = "15:00",
+            settlementType = SettlementType.FULL,
+            customerId = customer.id,
+            paidAmount = 100.0,
+            creditAmount = 0.0,
+            transactionType = TransactionType.CUSTOMER_PAYMENT,
+            operationStatus = OperationStatus.REVERSED
+        )
+
+        val txs = listOf(mixedSale, creditSale, cashSale, payment, reversedCreditSale, reversedPayment)
+
+        val data = AnalyticsExportDataPreparer.prepareAnalyticsData(
+            transactions = txs,
+            allCustomers = sampleCustomers,
+            selectedCustomer = null,
+            activePeriod = PeriodFilter.ALL,
+            currency = "SAR",
+            today = testDate
+        )
+
+        // 1. Accounting Assertions
+        assertEquals(450.0, data.metrics.totalSales, 0.001) // 100 + 200 + 150 (reversed 500 excluded)
+        assertEquals(210.0, data.metrics.totalCashSales, 0.001) // 60 (from mixed) + 150
+        assertEquals(240.0, data.metrics.totalDebtSales, 0.001) // 40 (from mixed) + 200
+        assertEquals(50.0, data.metrics.totalPaymentsReceived, 0.001) // 50 (reversed 100 excluded)
+        assertEquals(190.0, data.metrics.netOutstandingBalance, 0.001) // 240 - 50
+
+        // 2. Exporter Output Assertions: Arabic & English CSV formats must reflect identical figures
+        val csvAr = AnalyticsCsvGenerator.generateAnalyticsCsv(data, isArabic = true)
+        val csvEn = AnalyticsCsvGenerator.generateAnalyticsCsv(data, isArabic = false)
+
+        assertTrue("Arabic CSV contains 450.0 total sales", csvAr.contains("450.00") || csvAr.contains("450"))
+        assertTrue("Arabic CSV contains 210.0 cash sales", csvAr.contains("210.00") || csvAr.contains("210"))
+        assertTrue("Arabic CSV contains 240.0 debt sales", csvAr.contains("240.00") || csvAr.contains("240"))
+        assertTrue("Arabic CSV contains 50.0 payments", csvAr.contains("50.00") || csvAr.contains("50"))
+
+        assertTrue("English CSV contains 450.0 total sales", csvEn.contains("450.00") || csvEn.contains("450"))
+        assertTrue("English CSV contains 210.0 cash sales", csvEn.contains("210.00") || csvEn.contains("210"))
+        assertTrue("English CSV contains 240.0 debt sales", csvEn.contains("240.00") || csvEn.contains("240"))
+        assertTrue("English CSV contains 50.0 payments", csvEn.contains("50.00") || csvEn.contains("50"))
     }
 }

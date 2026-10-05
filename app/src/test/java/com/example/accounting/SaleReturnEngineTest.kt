@@ -204,11 +204,11 @@ class SaleReturnEngineTest {
         assertEquals("ACTIVE", returnResult.saleReturn.status)
 
         // Verify original Sale remains unchanged
-        val originalSaleAfter = repository.getSaleById(sale.id)
+        val originalSaleAfter = repository.salesRepository.getSaleById(sale.id)
         assertNotNull(originalSaleAfter)
         assertEquals(400.0, originalSaleAfter!!.totalAmount, 0.001)
         assertEquals("ACTIVE", originalSaleAfter.status)
-        val originalLinesAfter = repository.getSaleLines(sale.id)
+        val originalLinesAfter = repository.salesRepository.getSaleLines(sale.id)
         assertEquals(10, originalLinesAfter[0].quantity)
 
         // Customer receivable is reduced back to 0.0
@@ -555,7 +555,7 @@ class SaleReturnEngineTest {
         assertEquals(refund.id, storedRefunds.first().id)
 
         // Original sale amount & paidAmount remain untouched!
-        val unchangedSale = repository.getSaleById(sale.id)
+        val unchangedSale = repository.salesRepository.getSaleById(sale.id)
         assertEquals(100.0, unchangedSale!!.totalAmount, 0.001)
         assertEquals(100.0, unchangedSale.paidAmount, 0.001)
     }

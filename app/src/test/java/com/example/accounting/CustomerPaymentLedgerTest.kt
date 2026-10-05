@@ -238,7 +238,7 @@ class CustomerPaymentLedgerTest {
         )
 
         // 1. Verify Sales table contains ONLY the sale (never the payment)
-        val salesList = repository.getAllSalesSync()
+        val salesList = repository.salesRepository.getAllSalesSync()
         assertEquals("sales table must contain exactly 1 sale", 1, salesList.size)
         val salesTotal = salesList.sumOf { it.totalAmount }
         assertEquals("Sales total must be exactly 100.0, not contaminated by payment", 100.0, salesTotal, 0.0001)

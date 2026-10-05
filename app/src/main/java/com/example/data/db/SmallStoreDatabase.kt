@@ -36,7 +36,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         Expense::class,
         StockMovementEntity::class
     ],
-    version = 17,
+    version = 18,
     exportSchema = false
 )
 abstract class SmallStoreDatabase : RoomDatabase() {
@@ -94,6 +94,12 @@ abstract class SmallStoreDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE sales ADD COLUMN financialAccountId TEXT DEFAULT NULL")
+            }
+        }
+
         fun getDatabase(context: Context): SmallStoreDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -118,7 +124,8 @@ abstract class SmallStoreDatabase : RoomDatabase() {
                         MIGRATION_13_14,
                         MIGRATION_14_15,
                         MIGRATION_15_16,
-                        MIGRATION_16_17
+                        MIGRATION_16_17,
+                        MIGRATION_17_18
                     )
                     .build()
                 INSTANCE = instance

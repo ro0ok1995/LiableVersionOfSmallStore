@@ -752,4 +752,189 @@ class CustomerStatementReconciliationTest {
         assertEquals(150.0, rows[0].runningBalance, 0.0001)
         assertEquals(400.0, rows[1].runningBalance, 0.0001)
     }
+
+    /**
+     * Test I: Period statement closing balance strictly reconciles with authoritative CustomerLedgerCalculator.
+     */
+    @Test
+    fun testI_periodStatementClosingBalanceReconcilesWithAuthoritativeLedger() {
+        val periodStart = LocalDate.of(2026, 9, 10)
+        val periodEnd = LocalDate.of(2026, 9, 20)
+
+        // 1. Pre-period transactions (form opening balance = 150 - 50 = 100)
+        val preSale = TransactionItem(
+            id = "tx_pre_1",
+            customerId = customerId,
+            customerNameSnapshot = customer.customerName,
+            activityType = "شراء آجل",
+            amount = 150.0,
+            isCredit = true,
+            date = "2026-09-01",
+            relativeTime = "اليوم",
+            transactionType = TransactionType.SALE,
+            saleType = SaleType.CREDIT,
+            creditAmount = 150.0
+        )
+        val prePayment = TransactionItem(
+            id = "tx_pre_2",
+            customerId = customerId,
+            customerNameSnapshot = customer.customerName,
+            activityType = "تسديد",
+            amount = 50.0,
+            isCredit = false,
+            date = "2026-09-05",
+            relativeTime = "اليوم",
+            transactionType = TransactionType.CUSTOMER_PAYMENT
+        )
+
+        // 2. In-period transactions
+        // Mixed sale: 200 total = 80 paid + 120 credit (+120 receivable)
+        val inMixedSale = TransactionItem(
+            id = "tx_in_1",
+            customerId = customerId,
+            customerNameSnapshot = customer.customerName,
+            activityType = "شراء مختلط",
+            amount = 200.0,
+            isCredit = true,
+            date = "2026-09-12",
+            relativeTime = "اليوم",
+            transactionType = TransactionType.SALE,
+            saleType = SaleType.MIXED,
+            paidAmount = 80.0,
+            creditAmount = 120.0
+        )
+        // In-period payment: -70 receivable
+        val inPayment = TransactionItem(
+            id = "tx_in_2",
+            customerId = customerId,
+            customerNameSnapshot = customer.customerName,
+            activityType = "تسديد",
+            amount = 70.0,
+            isCredit = false,
+            date = "2026-09-15",
+            relativeTime = "اليوم",
+            transactionType = TransactionType.CUSTOMER_PAYMENT
+        )
+        // In-period reversed sale: 300 total (should contribute 0.0)
+        val inReversedSale = TransactionItem(
+            id = "tx_in_3",
+            customerId = customerId,
+            customerNameSnapshot = customer.customerName,
+            activityType = "شراء آجل ملغى",
+            amount = 300.0,
+            isCredit = true,
+            date = "2026-09-18",
+            relativeTime = "اليوم",
+            transactionType = TransactionType.SALE,
+            saleType = SaleType.CREDIT,
+            creditAmount = 300.0,
+            operationStatus = OperationStatus.REVERSED
+        )
+
+        // 3. Post-period transaction (must NOT affect period closing balance)
+        val postSale = TransactionItem(
+            id = "tx_post_1",
+            customerId = customerId,
+            customerNameSnapshot = customer.customerName,
+            activityType = "شراء آجل",
+            amount = 500.0,
+            isCredit = true,
+            date = "2026-09-25",
+            relativeTime = "اليوم",
+            transactionType = TransactionType.SALE,
+            saleType = SaleType.CREDIT,
+            creditAmount = 500.0
+        )
+
+        val allTxs: List<TransactionItem> = listOf(preSale, prePayment, inMixedSale, inPayment, inReversedSale, postSale)
+
+        // Compute statement for CUSTOM period (2026-09-10 to 2026-09-20)
+        val rows = viewModel.computeStatementRows(
+            allTransactions = allTxs,
+            selectedCustomer = customer,
+            filter = StatementTxFilter.ALL,
+            period = PeriodFilter.CUSTOM,
+            customStartDate = periodStart,
+            customEndDate = periodEnd,
+            includeOpeningBalanceRow = true
+        )
+
+        // Opening balance row + 3 in-period transactions = 4 rows
+        assertEquals(4, rows.size)
+
+        // Opening balance: 150 - 50 = 100.0
+        assertEquals("opening_balance", rows[0].id)
+        assertEquals(100.0, rows[0].runningBalance, 0.0001)
+
+        // After inMixedSale (+120): running = 220.0
+        assertEquals("tx_in_1", rows[1].id)
+        assertEquals(220.0, rows[1].runningBalance, 0.0001)
+
+        // After inPayment (-70): running = 150.0
+        assertEquals("tx_in_2", rows[2].id)
+        assertEquals(150.0, rows[2].runningBalance, 0.0001)
+
+        // After inReversedSale (+0): running = 150.0
+        assertEquals("tx_in_3", rows[3].id)
+        assertTrue(rows[3].isReversed)
+        assertEquals(150.0, rows[3].runningBalance, 0.0001)
+
+        // Authoritative reconciliation:
+        // Transactions up to period end = preSale, prePayment, inMixedSale, inPayment, inReversedSale
+        val txsUpToPeriodEnd: List<TransactionItem> = listOf(preSale, prePayment, inMixedSale, inPayment, inReversedSale)
+        val expectedBalance = CustomerLedgerCalculator.calculateCustomerBalance(customerId, transactions = txsUpToPeriodEnd).balance
+        assertEquals("Period statement closing balance matches authoritative ledger", expectedBalance, rows.last().runningBalance, 0.0001)
+    }
+
+    /**
+     * Test J: Typed fields take absolute precedence over string checks (Rule 6).
+     */
+    @Test
+    fun testJ_typedFieldsTakePrecedenceOverMisleadingStringLabels() {
+        // A Sale whose activityType misleadingly contains "تسديد" / "Payment"
+        val saleWithPaymentString = TransactionItem(
+            id = "tx_sale_with_payment_string",
+            customerId = customerId,
+            customerNameSnapshot = customer.customerName,
+            activityType = "شراء فاتورة تسديد 123",
+            amount = 90.0,
+            isCredit = true,
+            date = "2026-09-10",
+            relativeTime = "اليوم",
+            transactionType = TransactionType.SALE,
+            saleType = SaleType.CREDIT,
+            creditAmount = 90.0
+        )
+
+        // A Payment whose activityType misleadingly contains "شراء" / "آجل"
+        val paymentWithSaleString = TransactionItem(
+            id = "tx_pay_with_sale_string",
+            customerId = customerId,
+            customerNameSnapshot = customer.customerName,
+            activityType = "تسديد شراء آجل",
+            amount = 40.0,
+            isCredit = false,
+            date = "2026-09-11",
+            relativeTime = "اليوم",
+            transactionType = TransactionType.CUSTOMER_PAYMENT
+        )
+
+        val rows = viewModel.computeStatementRows(
+            allTransactions = listOf(saleWithPaymentString, paymentWithSaleString),
+            selectedCustomer = customer,
+            filter = StatementTxFilter.ALL,
+            period = PeriodFilter.ALL
+        )
+
+        assertEquals(2, rows.size)
+        // 1. First row is SALE: isCreditDebt must be true, isPayment must be false
+        assertTrue("Sale must be classified as debt purchase despite string label", rows[0].isCreditDebt)
+        assertFalse("Sale must not be classified as payment despite string label", rows[0].isPayment)
+        assertEquals(90.0, rows[0].runningBalance, 0.0001)
+
+        // 2. Second row is PAYMENT: isPayment must be true, isCreditDebt must be false
+        assertTrue("Payment must be classified as payment despite string label", rows[1].isPayment)
+        assertFalse("Payment must not be classified as debt purchase despite string label", rows[1].isCreditDebt)
+        assertEquals(50.0, rows[1].runningBalance, 0.0001)
+    }
 }

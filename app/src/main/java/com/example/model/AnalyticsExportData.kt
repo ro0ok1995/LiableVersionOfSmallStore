@@ -177,8 +177,8 @@ object AnalyticsExportDataPreparer {
         val fullSettlementAmount = breakdown.fullSettlementAmount
         val partialSettlementAmount = breakdown.partialSettlementAmount
 
-        val totalPaymentsReceived = fullSettlementAmount + partialSettlementAmount
-        val totalSales = totalCashSales + totalDebtSales
+        val totalPaymentsReceived = breakdown.customerPayments
+        val totalSales = breakdown.totalSales
         val netBalance = totalDebtSales - totalPaymentsReceived
 
         // Volume & percentages matching HomeScreen.kt and StatisticsTabContent
@@ -222,19 +222,22 @@ object AnalyticsExportDataPreparer {
 
         // 5. Selected Customer Info (strictly only for ONE_SELECTED_CUSTOMER)
         val customerInfo = if (selectedCustomer != null) {
-            val liveBalance = CustomerLedgerCalculator.calculateCustomerBalance(selectedCustomer.id, transactions).balance
+            val summary = CustomerLedgerCalculator.calculateCustomerBalance(selectedCustomer.id, transactions)
             AnalyticsCustomerInfo(
                 customerId = selectedCustomer.id,
                 customerName = selectedCustomer.customerName,
                 phone = selectedCustomer.phone,
-                currentBalance = liveBalance,
-                totalDebt = liveBalance.coerceAtLeast(0.0)
+                currentBalance = summary.balance,
+                totalDebt = summary.totalCreditSales
             )
         } else null
 
         // 6. Most Ordered Products (for selected customer only, matching Comprehensive Customer Report)
         val mostOrderedProducts = if (selectedCustomer != null) {
-            val custTxIds = filteredTransactions.map { it.id }.toSet()
+            val activeFilteredTxs = filteredTransactions.filter {
+                (it.operationStatus ?: it.typedOperationStatus) != OperationStatus.REVERSED
+            }
+            val custTxIds = activeFilteredTxs.map { it.id }.toSet()
             val lines = transactionLines.filter { it.transactionId in custTxIds }
             lines.groupBy { it.productNameSnapshot.ifBlank { it.productId ?: "-" } }
                 .map { (name, gLines) ->

@@ -507,10 +507,20 @@ object FinancialReportCalculator {
             .filter { (it.operationStatus ?: it.typedOperationStatus) == OperationStatus.REVERSED }
             .map { it.id }
             .toSet()
-        return transactionLines
-            .filter { it.transactionId !in reversedTxIds }
+        val returnTxIds = transactions
+            .filter { (it.transactionType ?: it.typedTransactionType) == TransactionType.SALE_RETURN }
+            .map { it.id }
+            .toSet()
+
+        val salesCogs = transactionLines
+            .filter { it.transactionId !in reversedTxIds && it.transactionId !in returnTxIds }
             .sumOf { it.quantity * it.costPrice }
-            .coerceAtLeast(0.0)
+
+        val returnsCogs = transactionLines
+            .filter { it.transactionId !in reversedTxIds && it.transactionId in returnTxIds }
+            .sumOf { it.quantity * it.costPrice }
+
+        return (salesCogs - returnsCogs).coerceAtLeast(0.0)
     }
 
     /**

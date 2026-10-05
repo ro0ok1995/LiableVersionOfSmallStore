@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -22,6 +24,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -48,6 +51,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.db.FinancialAccount
 import com.example.model.AppCurrency
 import com.example.model.CartItem
 import com.example.model.LanguageMode
@@ -81,8 +85,9 @@ fun UnifiedSettlementSheet(
     initialCashAmount: String = "50",
     initialDebtAmount: String = "40",
     initialNotes: String = "",
+    financialAccounts: List<FinancialAccount> = emptyList(),
     onDismiss: () -> Unit = {},
-    onComplete: (cash: Double, debt: Double, notes: String) -> Unit = { _, _, _ -> }
+    onComplete: (cash: Double, debt: Double, notes: String, financialAccountId: String?) -> Unit = { _, _, _, _ -> }
 ) {
     if (!isOpen) return
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -115,6 +120,7 @@ fun UnifiedSettlementSheet(
                 initialCashAmount = initialCashAmount,
                 initialDebtAmount = initialDebtAmount,
                 initialNotes = initialNotes,
+                financialAccounts = financialAccounts,
                 onComplete = onComplete
             )
         }
@@ -130,7 +136,8 @@ fun UnifiedSettlementSheetContent(
     initialCashAmount: String = "50",
     initialDebtAmount: String = "40",
     initialNotes: String = "",
-    onComplete: (cash: Double, debt: Double, notes: String) -> Unit = { _, _, _ -> }
+    financialAccounts: List<FinancialAccount> = emptyList(),
+    onComplete: (cash: Double, debt: Double, notes: String, financialAccountId: String?) -> Unit = { _, _, _, _ -> }
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
     val currency = AppCurrency.SYMBOL
@@ -139,6 +146,15 @@ fun UnifiedSettlementSheetContent(
     var cashAmountText by remember(initialCashAmount) { mutableStateOf(initialCashAmount) }
     var debtAmountText by remember(initialDebtAmount) { mutableStateOf(initialDebtAmount) }
     var notesText by remember(initialNotes) { mutableStateOf(initialNotes) }
+
+    val activeAccounts = remember(financialAccounts) { financialAccounts.filter { it.isActive } }
+    var selectedAccountId by remember(financialAccounts) {
+        mutableStateOf(
+            activeAccounts.find { it.id == "acc_cash" }?.id
+                ?: activeAccounts.firstOrNull()?.id
+                ?: "acc_cash"
+        )
+    }
 
     val parsedCash = cashAmountText.toDoubleOrNull() ?: 0.0
     val parsedDebt = debtAmountText.toDoubleOrNull() ?: 0.0
@@ -330,6 +346,32 @@ fun UnifiedSettlementSheetContent(
                     .testTag("settlement_cash_input")
             )
 
+            // FINANCIAL ACCOUNT SELECTION FOR PAID PORTION
+            if (activeAccounts.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = if (isArabic) "إيداع المبلغ في الحساب المالي:" else "Deposit paid amount into account:",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("settlement_account_row")
+                ) {
+                    items(activeAccounts) { acc ->
+                        FilterChip(
+                            selected = selectedAccountId == acc.id,
+                            onClick = { selectedAccountId = acc.id },
+                            label = { Text(acc.name) },
+                            modifier = Modifier.testTag("settlement_chip_account_${acc.id}")
+                        )
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(14.dp))
 
             // DEBT AMOUNT
@@ -500,7 +542,7 @@ fun UnifiedSettlementSheetContent(
                 Button(
                     onClick = {
                         focusManager.clearFocus()
-                        onComplete(parsedCash, parsedDebt, notesText.trim())
+                        onComplete(parsedCash, parsedDebt, notesText.trim(), selectedAccountId)
                     },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,

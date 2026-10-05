@@ -657,18 +657,30 @@ class AnalysisCenterViewModel : ViewModel() {
         // 4. Filter by transaction type using typed classifications with legacy fallback
         txList = when (filter) {
             StatementTxFilter.ALL -> txList
-            StatementTxFilter.PAYMENT -> txList.filter {
-                it.typedTransactionType == TransactionType.CUSTOMER_PAYMENT ||
-                it.activityType.contains("تسديد") || it.activityType.contains("Payment")
+            StatementTxFilter.PAYMENT -> txList.filter { tx ->
+                val type = tx.typedTransactionType
+                if (type != null) {
+                    type == TransactionType.CUSTOMER_PAYMENT || type == TransactionType.SALE_RETURN
+                } else {
+                    tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
+                }
             }
-            StatementTxFilter.CASH_PURCHASE -> txList.filter {
-                (it.typedTransactionType == TransactionType.SALE && it.typedSaleType == SaleType.CASH) ||
-                (!it.isCredit && (it.activityType.contains("كاش") || it.activityType.contains("Cash")))
+            StatementTxFilter.CASH_PURCHASE -> txList.filter { tx ->
+                val type = tx.typedTransactionType
+                if (type != null) {
+                    type == TransactionType.SALE && tx.typedSaleType == SaleType.CASH
+                } else {
+                    !tx.isCredit && (tx.activityType.contains("كاش") || tx.activityType.contains("Cash"))
+                }
             }
-            StatementTxFilter.DEBT_PURCHASE -> txList.filter {
-                (it.typedTransactionType == TransactionType.SALE && (it.typedSaleType == SaleType.CREDIT || it.typedSaleType == SaleType.MIXED)) ||
-                it.creditAmount > 0.0 ||
-                it.isCredit || it.activityType.contains("آجل") || it.activityType.contains("دين") || it.activityType.contains("Debt")
+            StatementTxFilter.DEBT_PURCHASE -> txList.filter { tx ->
+                val type = tx.typedTransactionType
+                if (type != null) {
+                    (type == TransactionType.SALE && (tx.typedSaleType == SaleType.CREDIT || tx.typedSaleType == SaleType.MIXED || tx.creditAmount > 0.0)) ||
+                    type == TransactionType.CUSTOMER_REFUND
+                } else {
+                    tx.creditAmount > 0.0 || tx.isCredit || tx.activityType.contains("آجل") || tx.activityType.contains("دين") || tx.activityType.contains("Debt")
+                }
             }
         }
 
@@ -701,15 +713,20 @@ class AnalysisCenterViewModel : ViewModel() {
         }
 
         for (tx in sortedList) {
-            val isPayment = tx.typedTransactionType == TransactionType.CUSTOMER_PAYMENT ||
-                tx.typedTransactionType == TransactionType.SALE_RETURN ||
+            val type = tx.typedTransactionType
+            val isPayment = if (type != null) {
+                type == TransactionType.CUSTOMER_PAYMENT || type == TransactionType.SALE_RETURN
+            } else {
                 tx.activityType.contains("تسديد") || tx.activityType.contains("Payment")
+            }
 
-            val isDebtPurchase = (tx.typedTransactionType == TransactionType.SALE &&
-                (tx.typedSaleType == SaleType.CREDIT || tx.typedSaleType == SaleType.MIXED || tx.isCredit)) ||
-                tx.typedTransactionType == TransactionType.CUSTOMER_REFUND ||
-                tx.creditAmount > 0.0 ||
-                tx.activityType.contains("آجل") || tx.activityType.contains("دين") || tx.activityType.contains("Debt")
+            val isDebtPurchase = if (type != null) {
+                (type == TransactionType.SALE &&
+                    (tx.typedSaleType == SaleType.CREDIT || tx.typedSaleType == SaleType.MIXED || tx.isCredit || tx.creditAmount > 0.0)) ||
+                    type == TransactionType.CUSTOMER_REFUND
+            } else {
+                tx.creditAmount > 0.0 || tx.isCredit || tx.activityType.contains("آجل") || tx.activityType.contains("دين") || tx.activityType.contains("Debt")
+            }
 
             val impact = getTransactionReceivableImpact(tx)
             running += impact

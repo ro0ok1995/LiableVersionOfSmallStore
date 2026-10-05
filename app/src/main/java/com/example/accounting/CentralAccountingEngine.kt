@@ -79,6 +79,20 @@ object CentralAccountingEngine {
     }
 
     /**
+     * Calculates customer balance summary directly from a list of [Sale] entities.
+     */
+    fun calculateCustomerBalanceFromSales(customerId: String, sales: List<Sale>): CustomerBalanceSummary {
+        return CustomerLedgerCalculator.calculateCustomerBalanceFromSales(customerId, sales)
+    }
+
+    /**
+     * Calculates customer balance summary directly from [CustomerPayment] entities.
+     */
+    fun calculateCustomerBalanceFromPayments(customerId: String, payments: List<CustomerPayment>): CustomerBalanceSummary {
+        return CustomerLedgerCalculator.calculateCustomerBalanceFromPayments(customerId, payments)
+    }
+
+    /**
      * Converts a collection of domain [TransactionItem]s for a specific [customerId] into
      * standard customer ledger entries.
      */
@@ -184,7 +198,7 @@ object CentralAccountingEngine {
      * Calculates current stock on hand and valuation for all products directly
      * from persisted [StockMovementEntity] records.
      */
-    fun calculateAllProductsStockFromMovements(
+     fun calculateAllProductsStockFromMovements(
         productIds: Set<String>,
         movements: List<StockMovementEntity>,
         productCostPrices: Map<String, Double> = emptyMap(),
@@ -195,6 +209,70 @@ object CentralAccountingEngine {
             movements = movements,
             productCostPrices = productCostPrices,
             productNames = productNames
+        )
+    }
+
+    /**
+     * Calculates current stock on hand and valuation for a single product directly
+     * from transaction line items.
+     */
+    fun calculateProductStock(
+        productId: String,
+        purchases: List<Purchase>,
+        purchaseLines: List<PurchaseLine>,
+        sales: List<Sale>,
+        saleLines: List<SaleLine>,
+        saleReturns: List<SaleReturn>,
+        saleReturnLines: List<SaleReturnLine>,
+        fallbackUnitCost: Double = 0.0,
+        productName: String = "",
+        purchaseReturns: List<PurchaseReturn> = emptyList(),
+        adjustments: List<Adjustment> = emptyList()
+    ): ProductStockSummary {
+        return InventoryLedgerCalculator.calculateProductStock(
+            productId = productId,
+            purchases = purchases,
+            purchaseLines = purchaseLines,
+            sales = sales,
+            saleLines = saleLines,
+            saleReturns = saleReturns,
+            saleReturnLines = saleReturnLines,
+            fallbackUnitCost = fallbackUnitCost,
+            productName = productName,
+            purchaseReturns = purchaseReturns,
+            adjustments = adjustments
+        )
+    }
+
+    /**
+     * Calculates current stock on hand and valuation for all products directly
+     * from transaction line items.
+     */
+    fun calculateAllProductsStock(
+        productIds: Set<String>,
+        purchases: List<Purchase>,
+        purchaseLines: List<PurchaseLine>,
+        sales: List<Sale>,
+        saleLines: List<SaleLine>,
+        saleReturns: List<SaleReturn>,
+        saleReturnLines: List<SaleReturnLine>,
+        productCostPrices: Map<String, Double> = emptyMap(),
+        productNames: Map<String, String> = emptyMap(),
+        purchaseReturns: List<PurchaseReturn> = emptyList(),
+        adjustments: List<Adjustment> = emptyList()
+    ): Map<String, ProductStockSummary> {
+        return InventoryLedgerCalculator.calculateAllProductsStock(
+            productIds = productIds,
+            purchases = purchases,
+            purchaseLines = purchaseLines,
+            sales = sales,
+            saleLines = saleLines,
+            saleReturns = saleReturns,
+            saleReturnLines = saleReturnLines,
+            productCostPrices = productCostPrices,
+            productNames = productNames,
+            purchaseReturns = purchaseReturns,
+            adjustments = adjustments
         )
     }
 
@@ -239,8 +317,11 @@ object CentralAccountingEngine {
     /**
      * Calculates authoritative financial report totals directly from domain [TransactionItem]s.
      */
-    fun calculateFinancialReport(transactions: List<TransactionItem>): FinancialReportTotals {
-        return FinancialReportCalculator.calculate(transactions)
+    fun calculateFinancialReport(
+        transactions: List<TransactionItem>,
+        transactionLines: List<com.example.data.db.TransactionItemLineEntity> = emptyList()
+    ): FinancialReportTotals {
+        return FinancialReportCalculator.calculate(transactions, transactionLines)
     }
 
     /**
@@ -292,6 +373,137 @@ object CentralAccountingEngine {
      */
     fun decomposeTransaction(tx: TransactionItem): TransactionFinancialDecomposition {
         return FinancialReportCalculator.decomposeTransaction(tx)
+    }
+
+    // =========================================================================
+    // 5. FINANCIAL ACCOUNT LEDGER
+    // =========================================================================
+
+    /**
+     * Authoritative calculation of the net balance of a specific financial account.
+     * Inflows (positive):
+     * - Paid amount from active sales (attributed to "acc_cash")
+     * - Customer payments (linked to this account)
+     * - Opening balance (DEBIT positive, CREDIT negative)
+     * - Adjustments (DEBIT positive, CREDIT negative)
+     *
+     * Outflows (negative):
+     * - Customer refunds (linked to this account)
+     * - Paid amount from active purchases (linked to this account)
+     * - Supplier payments (linked to this account)
+     * - Expenses (linked to this account)
+     *
+     * Invariant: Operations with status == "REVERSED" are strictly excluded.
+     */
+    fun calculateFinancialAccountBalance(
+        accountId: String,
+        sales: List<Sale> = emptyList(),
+        customerPayments: List<CustomerPayment> = emptyList(),
+        openingBalances: List<OpeningBalance> = emptyList(),
+        adjustments: List<Adjustment> = emptyList(),
+        refunds: List<Refund> = emptyList(),
+        purchases: List<Purchase> = emptyList(),
+        supplierPayments: List<SupplierPayment> = emptyList(),
+        expenses: List<Expense> = emptyList()
+    ): Double {
+        val activeSalesInflow = sales
+            .filter { (it.financialAccountId ?: "acc_cash") == accountId && it.status != "REVERSED" }
+            .sumOf { it.paidAmount }
+
+        val activeCustomerPaymentsInflow = customerPayments
+            .filter { (it.financialAccountId ?: "acc_cash") == accountId && it.status != "REVERSED" }
+            .sumOf { it.amount }
+
+        val openingBalancesInflow = openingBalances
+            .filter { it.entityType == "FINANCIAL_ACCOUNT" && it.entityId == accountId }
+            .sumOf { if (it.direction == "DEBIT") it.amount else -it.amount }
+
+        val activeAdjustmentsInflow = adjustments
+            .filter { it.entityType == "FINANCIAL_ACCOUNT" && it.entityId == accountId && it.status != "REVERSED" }
+            .sumOf { if (it.direction == "DEBIT") it.amount else -it.amount }
+
+        val activeRefundsOutflow = refunds
+            .filter { (it.financialAccountId ?: "acc_cash") == accountId && it.status != "REVERSED" }
+            .sumOf { it.amount }
+
+        val activePurchasesOutflow = purchases
+            .filter { (it.financialAccountId ?: "acc_cash") == accountId && it.status != "REVERSED" }
+            .sumOf { it.paidAmount }
+
+        val activeSupplierPaymentsOutflow = supplierPayments
+            .filter { (it.financialAccountId ?: "acc_cash") == accountId && it.status != "REVERSED" }
+            .sumOf { it.amount }
+
+        val activeExpensesOutflow = expenses
+            .filter { (it.financialAccountId ?: "acc_cash") == accountId && it.status != "REVERSED" }
+            .sumOf { it.amount }
+
+        val totalInflows = activeSalesInflow + activeCustomerPaymentsInflow + openingBalancesInflow + activeAdjustmentsInflow
+        val totalOutflows = activeRefundsOutflow + activePurchasesOutflow + activeSupplierPaymentsOutflow + activeExpensesOutflow
+
+        return totalInflows - totalOutflows
+    }
+
+    /**
+     * Builds a chronological financial account statement with opening, running, and closing balances.
+     */
+    fun buildFinancialAccountStatement(
+        accountId: String,
+        startDate: String? = null,
+        endDate: String? = null,
+        sales: List<Sale> = emptyList(),
+        customerPayments: List<CustomerPayment> = emptyList(),
+        openingBalances: List<OpeningBalance> = emptyList(),
+        adjustments: List<Adjustment> = emptyList(),
+        refunds: List<Refund> = emptyList(),
+        purchases: List<Purchase> = emptyList(),
+        supplierPayments: List<SupplierPayment> = emptyList(),
+        expenses: List<Expense> = emptyList()
+    ): FinancialAccountStatement {
+        return FinancialAccountLedgerCalculator.buildFinancialAccountStatement(
+            accountId = accountId,
+            startDate = startDate,
+            endDate = endDate,
+            sales = sales,
+            customerPayments = customerPayments,
+            openingBalances = openingBalances,
+            adjustments = adjustments,
+            refunds = refunds,
+            purchases = purchases,
+            supplierPayments = supplierPayments,
+            expenses = expenses
+        )
+    }
+
+    /**
+     * Builds a chronological financial account ledger entry list.
+     */
+    fun buildFinancialAccountLedger(
+        accountId: String,
+        startDate: String? = null,
+        endDate: String? = null,
+        sales: List<Sale> = emptyList(),
+        customerPayments: List<CustomerPayment> = emptyList(),
+        openingBalances: List<OpeningBalance> = emptyList(),
+        adjustments: List<Adjustment> = emptyList(),
+        refunds: List<Refund> = emptyList(),
+        purchases: List<Purchase> = emptyList(),
+        supplierPayments: List<SupplierPayment> = emptyList(),
+        expenses: List<Expense> = emptyList()
+    ): List<FinancialAccountLedgerEntry> {
+        return FinancialAccountLedgerCalculator.buildFinancialAccountLedger(
+            accountId = accountId,
+            startDate = startDate,
+            endDate = endDate,
+            sales = sales,
+            customerPayments = customerPayments,
+            openingBalances = openingBalances,
+            adjustments = adjustments,
+            refunds = refunds,
+            purchases = purchases,
+            supplierPayments = supplierPayments,
+            expenses = expenses
+        )
     }
 }
 

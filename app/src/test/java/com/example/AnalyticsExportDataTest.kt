@@ -324,4 +324,107 @@ class AnalyticsExportDataTest {
         assertEquals(50.0, data.metrics.partialSettlementAmount, 0.001)
         assertEquals(100.0, data.metrics.netOutstandingBalance, 0.001) // 150 debt - 50 payment
     }
+
+    @Test
+    fun testReversedOperationsExcludedFromActiveAnalyticsTotals() {
+        val activeSale = TransactionItem(
+            id = "tx_act_sale",
+            title = "بيع آجل نشط",
+            customerName = "خالد عمر",
+            activityType = "شراء آجل",
+            amount = 300.0,
+            isCredit = true,
+            date = "2026-09-10",
+            relativeTime = "10:00",
+            customerId = "c2",
+            paidAmount = 0.0,
+            creditAmount = 300.0,
+            transactionType = TransactionType.SALE,
+            saleType = SaleType.CREDIT,
+            operationStatus = com.example.model.OperationStatus.ACTIVE
+        )
+        val reversedSale = TransactionItem(
+            id = "tx_rev_sale",
+            title = "بيع آجل ملغى",
+            customerName = "خالد عمر",
+            activityType = "شراء آجل ملغى",
+            amount = 500.0,
+            isCredit = true,
+            date = "2026-09-11",
+            relativeTime = "11:00",
+            customerId = "c2",
+            paidAmount = 0.0,
+            creditAmount = 500.0,
+            transactionType = TransactionType.SALE,
+            saleType = SaleType.CREDIT,
+            operationStatus = com.example.model.OperationStatus.REVERSED
+        )
+        val activePayment = TransactionItem(
+            id = "tx_act_pay",
+            title = "دفعة نشطة",
+            customerName = "خالد عمر",
+            activityType = "تسديد",
+            amount = 100.0,
+            isCredit = false,
+            date = "2026-09-12",
+            relativeTime = "12:00",
+            settlementType = SettlementType.PARTIAL,
+            customerId = "c2",
+            paidAmount = 100.0,
+            creditAmount = 0.0,
+            transactionType = TransactionType.CUSTOMER_PAYMENT,
+            operationStatus = com.example.model.OperationStatus.ACTIVE
+        )
+        val reversedPayment = TransactionItem(
+            id = "tx_rev_pay",
+            title = "دفعة ملغاة",
+            customerName = "خالد عمر",
+            activityType = "تسديد ملغى",
+            amount = 200.0,
+            isCredit = false,
+            date = "2026-09-13",
+            relativeTime = "13:00",
+            settlementType = SettlementType.FULL,
+            customerId = "c2",
+            paidAmount = 200.0,
+            creditAmount = 0.0,
+            transactionType = TransactionType.CUSTOMER_PAYMENT,
+            operationStatus = com.example.model.OperationStatus.REVERSED
+        )
+
+        val txLines = listOf(
+            TransactionItemLineEntity(id = 10L, transactionId = "tx_act_sale", productId = "prod_1", productNameSnapshot = "سكر", quantity = 2, unitPrice = 150.0, subtotal = 300.0),
+            TransactionItemLineEntity(id = 11L, transactionId = "tx_rev_sale", productId = "prod_1", productNameSnapshot = "سكر", quantity = 5, unitPrice = 100.0, subtotal = 500.0)
+        )
+
+        val selected = sampleCustomers[1] // c2
+        val data = AnalyticsExportDataPreparer.prepareAnalyticsData(
+            transactions = listOf(activeSale, reversedSale, activePayment, reversedPayment),
+            transactionLines = txLines,
+            allCustomers = sampleCustomers,
+            selectedCustomer = selected,
+            activePeriod = PeriodFilter.ALL
+        )
+
+        // 1. Reversed sale (500) and reversed payment (200) MUST NOT contribute to active totals
+        assertEquals(300.0, data.metrics.totalSales, 0.001)
+        assertEquals(300.0, data.metrics.totalDebtSales, 0.001)
+        assertEquals(0.0, data.metrics.totalCashSales, 0.001)
+        assertEquals(100.0, data.metrics.totalPaymentsReceived, 0.001)
+        assertEquals(100.0, data.metrics.partialSettlementAmount, 0.001)
+        assertEquals(0.0, data.metrics.fullSettlementAmount, 0.001)
+        assertEquals(200.0, data.metrics.netOutstandingBalance, 0.001) // 300 - 100
+
+        // 2. Chart categories reflect only active volume: 300 debt + 100 payment = 400 totalVolume
+        assertEquals(400.0, data.totalVolume, 0.001)
+        val debtCategory = data.chartData.first { it.categoryKey == "DEBT" }
+        assertEquals(300.0, debtCategory.amount, 0.001)
+        val partialCategory = data.chartData.first { it.categoryKey == "PARTIAL_PAYMENT" }
+        assertEquals(100.0, partialCategory.amount, 0.001)
+
+        // 3. Most Ordered Products must only include lines from active transactions (quantity = 2, not 7!)
+        assertEquals(1, data.mostOrderedProducts.size)
+        assertEquals(2, data.mostOrderedProducts[0].totalQuantity)
+        assertEquals(300.0, data.mostOrderedProducts[0].totalSales, 0.001)
+    }
 }

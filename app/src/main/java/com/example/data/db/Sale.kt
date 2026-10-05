@@ -50,7 +50,8 @@ data class Sale(
     val transactionDate: String,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
-    val status: String = "ACTIVE"
+    val status: String = "ACTIVE",
+    val financialAccountId: String? = null
 ) {
     init {
         require(Math.abs(totalAmount - (paidAmount + creditAmount)) < 0.001) {

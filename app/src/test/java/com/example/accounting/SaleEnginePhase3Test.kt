@@ -336,10 +336,10 @@ class SaleEnginePhase3Test {
 
         // Complete settlement: total 17.0, cash 10.0, debt 7.0
         viewModel.completeSettlement(cashAmount = 10.0, debtAmount = 7.0, notes = "فاتورة بقالة")
-        waitForCondition { repository.getAllSalesSync().isNotEmpty() }
+        waitForCondition { repository.salesRepository.getAllSalesSync().isNotEmpty() }
 
         // Allow coroutine execution
-        val allSales = repository.getAllSalesSync()
+        val allSales = repository.salesRepository.getAllSalesSync()
         assertEquals("Exactly 1 Sale must exist in sales table", 1, allSales.size)
 
         val createdSale = allSales.first()
@@ -352,7 +352,7 @@ class SaleEnginePhase3Test {
         assertEquals("PARTIAL", createdSale.paymentStatus)
 
         // Test 2: Verify SaleLines exist and have correct frozen cost
-        val lines = repository.getSaleLines(createdSale.id)
+        val lines = repository.salesRepository.getSaleLines(createdSale.id)
         assertEquals("Expected exactly 2 SaleLine records", 2, lines.size)
 
         val line1 = lines.first { it.productId == "prod_001" }
@@ -458,10 +458,10 @@ class SaleEnginePhase3Test {
 
         // Mixed sale: Total 100, Cash 60, Credit 40
         viewModel.completeSettlement(cashAmount = 60.0, debtAmount = 40.0, notes = "دفعة 60 ومتبقي 40")
-        waitForCondition { repository.getSalesByCustomerIdSync("cust_mixed_40").isNotEmpty() }
+        waitForCondition { repository.salesRepository.getSalesByCustomerIdSync("cust_mixed_40").isNotEmpty() }
 
         // 1. Verify Sale-based ledger calculation
-        val sales = repository.getSalesByCustomerIdSync("cust_mixed_40")
+        val sales = repository.salesRepository.getSalesByCustomerIdSync("cust_mixed_40")
         assertEquals(1, sales.size)
         val sale = sales.first()
         assertEquals(100.0, sale.totalAmount, 0.0001)
@@ -512,7 +512,7 @@ class SaleEnginePhase3Test {
         waitForCondition { db.transactionDao().getAllTransactionsSync().isNotEmpty() }
 
         // Verify: sales table must remain completely empty!
-        val allSales = repository.getAllSalesSync()
+        val allSales = repository.salesRepository.getAllSalesSync()
         assertTrue("Quick payment must NOT create any Sale in sales table", allSales.isEmpty())
 
         // Verify: transactions table contains the payment transaction
@@ -524,5 +524,153 @@ class SaleEnginePhase3Test {
         assertEquals(80.0, payTx.paidAmount, 0.0001)
         assertEquals(0.0, payTx.creditAmount, 0.0001)
         assertEquals("cust_quick_pay", payTx.customerId)
+    }
+
+    // --- Phase 4 Gap 2 POS Financial Account Attribution Tests ---
+
+    @Test
+    fun testPosSettlement_explicitNonCashAccount_persistsBankAccountId() = runBlocking {
+        val customer = CustomerEntity(
+            id = "cust_pos_bank",
+            customerName = "سالم البنكي",
+            balance = 0.0,
+            totalDebt = 0.0,
+            phone = "0551112233",
+            lastTransactionDate = "2026-10-01",
+            hasRecentActivity = false
+        )
+        db.customerDao().insertCustomer(customer)
+
+        val product = ProductItem(
+            id = "prod_bank_1",
+            name = "منتج تجريبي بنك",
+            price = 100.0,
+            costPrice = 70.0,
+            category = "عام",
+            unit = "حبة"
+        )
+
+        val viewModel = MainViewModel(
+            application = ApplicationProvider.getApplicationContext(),
+            repository = repository
+        )
+        ShadowLooper.idleMainLooper()
+        viewModel.setPurchasesCustomer(customer.toModel())
+
+        viewModel.openPurchasesSettlement(listOf(CartItem(product, 1)))
+
+        // Complete settlement with explicit financialAccountId = "acc_bank"
+        viewModel.completeSettlement(
+            cashAmount = 100.0,
+            debtAmount = 0.0,
+            notes = "دفع شبكة بنك",
+            financialAccountId = "acc_bank"
+        )
+        waitForCondition { repository.salesRepository.getAllSalesSync().isNotEmpty() }
+
+        val sales = repository.salesRepository.getAllSalesSync()
+        val sale = sales.first { it.customerId == "cust_pos_bank" }
+        assertEquals(100.0, sale.totalAmount, 0.001)
+        assertEquals(100.0, sale.paidAmount, 0.001)
+        assertEquals(0.0, sale.creditAmount, 0.001)
+        assertEquals("acc_bank", sale.financialAccountId)
+    }
+
+    @Test
+    fun testPosSettlement_mixedSale_persistsSelectedAccountAndMaintainsSplit() = runBlocking {
+        val customer = CustomerEntity(
+            id = "cust_pos_mixed",
+            customerName = "فهد المختلط",
+            balance = 0.0,
+            totalDebt = 0.0,
+            phone = "0552223344",
+            lastTransactionDate = "2026-10-01",
+            hasRecentActivity = false
+        )
+        db.customerDao().insertCustomer(customer)
+
+        val product = ProductItem(
+            id = "prod_mixed_1",
+            name = "منتج مختلط",
+            price = 100.0,
+            costPrice = 60.0,
+            category = "عام",
+            unit = "حبة"
+        )
+
+        val viewModel = MainViewModel(
+            application = ApplicationProvider.getApplicationContext(),
+            repository = repository
+        )
+        ShadowLooper.idleMainLooper()
+        viewModel.setPurchasesCustomer(customer.toModel())
+
+        viewModel.openPurchasesSettlement(listOf(CartItem(product, 1)))
+
+        // Complete settlement: total 100, paid 60 to acc_bank, debt 40
+        viewModel.completeSettlement(
+            cashAmount = 60.0,
+            debtAmount = 40.0,
+            notes = "دفعة شبكة والباقي أجل",
+            financialAccountId = "acc_bank"
+        )
+        waitForCondition { repository.salesRepository.getAllSalesSync().isNotEmpty() }
+
+        val sales = repository.salesRepository.getAllSalesSync()
+        val sale = sales.first { it.customerId == "cust_pos_mixed" }
+        assertEquals(100.0, sale.totalAmount, 0.001)
+        assertEquals(60.0, sale.paidAmount, 0.001)
+        assertEquals(40.0, sale.creditAmount, 0.001)
+        assertEquals("acc_bank", sale.financialAccountId)
+        assertEquals("MIXED", sale.saleType)
+        assertEquals("PARTIAL", sale.paymentStatus)
+    }
+
+    @Test
+    fun testPosSettlement_defaultBehavior_persistsAccCash() = runBlocking {
+        val customer = CustomerEntity(
+            id = "cust_pos_default",
+            customerName = "عمر الافتراضي",
+            balance = 0.0,
+            totalDebt = 0.0,
+            phone = "0553332211",
+            lastTransactionDate = "2026-10-01",
+            hasRecentActivity = false
+        )
+        db.customerDao().insertCustomer(customer)
+
+        val product = ProductItem(
+            id = "prod_def_1",
+            name = "منتج افتراضي",
+            price = 50.0,
+            costPrice = 30.0,
+            category = "عام",
+            unit = "حبة"
+        )
+
+        val viewModel = MainViewModel(
+            application = ApplicationProvider.getApplicationContext(),
+            repository = repository
+        )
+        ShadowLooper.idleMainLooper()
+        viewModel.setPurchasesCustomer(customer.toModel())
+
+        viewModel.openPurchasesSettlement(listOf(CartItem(product, 1)))
+
+        // Complete settlement with no account specified (null)
+        viewModel.completeSettlement(
+            cashAmount = 50.0,
+            debtAmount = 0.0,
+            notes = "دفع كاش عادي",
+            financialAccountId = null
+        )
+        waitForCondition { repository.salesRepository.getAllSalesSync().isNotEmpty() }
+
+        val sales = repository.salesRepository.getAllSalesSync()
+        val sale = sales.first { it.customerId == "cust_pos_default" }
+        assertEquals(50.0, sale.totalAmount, 0.001)
+        assertEquals(50.0, sale.paidAmount, 0.001)
+        assertEquals(0.0, sale.creditAmount, 0.001)
+        assertEquals("acc_cash", sale.financialAccountId)
     }
 }

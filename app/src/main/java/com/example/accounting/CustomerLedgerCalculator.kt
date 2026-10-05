@@ -417,4 +417,29 @@ object CustomerLedgerCalculator {
         val entries = payments.mapNotNull { customerPaymentToLedgerEntry(customerId, it) }
         return calculateSummaryFromEntries(customerId, entries)
     }
+
+    /**
+     * Phase 3: Builds a chronological, deterministic customer account ledger from first-class persisted operations.
+     * Enforces persistent customer identity and status REVERSED neutralization.
+     * Returns entries sorted chronologically by date and transaction ID.
+     */
+    fun buildCustomerLedger(
+        customerId: String,
+        sales: List<Sale>,
+        payments: List<CustomerPayment> = emptyList(),
+        openingBalances: List<OpeningBalance> = emptyList(),
+        adjustments: List<Adjustment> = emptyList(),
+        saleReturns: List<SaleReturn> = emptyList(),
+        refunds: List<Refund> = emptyList()
+    ): List<CustomerLedgerEntry> {
+        val saleEntries = sales.mapNotNull { saleToLedgerEntry(customerId, it) }
+        val paymentEntries = payments.mapNotNull { customerPaymentToLedgerEntry(customerId, it) }
+        val openingEntries = openingBalances.mapNotNull { openingBalanceToLedgerEntry(customerId, it) }
+        val adjustmentEntries = adjustments.mapNotNull { adjustmentToLedgerEntry(customerId, it) }
+        val returnEntries = saleReturns.mapNotNull { saleReturnToLedgerEntry(customerId, it) }
+        val refundEntries = refunds.mapNotNull { refundToLedgerEntry(customerId, it) }
+
+        return (openingEntries + saleEntries + paymentEntries + adjustmentEntries + returnEntries + refundEntries)
+            .sortedWith(compareBy<CustomerLedgerEntry> { it.date }.thenBy { it.transactionId })
+    }
 }

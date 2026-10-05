@@ -774,13 +774,14 @@ fun SmallStoreApp(
                     transactionTotal = uiState.settlementTotal,
                     initialCashAmount = String.format(Locale.US, "%.0f", uiState.settlementTotal),
                     initialDebtAmount = "0",
+                    financialAccounts = uiState.financialAccounts,
                     onDismiss = {
                         focusManager.clearFocus()
                         mainViewModel.dismissSettlementSheet()
                     },
-                    onComplete = { cash, debt, notes ->
+                    onComplete = { cash, debt, notes, financialAccountId ->
                         focusManager.clearFocus()
-                        mainViewModel.completeSettlement(cash, debt, notes)
+                        mainViewModel.completeSettlement(cash, debt, notes, financialAccountId)
                     }
                 )
 
