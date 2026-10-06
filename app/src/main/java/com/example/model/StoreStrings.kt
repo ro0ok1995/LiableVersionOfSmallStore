@@ -506,6 +506,10 @@ object StoreStrings {
     const val STAT_CASH_SALES_AR = "كاش"
     const val STAT_PAYMENTS_RECEIVED_EN = "Payment"
     const val STAT_PAYMENTS_RECEIVED_AR = "دفعة"
+    const val STAT_GROSS_PROFIT_EN = "Gross Profit"
+    const val STAT_GROSS_PROFIT_AR = "إجمالي الربح"
+    const val STAT_NET_PROFIT_EN = "Net Profit"
+    const val STAT_NET_PROFIT_AR = "صافي الربح"
 
     // Accounts Screen Sort
     const val SORT_DEFAULT_AR = "الافتراضي"

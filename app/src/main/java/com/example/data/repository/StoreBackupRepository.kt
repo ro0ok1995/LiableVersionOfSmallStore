@@ -320,7 +320,7 @@ class StoreBackupRepository(
             customerBalances = customerBalances,
             supplierBalances = supplierBalances,
             financialAccountBalances = financialAccountBalances,
-            inventoryValuation = stock.values.sumOf { it.valuation },
+            inventoryValuation = stock.values.sumOf { it.totalValuation },
             totalSales = report.totalSales,
             cogs = report.cogs,
             grossProfit = report.grossProfit,

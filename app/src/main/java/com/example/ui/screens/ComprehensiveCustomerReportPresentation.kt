@@ -55,10 +55,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.accounting.FinancialReportCalculator
 import com.example.model.AppCurrency
 import com.example.model.CustomerAccount
 import com.example.model.StoreInfo
 import com.example.model.TransactionItem
+import com.example.model.TransactionType
+import com.example.model.typedTransactionType
 import com.example.ui.theme.GeoOutlineVariant
 import com.example.ui.theme.GeoPrimary
 import com.example.ui.theme.StatusAmber

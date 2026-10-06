@@ -43,6 +43,7 @@ import com.example.ui.theme.StatusAmber
 import com.example.ui.theme.StatusAmberBg
 import com.example.ui.theme.StatusGreen
 import com.example.ui.theme.StatusGreenBg
+import com.example.util.ReportPresentationUtils
 
 @Composable
 fun ArchivedTransactionCard(
@@ -51,6 +52,7 @@ fun ArchivedTransactionCard(
     onRestoreClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isDebt = ReportPresentationUtils.isDebtTransaction(transaction)
     Card(
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
