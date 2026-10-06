@@ -39,7 +39,7 @@ class CustomerPaymentRepository(
     }
 
     suspend fun insertCustomerPayment(payment: CustomerPayment) {
-        customerPaymentDao.insertPayment(if (payment.financialAccountId == accountId) payment else payment.copy(financialAccountId = accountId))
+        customerPaymentDao.insertPayment(if (payment.financialAccountId == payment.financialAccountId) payment else payment.copy(financialAccountId = payment.financialAccountId))
     }
 
     suspend fun recordCustomerPayment(
