@@ -6,6 +6,8 @@ import com.example.data.db.Refund
 import com.example.data.db.RefundDao
 import com.example.data.db.SaleDao
 import com.example.data.db.SaleReturnDao
+import com.example.data.db.FinancialAccountDao
+import com.example.data.db.PaymentMethodDao
 import com.example.data.db.SmallStoreDatabase
 import com.example.data.db.TransactionDao
 import com.example.data.db.toEntity
@@ -22,7 +24,9 @@ class RefundRepository(
     private val saleReturnDao: SaleReturnDao = database.saleReturnDao(),
     private val saleDao: SaleDao = database.saleDao(),
     private val customerDao: CustomerDao = database.customerDao(),
-    private val transactionDao: TransactionDao = database.transactionDao()
+    private val transactionDao: TransactionDao = database.transactionDao(),
+    private val financialAccountDao: FinancialAccountDao = database.financialAccountDao(),
+    private val paymentMethodDao: PaymentMethodDao = database.paymentMethodDao()
 ) {
     val allRefunds: Flow<List<Refund>> = refundDao.getAllRefunds()
 
@@ -50,8 +54,17 @@ class RefundRepository(
         refundDate: String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
     ): Refund {
         require(saleReturnId.isNotBlank()) { "Sale return ID cannot be blank" }
-        require(amount > 0.0) { "Refund amount must be greater than zero" }
+        require(amount.isFinite() && amount > 0.0) { "Refund amount must be finite and greater than zero" }
         require(reason.isNotBlank()) { "Refund reason cannot be blank" }
+
+        val effectivePaymentMethodId = paymentMethodId ?: "pm_cash"
+        val paymentMethod = paymentMethodDao.getPaymentMethodById(effectivePaymentMethodId)
+            ?: throw IllegalArgumentException("Payment method not found: $effectivePaymentMethodId")
+        require(paymentMethod.isActive) { "Payment method is inactive: $effectivePaymentMethodId" }
+        val effectiveAccountId = financialAccountId ?: "acc_cash"
+        val financialAccount = financialAccountDao.getAccountById(effectiveAccountId)
+            ?: throw IllegalArgumentException("Financial account not found: $effectiveAccountId")
+        require(financialAccount.isActive) { "Financial account is inactive: $effectiveAccountId" }
 
         val saleReturn = saleReturnDao.getReturnById(saleReturnId)
             ?: throw IllegalArgumentException("Sale return not found with id: $saleReturnId")
@@ -82,8 +95,8 @@ class RefundRepository(
             saleId = sale.id,
             customerId = sale.customerId,
             amount = amount,
-            paymentMethodId = paymentMethodId,
-            financialAccountId = financialAccountId,
+            paymentMethodId = effectivePaymentMethodId,
+            financialAccountId = effectiveAccountId,
             refundDate = refundDate,
             reason = reason.trim(),
             status = "ACTIVE"

@@ -54,14 +54,19 @@ class SupplierPaymentRepository(
         referenceNumber: String? = null
     ): SupplierPayment {
         require(supplierId.isNotBlank()) { "Supplier ID cannot be blank" }
+        require(amount.isFinite() && amount > 0.0) { "Payment amount must be finite and greater than zero" }
         val supplier = supplierDao.getSupplierById(supplierId)
             ?: throw IllegalArgumentException("Supplier with ID $supplierId not found")
 
-        require(amount > 0.0) { "Payment amount ($amount) must be greater than zero" }
+        val methodId = paymentMethodId ?: "pm_cash"
+        val method = database.paymentMethodDao().getPaymentMethodById(methodId)
+            ?: throw IllegalArgumentException("Payment method not found: $methodId")
+        require(method.isActive) { "Payment method is inactive: $methodId" }
 
         val accId = financialAccountId ?: "acc_cash"
-        financialAccountDao.getAccountById(accId)
+        val account = financialAccountDao.getAccountById(accId)
             ?: throw IllegalArgumentException("Financial account not found: $accId")
+        require(account.isActive) { "Financial account is inactive: $accId" }
 
         val dateToUse = paymentDate?.takeIf { it.isNotBlank() }
             ?: SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
@@ -75,7 +80,7 @@ class SupplierPaymentRepository(
             supplierId = supplierId,
             amount = amount,
             paymentDate = dateToUse,
-            paymentMethodId = paymentMethodId,
+            paymentMethodId = methodId,
             financialAccountId = accId,
             referenceNumber = refNum,
             notes = notes,

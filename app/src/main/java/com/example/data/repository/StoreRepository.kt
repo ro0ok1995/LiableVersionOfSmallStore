@@ -24,6 +24,7 @@ import com.example.data.db.Purchase
 import com.example.data.db.PurchaseLine
 import com.example.data.db.SupplierPayment
 import com.example.data.db.PurchaseReturn
+import com.example.data.db.PurchaseReturnLine
 import com.example.data.db.ExpenseCategory
 import com.example.data.db.Expense
 import com.example.data.db.StockMovementEntity as PersistentStockMovement
@@ -44,6 +45,7 @@ import com.example.model.NotificationItem
 import com.example.model.OperationStatus
 import com.example.model.ProductItem
 import com.example.model.PurchaseLineRequest
+import com.example.model.PurchaseReturnLineRequest
 import com.example.model.PurchaseResult
 import com.example.model.RefundRequest
 import com.example.model.SaleReturnLineRequest
@@ -732,9 +734,16 @@ class StoreRepository private constructor(
         val payment = customerPaymentDao.getPaymentById(originalTransactionId)
         val adjustment = adjustmentDao.getAdjustmentById(originalTransactionId)
         val expense = expenseDao.getExpenseById(originalTransactionId)
+        val supplierPayment = supplierPaymentDao.getPaymentById(originalTransactionId)
+        val purchase = purchaseDao.getPurchaseById(originalTransactionId)
+        val purchaseReturn = purchaseReturnDao.getReturnById(originalTransactionId)
+        val saleReturn = saleReturnDao.getReturnById(originalTransactionId)
+        val refund = refundDao.getRefundById(originalTransactionId)
         val legacyTx = transactionDao.getTransactionById(originalTransactionId)
 
-        if (sale == null && payment == null && adjustment == null && expense == null && legacyTx == null) {
+        if (sale == null && payment == null && adjustment == null && expense == null &&
+            supplierPayment == null && purchase == null && purchaseReturn == null &&
+            saleReturn == null && refund == null && legacyTx == null) {
             throw IllegalArgumentException("Original transaction not found: $originalTransactionId")
         }
 
@@ -782,6 +791,43 @@ class StoreRepository private constructor(
             foundAnyEligible = true
         }
 
+        if (supplierPayment != null) {
+            if (supplierPayment.status == "REVERSED") throw IllegalStateException("Supplier payment $originalTransactionId is already reversed")
+            supplierPaymentDao.updatePayment(supplierPayment.copy(status = "REVERSED"))
+            customerIdToTouch = null
+            foundAnyEligible = true
+        }
+
+        if (purchase != null) {
+            if (purchase.status == "REVERSED") throw IllegalStateException("Purchase $originalTransactionId is already reversed")
+            val activeReturns = purchaseReturnDao.getReturnsByPurchaseIdSync(purchase.id).filter { it.status == "ACTIVE" }
+            require(activeReturns.isEmpty()) { "Cannot reverse purchase ${purchase.id} while it has active purchase returns" }
+            purchaseDao.updatePurchase(purchase.copy(status = "REVERSED"))
+            foundAnyEligible = true
+        }
+
+        if (purchaseReturn != null) {
+            if (purchaseReturn.status == "REVERSED") throw IllegalStateException("Purchase return $originalTransactionId is already reversed")
+            purchaseReturnDao.updateReturn(purchaseReturn.copy(status = "REVERSED"))
+            foundAnyEligible = true
+        }
+
+        if (saleReturn != null) {
+            if (saleReturn.status == "REVERSED") throw IllegalStateException("Sale return $originalTransactionId is already reversed")
+            val activeRefunds = refundDao.getRefundsByReturnId(saleReturn.id).filter { it.status == "ACTIVE" }
+            require(activeRefunds.isEmpty()) { "Reverse the linked refund first before reversing sale return ${saleReturn.id}" }
+            saleReturnDao.updateReturn(saleReturn.copy(status = "REVERSED"))
+            customerIdToTouch = saleReturn.customerId
+            foundAnyEligible = true
+        }
+
+        if (refund != null) {
+            if (refund.status == "REVERSED") throw IllegalStateException("Refund $originalTransactionId is already reversed")
+            refundDao.updateRefund(refund.copy(status = "REVERSED"))
+            customerIdToTouch = refund.customerId
+            foundAnyEligible = true
+        }
+
         if (legacyTx != null) {
             if (legacyTx.operationStatus == "REVERSED") {
                 throw IllegalStateException("Transaction $originalTransactionId is already reversed")
@@ -796,8 +842,11 @@ class StoreRepository private constructor(
                     foundAnyEligible = true
                 }
                 TransactionType.SALE_RETURN,
-                TransactionType.CUSTOMER_REFUND -> {
-                    throw UnsupportedOperationException("Phase 8 return/refund transactions cannot be reversed in Phase 7")
+                TransactionType.CUSTOMER_REFUND,
+                TransactionType.PURCHASE,
+                TransactionType.PURCHASE_RETURN,
+                TransactionType.SUPPLIER_PAYMENT -> {
+                    if (!foundAnyEligible) throw UnsupportedOperationException("Transaction type $txType cannot be reversed")
                 }
                 TransactionType.OPENING_BALANCE -> {
                     throw UnsupportedOperationException("Opening balances cannot be reversed as operational transactions")
@@ -951,17 +1000,29 @@ class StoreRepository private constructor(
 
     suspend fun recordPurchaseReturn(
         purchaseId: String,
+        returnLines: List<PurchaseReturnLineRequest>,
+        reason: String,
+        returnDate: String? = null
+    ): PurchaseReturn = purchaseReturnRepository.recordPurchaseReturn(
+        purchaseId = purchaseId,
+        returnLines = returnLines,
+        reason = reason,
+        returnDate = returnDate
+    )
+
+    @Deprecated("Use line-level purchase returns")
+    suspend fun recordPurchaseReturn(
+        purchaseId: String,
         amount: Double,
         reason: String,
         returnDate: String? = null
-    ): PurchaseReturn {
-        return purchaseReturnRepository.recordPurchaseReturn(
-            purchaseId = purchaseId,
-            amount = amount,
-            reason = reason,
-            returnDate = returnDate
-        )
-    }
+    ): PurchaseReturn = purchaseReturnRepository.recordPurchaseReturn(purchaseId, amount, reason, returnDate)
+
+    suspend fun getPurchaseReturnLines(returnId: String): List<PurchaseReturnLine> =
+        purchaseReturnRepository.getReturnLines(returnId)
+
+    suspend fun getRemainingPurchaseReturnQuantities(purchaseId: String): Map<String, Int> =
+        purchaseReturnRepository.getRemainingReturnableQuantities(purchaseId)
 
     suspend fun getSupplierBalance(supplierId: String): SupplierBalanceSummary {
         val purchases = purchaseDao.getPurchasesBySupplierIdSync(supplierId)

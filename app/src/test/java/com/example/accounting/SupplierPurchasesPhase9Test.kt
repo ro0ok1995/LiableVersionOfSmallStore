@@ -93,6 +93,16 @@ class SupplierPurchasesPhase9Test {
                 unit = "قطعة"
             )
         )
+        db.productDao().insertProduct(
+            ProductEntity(
+                id = "prod_002",
+                name = "زيت فاخر",
+                price = 120.0,
+                costPrice = 100.0,
+                category = "General",
+                unit = "قطعة"
+            )
+        )
     }
 
     @After
@@ -306,16 +316,48 @@ class SupplierPurchasesPhase9Test {
 
         repository.recordPurchaseReturn(
             purchaseId = res.purchase.id,
-            amount = 150.0,
+            amount = 140.0,
             reason = "بضاعة تالفة"
         )
 
         val balance = repository.getSupplierBalance(testSupplierId)
-        assertEquals(350.0, balance.balance, 0.0001)
-        assertEquals(150.0, balance.totalReturns, 0.0001)
+        assertEquals(360.0, balance.balance, 0.0001)
+        assertEquals(140.0, balance.totalReturns, 0.0001)
     }
 
-    // 13. Full PurchaseReturn is accepted
+    // 13. Multi-product returns use explicit lines and exact inventory value.
+    @Test
+    fun test13_multiProductReturn_usesExactSelectedLines() = runBlocking {
+        val purchase = repository.recordPurchase(
+            supplierId = testSupplierId,
+            lines = listOf(
+                PurchaseLineRequest(testProductId, "زيت زيتون 1 لتر", 10, 20.0),
+                PurchaseLineRequest("prod_002", "زيت فاخر", 10, 100.0)
+            ),
+            paidAmount = 0.0
+        )
+        val purchaseLines = repository.getPurchaseLines(purchase.purchase.id)
+        val first = purchaseLines.first { it.productId == testProductId }
+        val second = purchaseLines.first { it.productId == "prod_002" }
+
+        val ret = repository.recordPurchaseReturn(
+            purchaseId = purchase.purchase.id,
+            returnLines = listOf(
+                com.example.model.PurchaseReturnLineRequest(first.id, 2),
+                com.example.model.PurchaseReturnLineRequest(second.id, 1)
+            ),
+            reason = "مرتجع مختلط"
+        )
+
+        assertEquals(140.0, ret.amount, 0.0001)
+        assertEquals(8, repository.getProductStock(testProductId).quantityOnHand)
+        assertEquals(9, repository.getProductStock("prod_002").quantityOnHand)
+        val returnLines = repository.getPurchaseReturnLines(ret.id)
+        assertEquals(2, returnLines.size)
+        assertEquals(140.0, returnLines.sumOf { it.subtotal }, 0.0001)
+    }
+
+    // 14. Full PurchaseReturn is accepted
     @Test
     fun test13_fullPurchaseReturn_isAccepted() = runBlocking {
         val lines = listOf(PurchaseLineRequest(testProductId, "زيت زيتون 1 لتر", 25, 20.0))
@@ -351,14 +393,14 @@ class SupplierPurchasesPhase9Test {
             // Expected
         }
 
-        // Return 150 (valid)
+        // Return 140 (7 whole units × 20)
         repository.recordPurchaseReturn(
             purchaseId = res.purchase.id,
             amount = 150.0,
             reason = "مرتجع جزئي أول"
         )
 
-        // Attempt 2: Return 100 when only 50 is remaining (150 + 100 = 250 > 200)
+        // Attempt 2: Return 100 when only 60 is remaining (140 + 100 = 240 > 200)
         try {
             repository.recordPurchaseReturn(
                 purchaseId = res.purchase.id,

@@ -75,12 +75,14 @@ import com.example.accounting.SupplierLedgerEntry
 import com.example.accounting.SupplierLedgerEntryType
 import com.example.data.db.Purchase
 import com.example.data.db.PurchaseReturn
+import com.example.data.db.PurchaseLine
 import com.example.data.db.Supplier
 import com.example.data.db.SupplierPayment
 import com.example.model.AppCurrency
 import com.example.model.LanguageMode
 import com.example.model.ProductItem
 import com.example.model.PurchaseLineRequest
+import com.example.model.PurchaseReturnLineRequest
 import com.example.model.PurchaseResult
 import com.example.ui.theme.GeoOutline
 import com.example.ui.theme.GeoOutlineVariant
@@ -106,7 +108,8 @@ fun SupplierPurchasesSection(
     onRecordSupplierPayment: (supplierId: String, amount: Double, date: String, financialAccountId: String?, notes: String?, onComplete: (Result<SupplierPayment>) -> Unit) -> Unit,
     onGetSupplierBalance: suspend (supplierId: String) -> SupplierBalanceSummary,
     onGetSupplierStatement: suspend (supplierId: String) -> List<SupplierLedgerEntry>,
-    onRecordPurchaseReturn: ((purchaseId: String, amount: Double, reason: String, date: String, onComplete: (Result<PurchaseReturn>) -> Unit) -> Unit)? = null,
+    onGetPurchaseLines: suspend (purchaseId: String) -> List<PurchaseLine>,
+    onRecordPurchaseReturn: ((purchaseId: String, returnLines: List<PurchaseReturnLineRequest>, reason: String, date: String, onComplete: (Result<PurchaseReturn>) -> Unit) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
@@ -122,6 +125,8 @@ fun SupplierPurchasesSection(
     var showRecordPaymentDialog by remember { mutableStateOf(false) }
     var showRecordReturnDialog by remember { mutableStateOf(false) }
     var purchaseToReturn by remember { mutableStateOf<Purchase?>(null) }
+    var purchaseReturnLines by remember { mutableStateOf<List<PurchaseLine>>(emptyList()) }
+    var returnQuantities by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var showStatementDialog by remember { mutableStateOf(false) }
     var statementEntries by remember { mutableStateOf<List<SupplierLedgerEntry>>(emptyList()) }
 
@@ -421,7 +426,13 @@ fun SupplierPurchasesSection(
                                         OutlinedButton(
                                             onClick = {
                                                 purchaseToReturn = pur
+                                                purchaseReturnLines = emptyList()
+                                                returnQuantities = emptyMap()
                                                 showRecordReturnDialog = true
+                                                coroutineScope.launch {
+                                                    purchaseReturnLines = onGetPurchaseLines(pur.id)
+                                                    returnQuantities = purchaseReturnLines.associate { it.id to 0 }
+                                                }
                                             },
                                             modifier = Modifier.testTag("btn_return_purchase_${pur.id}"),
                                             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp)
@@ -944,41 +955,68 @@ fun SupplierPurchasesSection(
     // 5. RECORD PURCHASE RETURN DIALOG
     if (showRecordReturnDialog && purchaseToReturn != null) {
         val pur = purchaseToReturn!!
-        var returnAmountText by remember { mutableStateOf(pur.totalAmount.toString()) }
         var returnReason by remember { mutableStateOf("") }
         var returnError by remember { mutableStateOf<String?>(null) }
+        val totalSelected = purchaseReturnLines.sumOf { line ->
+            (returnQuantities[line.id] ?: 0) * line.unitCost
+        }
 
         AlertDialog(
             onDismissRequest = { showRecordReturnDialog = false; purchaseToReturn = null },
-            title = {
-                Text(text = if (isArabic) "تسجيل مرتجع مشتريات" else "Record Purchase Return")
-            },
+            title = { Text(if (isArabic) "تحديد مرتجع المشتريات" else "Select Purchase Return") },
             text = {
                 Column(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 500.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     if (returnError != null) {
-                        Text(text = returnError!!, color = StatusRed, style = MaterialTheme.typography.bodySmall)
+                        Text(returnError!!, color = StatusRed, style = MaterialTheme.typography.bodySmall)
                     }
-
                     Text(
-                        text = "${if (isArabic) "فاتورة" else "Invoice"}: ${pur.invoiceNumber} (${String.format(Locale.US, "%.2f", pur.totalAmount)} $currency)",
+                        text = "${if (isArabic) "فاتورة" else "Invoice"}: ${pur.invoiceNumber}",
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
                     )
-
-                    OutlinedTextField(
-                        value = returnAmountText,
-                        onValueChange = { returnAmountText = it; returnError = null },
-                        label = { Text(if (isArabic) "مبلغ المرتجع *" else "Return Amount *") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        modifier = Modifier.fillMaxWidth().testTag("input_purchase_return_amount")
-                    )
-
+                    if (purchaseReturnLines.isEmpty()) {
+                        Text(if (isArabic) "جاري تحميل بنود الفاتورة..." else "Loading purchase lines...")
+                    } else {
+                        LazyColumn(modifier = Modifier.heightIn(max = 280.dp)) {
+                            items(purchaseReturnLines, key = { it.id }) { line ->
+                                val selected = returnQuantities[line.id] ?: 0
+                                val remaining = line.quantity
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(line.productNameSnapshot, fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            "${if (isArabic) "المتوفر للمرتجع" else "Returnable"}: $remaining × ${String.format(Locale.US, "%.2f", line.unitCost)} $currency",
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                    }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        IconButton(onClick = {
+                                            returnQuantities = returnQuantities + (line.id to (selected - 1).coerceAtLeast(0))
+                                            returnError = null
+                                        }) { Text("−") }
+                                        Text(selected.toString(), modifier = Modifier.width(32.dp), textAlign = TextAlign.Center)
+                                        IconButton(onClick = {
+                                            returnQuantities = returnQuantities + (line.id to (selected + 1).coerceAtMost(remaining))
+                                            returnError = null
+                                        }) { Text("+") }
+                                    }
+                                }
+                            }
+                        }
+                        Text(
+                            text = "${if (isArabic) "إجمالي المرتجع" else "Return total"}: ${String.format(Locale.US, "%.2f", totalSelected)} $currency",
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                     OutlinedTextField(
                         value = returnReason,
                         onValueChange = { returnReason = it; returnError = null },
-                        label = { Text(if (isArabic) "سبب المرتجع (إجباري) *" else "Reason (Required) *") },
+                        label = { Text(if (isArabic) "سبب المرتجع *" else "Reason *") },
                         modifier = Modifier.fillMaxWidth().testTag("input_purchase_return_reason")
                     )
                 }
@@ -986,9 +1024,10 @@ fun SupplierPurchasesSection(
             confirmButton = {
                 Button(
                     onClick = {
-                        val amount = returnAmountText.toDoubleOrNull() ?: 0.0
-                        if (amount <= 0.0) {
-                            returnError = if (isArabic) "مبلغ المرتجع يجب أن يكون أكبر من صفر" else "Amount must be > 0"
+                        val selectedLines = returnQuantities.filterValues { it > 0 }
+                            .map { (id, quantity) -> PurchaseReturnLineRequest(id, quantity) }
+                        if (selectedLines.isEmpty()) {
+                            returnError = if (isArabic) "حدد منتجًا واحدًا على الأقل وكمية المرتجع" else "Select at least one product and quantity"
                             return@Button
                         }
                         if (returnReason.trim().isBlank()) {
@@ -996,25 +1035,20 @@ fun SupplierPurchasesSection(
                             return@Button
                         }
                         val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-                        onRecordPurchaseReturn?.invoke(
-                            pur.id,
-                            amount,
-                            returnReason.trim(),
-                            today
-                        ) { result ->
+                        onRecordPurchaseReturn?.invoke(pur.id, selectedLines, returnReason.trim(), today) { result ->
                             if (result.isSuccess) {
                                 refreshBalance()
                                 showRecordReturnDialog = false
                                 purchaseToReturn = null
+                                purchaseReturnLines = emptyList()
+                                returnQuantities = emptyMap()
                             } else {
                                 returnError = result.exceptionOrNull()?.message ?: "Error recording return"
                             }
                         }
                     },
                     modifier = Modifier.testTag("btn_confirm_purchase_return")
-                ) {
-                    Text(if (isArabic) "تأكيد المرتجع" else "Confirm Return")
-                }
+                ) { Text(if (isArabic) "تأكيد المرتجع" else "Confirm Return") }
             },
             dismissButton = {
                 TextButton(onClick = { showRecordReturnDialog = false; purchaseToReturn = null }) {

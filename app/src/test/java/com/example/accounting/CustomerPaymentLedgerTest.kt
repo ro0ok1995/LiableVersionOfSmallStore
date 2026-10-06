@@ -9,6 +9,7 @@ import com.example.data.db.CustomerPayment
 import com.example.data.db.FinancialAccount
 import com.example.data.db.PaymentMethod
 import com.example.data.db.Sale
+import com.example.data.db.SaleLine
 import com.example.data.db.SmallStoreDatabase
 import com.example.data.repository.StoreRepository
 import com.example.model.OperationStatus
@@ -132,7 +133,7 @@ class CustomerPaymentLedgerTest {
         assertEquals("Total payments must be 30", 30.0, pureSummary.totalPayments, 0.0001)
 
         // Repository & Database check
-        repository.createSale(sale, emptyList())
+        repository.createSale(sale, listOf(SaleLine("${sale.id}_line", sale.id, null, "Test item", 1, sale.totalAmount, 0.0, sale.totalAmount)))
         val recordedPayment = repository.recordCustomerPayment(
             customerId = testCustomerId,
             amount = 30.0,
@@ -189,7 +190,7 @@ class CustomerPaymentLedgerTest {
         assertEquals("Total payments must be 100", 100.0, pureSummary.totalPayments, 0.0001)
 
         // Repository & Database check
-        repository.createSale(sale, emptyList())
+        repository.createSale(sale, listOf(SaleLine("${sale.id}_line", sale.id, null, "Test item", 1, sale.totalAmount, 0.0, sale.totalAmount)))
         val recordedPayment = repository.recordCustomerPayment(
             customerId = testCustomerId,
             amount = 100.0,
@@ -225,7 +226,7 @@ class CustomerPaymentLedgerTest {
             transactionDate = "2026-09-23",
             status = OperationStatus.ACTIVE.name
         )
-        repository.createSale(sale, emptyList())
+        repository.createSale(sale, listOf(SaleLine("${sale.id}_line", sale.id, null, "Test item", 1, sale.totalAmount, 0.0, sale.totalAmount)))
 
         // Step 2: Record a customer payment of 30
         repository.recordCustomerPayment(

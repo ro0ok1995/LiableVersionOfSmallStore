@@ -149,14 +149,23 @@ class SaleReturnRepository(
                 "Refund amount (${refundRequest.amount}) exceeds amount eligible for cash/bank refund ($maxRefundEligible)"
             }
 
+            val effectivePaymentMethodId = refundRequest.paymentMethodId ?: "pm_cash"
+            val paymentMethod = database.paymentMethodDao().getPaymentMethodById(effectivePaymentMethodId)
+                ?: throw IllegalArgumentException("Payment method not found: $effectivePaymentMethodId")
+            require(paymentMethod.isActive) { "Payment method is inactive: $effectivePaymentMethodId" }
+            val effectiveFinancialAccountId = refundRequest.financialAccountId ?: "acc_cash"
+            val financialAccount = database.financialAccountDao().getAccountById(effectiveFinancialAccountId)
+                ?: throw IllegalArgumentException("Financial account not found: $effectiveFinancialAccountId")
+            require(financialAccount.isActive) { "Financial account is inactive: $effectiveFinancialAccountId" }
+
             constructedRefund = Refund(
                 id = UUID.randomUUID().toString(),
                 saleReturnId = returnId,
                 saleId = sale.id,
                 customerId = sale.customerId,
                 amount = refundRequest.amount,
-                paymentMethodId = refundRequest.paymentMethodId,
-                financialAccountId = refundRequest.financialAccountId,
+                paymentMethodId = effectivePaymentMethodId,
+                financialAccountId = effectiveFinancialAccountId,
                 refundDate = returnDate,
                 reason = refundRequest.reason?.trim()?.ifBlank { null } ?: "استرداد نقدي لمرتجع ${sale.invoiceNumber}",
                 status = "ACTIVE"

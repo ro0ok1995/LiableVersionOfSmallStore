@@ -146,11 +146,12 @@ fun PurchasesScreen(
     onAddSupplier: (name: String, phone: String, address: String?, notes: String?, onComplete: (Result<Supplier>) -> Unit) -> Unit = { _, _, _, _, _ -> },
     onRecordPurchase: (supplierId: String, lines: List<PurchaseLineRequest>, paidAmount: Double, financialAccountId: String?, notes: String?, date: String, onComplete: (Result<PurchaseResult>) -> Unit) -> Unit = { _, _, _, _, _, _, _ -> },
     onRecordSupplierPayment: (supplierId: String, amount: Double, date: String, financialAccountId: String?, notes: String?, onComplete: (Result<SupplierPayment>) -> Unit) -> Unit = { _, _, _, _, _, _ -> },
-    onRecordPurchaseReturn: ((purchaseId: String, amount: Double, reason: String, date: String, onComplete: (Result<PurchaseReturn>) -> Unit) -> Unit)? = null,
+    onRecordPurchaseReturn: ((purchaseId: String, returnLines: List<com.example.model.PurchaseReturnLineRequest>, reason: String, date: String, onComplete: (Result<PurchaseReturn>) -> Unit) -> Unit)? = null,
     onRecordExpense: (categoryId: String, amount: Double, financialAccountId: String, paymentMethodId: String?, date: String?, description: String, onComplete: (Result<Expense>) -> Unit) -> Unit = { _, _, _, _, _, _, _ -> },
     onAddExpenseCategory: (name: String, description: String?, onComplete: (Result<ExpenseCategory>) -> Unit) -> Unit = { _, _, _ -> },
     onGetSupplierBalance: (suspend (supplierId: String) -> SupplierBalanceSummary)? = null,
     onGetSupplierStatement: (suspend (supplierId: String) -> List<SupplierLedgerEntry>)? = null,
+    onGetPurchaseLines: suspend (purchaseId: String) -> List<com.example.data.db.PurchaseLine> = { emptyList() },
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
@@ -163,7 +164,7 @@ fun PurchasesScreen(
 
     val totalCartItems = cart.sumOf { it.quantity }
     val totalCartAmount = cart.sumOf { it.product.price * it.quantity }
-    val isCheckoutEnabled = customer != null && cart.isNotEmpty()
+    val isCheckoutEnabled = cart.isNotEmpty() && (customer == null || customer.isArchived.not())
 
     Scaffold(
         modifier = modifier
@@ -476,6 +477,7 @@ fun PurchasesScreen(
                 onRecordSupplierPayment = onRecordSupplierPayment,
                 onGetSupplierBalance = onGetSupplierBalance ?: { SupplierBalanceSummary(it) },
                 onGetSupplierStatement = onGetSupplierStatement ?: { emptyList() },
+                onGetPurchaseLines = onGetPurchaseLines,
                 onRecordPurchaseReturn = onRecordPurchaseReturn,
                 modifier = Modifier
                     .fillMaxSize()

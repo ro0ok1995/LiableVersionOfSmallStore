@@ -17,6 +17,7 @@ import com.example.data.db.Purchase
 import com.example.data.db.PurchaseLine
 import com.example.data.db.SupplierPayment
 import com.example.data.db.PurchaseReturn
+import com.example.model.PurchaseReturnLineRequest
 import com.example.data.db.ExpenseCategory
 import com.example.data.db.Expense
 import com.example.data.db.FinancialAccount
@@ -673,18 +674,22 @@ class MainViewModel @JvmOverloads constructor(
 
     fun recordPurchaseReturn(
         purchaseId: String,
-        amount: Double,
+        returnLines: List<PurchaseReturnLineRequest>,
         reason: String,
         returnDate: String = getCurrentDateString(),
         onComplete: (Result<PurchaseReturn>) -> Unit = {}
     ) {
         supplierPurchaseViewModel.recordPurchaseReturn(
             purchaseId = purchaseId,
-            amount = amount,
+            returnLines = returnLines,
             reason = reason,
             returnDate = returnDate,
             onComplete = onComplete
         )
+    }
+
+    fun getPurchaseReturnableQuantities(purchaseId: String, onResult: (Map<String, Int>) -> Unit) {
+        supplierPurchaseViewModel.getPurchaseReturnableQuantities(purchaseId, onResult)
     }
 
     suspend fun getSupplierBalance(supplierId: String): SupplierBalanceSummary {
@@ -1100,30 +1105,47 @@ class MainViewModel @JvmOverloads constructor(
     }
 
     fun addToCart(product: ProductItem) {
-        _uiState.update { state ->
-            val existing = state.cart.find { it.product.id == product.id }
-            val newCart = if (existing != null) {
-                state.cart.map {
-                    if (it.product.id == product.id) it.copy(quantity = it.quantity + 1) else it
+        viewModelScope.launch {
+            val stock = repository.getProductStock(product.id)
+            val currentQty = _uiState.value.cart.find { it.product.id == product.id }?.quantity ?: 0
+            if (stock.quantityOnHand <= currentQty) return@launch
+            _uiState.update { state ->
+                val existing = state.cart.find { it.product.id == product.id }
+                val newCart = if (existing != null) {
+                    state.cart.map {
+                        if (it.product.id == product.id) it.copy(quantity = it.quantity + 1) else it
+                    }
+                } else {
+                    state.cart + CartItem(product = product, quantity = 1)
                 }
-            } else {
-                state.cart + CartItem(product = product, quantity = 1)
+                state.copy(cart = newCart)
             }
-            state.copy(cart = newCart)
         }
     }
 
     fun updateCartQuantity(productId: String, delta: Int) {
-        _uiState.update { state ->
-            val newCart = state.cart.mapNotNull { item ->
-                if (item.product.id == productId) {
-                    val newQty = item.quantity + delta
-                    if (newQty > 0) item.copy(quantity = newQty) else null
-                } else {
-                    item
-                }
+        if (delta == 0) return
+        if (delta < 0) {
+            _uiState.update { state ->
+                state.copy(cart = state.cart.mapNotNull { item ->
+                    if (item.product.id == productId) {
+                        val newQty = item.quantity + delta
+                        if (newQty > 0) item.copy(quantity = newQty) else null
+                    } else item
+                })
             }
-            state.copy(cart = newCart)
+            return
+        }
+        viewModelScope.launch {
+            val stock = repository.getProductStock(productId)
+            _uiState.update { state ->
+                state.copy(cart = state.cart.mapNotNull { item ->
+                    if (item.product.id == productId) {
+                        val newQty = (item.quantity + delta).coerceAtMost(stock.quantityOnHand)
+                        if (newQty > 0) item.copy(quantity = newQty) else null
+                    } else item
+                })
+            }
         }
     }
 
@@ -1151,8 +1173,12 @@ class MainViewModel @JvmOverloads constructor(
 
     fun completeSettlement(cashAmount: Double, debtAmount: Double, notes: String, financialAccountId: String? = null) {
         val state = _uiState.value
-        val customer = state.purchasesCustomer ?: state.customers.firstOrNull() ?: return
-        if (customer.isArchived || (state.customers.isNotEmpty() && state.customers.none { it.id == customer.id })) return
+        val customer = state.purchasesCustomer
+        if (customer?.isArchived == true) return
+        if (customer != null && state.customers.isNotEmpty() && state.customers.none { it.id == customer.id }) return
+        if (state.cart.isEmpty()) return
+        if (!cashAmount.isFinite() || !debtAmount.isFinite() || cashAmount < 0.0 || debtAmount < 0.0) return
+        if (debtAmount > 0.001 && customer == null) return
         val total = if (Math.abs(state.settlementTotal - (cashAmount + debtAmount)) < 0.001 && state.settlementTotal > 0.0) {
             state.settlementTotal
         } else {
@@ -1178,14 +1204,14 @@ class MainViewModel @JvmOverloads constructor(
 
         val cartSnapshot = state.cart
         val todayDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-        val updatedCustomer = customer.copy(
+        val updatedCustomer = customer?.copy(
             hasRecentActivity = true,
             lastTransactionDate = todayDate
         )
 
         val notif = NotificationItem(
             id = "notif_${System.currentTimeMillis()}",
-            customerName = customer.customerName,
+            customerName = customer?.customerName ?: "عميل نقدي",
             transactionType = legacyFields.activityType,
             amount = total,
             timestamp = "الآن",
@@ -1194,21 +1220,12 @@ class MainViewModel @JvmOverloads constructor(
             transactionId = txId
         )
 
-        _uiState.update {
-            it.copy(
-                cart = emptyList(),
-                showSettlementSheet = false,
-                currentDestination = NavDestination.HOME,
-                activeBottomNav = NavDestination.HOME
-            )
-        }
-
         viewModelScope.launch {
             val invoiceNumber = repository.salesRepository.getNextInvoiceNumber()
             val sale = Sale(
                 id = txId,
                 invoiceNumber = invoiceNumber,
-                customerId = customer.id,
+                customerId = customer?.id,
                 saleType = saleType.name,
                 totalAmount = total,
                 paidAmount = cashAmount,
@@ -1237,11 +1254,19 @@ class MainViewModel @JvmOverloads constructor(
             repository.salesRepository.createSale(
                 sale = sale,
                 lines = saleLines,
-                customerNameSnapshot = customer.customerName,
+                customerNameSnapshot = customer?.customerName ?: "عميل نقدي",
                 notes = notes
             )
-            repository.updateCustomer(updatedCustomer)
+            if (updatedCustomer != null) repository.updateCustomer(updatedCustomer)
             repository.addNotification(notif)
+            _uiState.update {
+                it.copy(
+                    cart = emptyList(),
+                    showSettlementSheet = false,
+                    currentDestination = NavDestination.HOME,
+                    activeBottomNav = NavDestination.HOME
+                )
+            }
         }
     }
 

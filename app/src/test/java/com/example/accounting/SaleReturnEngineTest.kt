@@ -11,6 +11,7 @@ import com.example.data.db.ProductEntity
 import com.example.data.db.Sale
 import com.example.data.db.SaleLine
 import com.example.data.db.SmallStoreDatabase
+import com.example.data.db.StockMovementEntity
 import com.example.data.db.toTransactionItem
 import com.example.data.repository.StoreRepository
 import com.example.model.OperationStatus
@@ -160,6 +161,21 @@ class SaleReturnEngineTest {
             transactionDate = date,
             status = "ACTIVE"
         )
+        // Strict inventory validation now requires enough stock before a sale.
+        lines.filter { !it.productId.isNullOrBlank() }.forEach { line ->
+            db.stockMovementDao().insertStockMovement(
+                StockMovementEntity(
+                    id = "seed_${line.id}",
+                    productId = line.productId!!,
+                    productNameSnapshot = line.productNameSnapshot,
+                    movementType = "PURCHASE_IN",
+                    quantityIn = line.quantity,
+                    unitCost = line.costPriceAtSale,
+                    referenceType = "TEST_SEED",
+                    referenceId = sale.id
+                )
+            )
+        }
         return repository.createSale(sale, lines)
     }
 

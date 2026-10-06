@@ -17,3 +17,8 @@ data class PurchaseResult(
     val inventoryValueIncrease: Double,
     val financialAccountDeduction: Double
 )
+
+data class PurchaseReturnLineRequest(
+    val purchaseLineId: String,
+    val quantity: Int
+)

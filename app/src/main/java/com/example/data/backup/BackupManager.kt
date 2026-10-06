@@ -15,6 +15,7 @@ import com.example.data.db.PaymentMethod
 import com.example.data.db.Purchase
 import com.example.data.db.PurchaseLine
 import com.example.data.db.PurchaseReturn
+import com.example.data.db.PurchaseReturnLine
 import com.example.data.db.Refund
 import com.example.data.db.Reversal
 import com.example.data.db.Sale
@@ -69,6 +70,7 @@ data class BackupPayload(
     val purchaseLines: List<PurchaseLine> = emptyList(),
     val supplierPayments: List<SupplierPayment> = emptyList(),
     val purchaseReturns: List<PurchaseReturn> = emptyList(),
+    val purchaseReturnLines: List<PurchaseReturnLine> = emptyList(),
     val expenseCategories: List<ExpenseCategory> = emptyList(),
     val expenses: List<Expense> = emptyList(),
     val stockMovements: List<StockMovementEntity> = emptyList()
@@ -251,6 +253,7 @@ object BackupManager {
             put("purchaseLines", encodeList(payload.purchaseLines, PurchaseLine::class.java))
             put("supplierPayments", encodeList(payload.supplierPayments, SupplierPayment::class.java))
             put("purchaseReturns", encodeList(payload.purchaseReturns, PurchaseReturn::class.java))
+            put("purchaseReturnLines", encodeList(payload.purchaseReturnLines, PurchaseReturnLine::class.java))
             put("expenseCategories", encodeList(payload.expenseCategories, ExpenseCategory::class.java))
             put("expenses", encodeList(payload.expenses, Expense::class.java))
             put("stockMovements", encodeList(payload.stockMovements, StockMovementEntity::class.java))
@@ -432,6 +435,7 @@ object BackupManager {
         val modernPurchaseLines = modern?.let { decodeList(it, "purchaseLines", PurchaseLine::class.java) } ?: emptyList()
         val modernSupplierPayments = modern?.let { decodeList(it, "supplierPayments", SupplierPayment::class.java) } ?: emptyList()
         val modernPurchaseReturns = modern?.let { decodeList(it, "purchaseReturns", PurchaseReturn::class.java) } ?: emptyList()
+        val modernPurchaseReturnLines = modern?.let { decodeList(it, "purchaseReturnLines", PurchaseReturnLine::class.java) } ?: emptyList()
         val modernExpenseCategories = modern?.let { decodeList(it, "expenseCategories", ExpenseCategory::class.java) } ?: emptyList()
         val modernExpenses = modern?.let { decodeList(it, "expenses", Expense::class.java) } ?: emptyList()
         val modernStockMovements = modern?.let { decodeList(it, "stockMovements", StockMovementEntity::class.java) } ?: emptyList()
@@ -463,6 +467,7 @@ object BackupManager {
             purchaseLines = modernPurchaseLines,
             supplierPayments = modernSupplierPayments,
             purchaseReturns = modernPurchaseReturns,
+            purchaseReturnLines = modernPurchaseReturnLines,
             expenseCategories = modernExpenseCategories,
             expenses = modernExpenses,
             stockMovements = modernStockMovements

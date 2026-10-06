@@ -12,6 +12,7 @@ import com.example.data.db.Supplier
 import com.example.data.db.SupplierPayment
 import com.example.data.repository.StoreRepository
 import com.example.model.PurchaseLineRequest
+import com.example.model.PurchaseReturnLineRequest
 import com.example.model.PurchaseResult
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -142,7 +143,7 @@ class SupplierPurchaseViewModel @JvmOverloads constructor(
 
     fun recordPurchaseReturn(
         purchaseId: String,
-        amount: Double,
+        returnLines: List<PurchaseReturnLineRequest>,
         reason: String,
         returnDate: String = getCurrentDateString(),
         onComplete: (Result<PurchaseReturn>) -> Unit = {}
@@ -151,7 +152,7 @@ class SupplierPurchaseViewModel @JvmOverloads constructor(
             try {
                 val result = repository.recordPurchaseReturn(
                     purchaseId = purchaseId,
-                    amount = amount,
+                    returnLines = returnLines,
                     reason = reason,
                     returnDate = returnDate
                 )
@@ -160,6 +161,10 @@ class SupplierPurchaseViewModel @JvmOverloads constructor(
                 onComplete(Result.failure(e))
             }
         }
+    }
+
+    fun getPurchaseReturnableQuantities(purchaseId: String, onResult: (Map<String, Int>) -> Unit) {
+        viewModelScope.launch { onResult(repository.getRemainingPurchaseReturnQuantities(purchaseId)) }
     }
 
     suspend fun getSupplierBalance(supplierId: String): SupplierBalanceSummary {

@@ -32,11 +32,12 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         PurchaseLine::class,
         SupplierPayment::class,
         PurchaseReturn::class,
+        PurchaseReturnLine::class,
         ExpenseCategory::class,
         Expense::class,
         StockMovementEntity::class
     ],
-    version = 18,
+    version = 19,
     exportSchema = false
 )
 abstract class SmallStoreDatabase : RoomDatabase() {
@@ -62,6 +63,7 @@ abstract class SmallStoreDatabase : RoomDatabase() {
     abstract fun purchaseLineDao(): PurchaseLineDao
     abstract fun supplierPaymentDao(): SupplierPaymentDao
     abstract fun purchaseReturnDao(): PurchaseReturnDao
+    abstract fun purchaseReturnLineDao(): PurchaseReturnLineDao
     abstract fun expenseCategoryDao(): ExpenseCategoryDao
     abstract fun expenseDao(): ExpenseDao
     abstract fun stockMovementDao(): StockMovementDao
@@ -100,6 +102,29 @@ abstract class SmallStoreDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS purchase_return_lines (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        purchaseReturnId TEXT NOT NULL,
+                        purchaseLineId TEXT NOT NULL,
+                        productId TEXT,
+                        productNameSnapshot TEXT NOT NULL,
+                        quantity INTEGER NOT NULL,
+                        unitCost REAL NOT NULL,
+                        subtotal REAL NOT NULL,
+                        createdAt INTEGER NOT NULL,
+                        FOREIGN KEY(purchaseReturnId) REFERENCES purchase_returns(id) ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(purchaseLineId) REFERENCES purchase_lines(id) ON UPDATE NO ACTION ON DELETE RESTRICT
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_purchase_return_lines_purchaseReturnId ON purchase_return_lines(purchaseReturnId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_purchase_return_lines_purchaseLineId ON purchase_return_lines(purchaseLineId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_purchase_return_lines_productId ON purchase_return_lines(productId)")
+            }
+        }
+
         fun getDatabase(context: Context): SmallStoreDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -125,7 +150,8 @@ abstract class SmallStoreDatabase : RoomDatabase() {
                         MIGRATION_14_15,
                         MIGRATION_15_16,
                         MIGRATION_16_17,
-                        MIGRATION_17_18
+                        MIGRATION_17_18,
+                        MIGRATION_18_19
                     )
                     .build()
                 INSTANCE = instance

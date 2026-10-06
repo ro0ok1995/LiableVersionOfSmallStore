@@ -38,6 +38,7 @@ class StoreBackupRepository(
     private val purchaseLineDao = database.purchaseLineDao()
     private val supplierPaymentDao = database.supplierPaymentDao()
     private val purchaseReturnDao = database.purchaseReturnDao()
+    private val purchaseReturnLineDao = database.purchaseReturnLineDao()
     private val expenseCategoryDao = database.expenseCategoryDao()
     private val expenseDao = database.expenseDao()
     private val stockMovementDao = database.stockMovementDao()
@@ -85,6 +86,7 @@ class StoreBackupRepository(
             purchaseLines = purchaseLineDao.getAllLinesSync(),
             supplierPayments = supplierPaymentDao.getAllPaymentsSync(),
             purchaseReturns = purchaseReturnDao.getAllReturnsSync(),
+            purchaseReturnLines = purchaseReturnLineDao.getAllLinesSync(),
             expenseCategories = expenseCategoryDao.getAllCategoriesSync(),
             expenses = expenseDao.getAllExpensesSync(),
             stockMovements = stockMovementDao.getAllMovementsSync()
@@ -117,6 +119,7 @@ class StoreBackupRepository(
                 purchases = payload.purchases,
                 supplierPayments = payload.supplierPayments,
                 purchaseReturns = payload.purchaseReturns,
+                purchaseReturnLines = payload.purchaseReturnLines,
                 expenses = payload.expenses,
                 stockMovements = payload.stockMovements,
                 products = payload.products.map { it.toEntity() }
@@ -128,6 +131,7 @@ class StoreBackupRepository(
             stockMovementDao.deleteAllStockMovements()
             expenseDao.deleteAllExpenses()
             expenseCategoryDao.deleteAllCategories()
+            purchaseReturnLineDao.deleteAllLines()
             purchaseReturnDao.deleteAllReturns()
             supplierPaymentDao.deleteAllPayments()
             purchaseLineDao.deleteAllLines()
@@ -173,6 +177,7 @@ class StoreBackupRepository(
                 if (payload.purchaseLines.isNotEmpty()) purchaseLineDao.insertLines(payload.purchaseLines)
                 if (payload.supplierPayments.isNotEmpty()) supplierPaymentDao.insertPayments(payload.supplierPayments)
                 if (payload.purchaseReturns.isNotEmpty()) purchaseReturnDao.insertReturns(payload.purchaseReturns)
+                if (payload.purchaseReturnLines.isNotEmpty()) purchaseReturnLineDao.insertLines(payload.purchaseReturnLines)
                 payload.expenses.forEach { expenseDao.insertExpense(it) }
                 if (payload.stockMovements.isNotEmpty()) stockMovementDao.insertMovements(payload.stockMovements)
                 if (payload.customerIdentityConflicts.isNotEmpty()) conflictDao.insertConflicts(payload.customerIdentityConflicts)
@@ -213,6 +218,7 @@ class StoreBackupRepository(
                 purchases = purchaseDao.getAllPurchasesSync(),
                 supplierPayments = supplierPaymentDao.getAllPaymentsSync(),
                 purchaseReturns = purchaseReturnDao.getAllReturnsSync(),
+            purchaseReturnLines = purchaseReturnLineDao.getAllLinesSync(),
                 expenses = expenseDao.getAllExpensesSync(),
                 stockMovements = stockMovementDao.getAllMovementsSync(),
                 products = productDao.getAllProductsSync()
@@ -263,6 +269,7 @@ class StoreBackupRepository(
         purchases: List<com.example.data.db.Purchase>,
         supplierPayments: List<com.example.data.db.SupplierPayment>,
         purchaseReturns: List<com.example.data.db.PurchaseReturn>,
+        purchaseReturnLines: List<com.example.data.db.PurchaseReturnLine>,
         expenses: List<com.example.data.db.Expense>,
         stockMovements: List<com.example.data.db.StockMovementEntity>,
         products: List<com.example.data.db.ProductEntity>

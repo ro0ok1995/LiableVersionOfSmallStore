@@ -2,7 +2,9 @@ package com.example.data.repository
 
 import androidx.room.withTransaction
 import com.example.accounting.InventoryMovementType
+import com.example.accounting.CentralAccountingEngine
 import com.example.data.db.CustomerDao
+import com.example.data.db.FinancialAccountDao
 import com.example.data.db.Sale
 import com.example.data.db.SaleDao
 import com.example.data.db.SaleLine
@@ -21,6 +23,7 @@ class SalesRepository(
     private val database: SmallStoreDatabase,
     private val saleDao: SaleDao = database.saleDao(),
     private val customerDao: CustomerDao = database.customerDao(),
+    private val financialAccountDao: FinancialAccountDao = database.financialAccountDao(),
     private val transactionDao: TransactionDao = database.transactionDao(),
     private val transactionItemLineDao: TransactionItemLineDao = database.transactionItemLineDao(),
     private val stockMovementDao: StockMovementDao = database.stockMovementDao()
@@ -57,9 +60,47 @@ class SalesRepository(
         customerNameSnapshot: String? = null,
         notes: String? = null
     ): Sale = database.withTransaction {
-        // Enforce accounting invariant at repository boundary
+        // Enforce accounting and operation invariants at the repository boundary.
+        require(lines.isNotEmpty()) { "Sale must contain at least one line item" }
         require(Math.abs(sale.totalAmount - (sale.paidAmount + sale.creditAmount)) < 0.001) {
             "Accounting invariant violated: totalAmount (${sale.totalAmount}) must equal paidAmount (${sale.paidAmount}) + creditAmount (${sale.creditAmount})"
+        }
+        require(sale.totalAmount > 0.0) { "Sale total must be greater than zero" }
+        require(sale.paidAmount >= 0.0 && sale.creditAmount >= 0.0) { "Sale payment amounts cannot be negative" }
+        require(sale.customerId != null || sale.creditAmount <= 0.001) {
+            "A credit or mixed sale requires a customer; anonymous sales must be fully cash"
+        }
+        require(lines.map { it.id }.distinct().size == lines.size) { "Duplicate sale line IDs are not allowed" }
+        require(lines.all { it.saleId == sale.id }) { "Every sale line must belong to the sale" }
+        val calculatedTotal = lines.sumOf { it.subtotal }
+        require(Math.abs(calculatedTotal - sale.totalAmount) < 0.001) {
+            "Sale total (${sale.totalAmount}) must equal the sum of sale line subtotals ($calculatedTotal)"
+        }
+        lines.forEach { line ->
+            require(line.quantity > 0) { "Sale quantity must be greater than zero" }
+            require(line.unitPrice >= 0.0 && line.costPriceAtSale >= 0.0) { "Sale prices cannot be negative" }
+            require(line.productNameSnapshot.isNotBlank()) { "Sale product snapshot cannot be blank" }
+        }
+        if (sale.paidAmount > 0.001) {
+            val accountId = sale.financialAccountId ?: "acc_cash"
+            val account = financialAccountDao.getAccountById(accountId)
+                ?: throw IllegalArgumentException("Financial account not found: $accountId")
+            require(account.isActive) { "Financial account is inactive: $accountId" }
+        }
+        val currentMovements = stockMovementDao.getAllMovementsSync()
+        lines.filter { !it.productId.isNullOrBlank() }.groupBy { it.productId!! }.forEach { (productId, requestedLines) ->
+            val product = database.productDao().getProductById(productId)
+                ?: throw IllegalArgumentException("Product not found: $productId")
+            val stock = CentralAccountingEngine.calculateProductStockFromMovements(
+                productId = productId,
+                movements = currentMovements,
+                fallbackUnitCost = product.costPrice,
+                productName = product.name
+            )
+            val requestedQty = requestedLines.sumOf { it.quantity }
+            require(requestedQty <= stock.quantityOnHand) {
+                "Insufficient stock for '${product.name}'. Available: ${stock.quantityOnHand}, requested: $requestedQty"
+            }
         }
 
         // 1. Insert Sale record into sales table

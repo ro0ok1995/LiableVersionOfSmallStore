@@ -102,12 +102,18 @@ class PurchasesRepository(
 
         val effectiveFinancialAccountId = if (paidAmount > 0.0) {
             val accId = financialAccountId ?: "acc_cash"
-            financialAccountDao.getAccountById(accId)
+            val account = financialAccountDao.getAccountById(accId)
                 ?: throw IllegalArgumentException("Financial account not found: $accId")
+            require(account.isActive) { "Financial account is inactive: $accId" }
             accId
-        } else {
-            financialAccountId
-        }
+        } else null
+        val effectivePaymentMethodId = if (paidAmount > 0.0) {
+            val methodId = paymentMethodId ?: "pm_cash"
+            val method = database.paymentMethodDao().getPaymentMethodById(methodId)
+                ?: throw IllegalArgumentException("Payment method not found: $methodId")
+            require(method.isActive) { "Payment method is inactive: $methodId" }
+            methodId
+        } else null
 
         val purchase = Purchase(
             id = purchaseId,
@@ -118,7 +124,7 @@ class PurchasesRepository(
             paidAmount = paidAmount,
             creditAmount = creditAmount,
             paymentStatus = paymentStatus,
-            paymentMethodId = paymentMethodId,
+            paymentMethodId = effectivePaymentMethodId,
             financialAccountId = effectiveFinancialAccountId,
             notes = notes,
             status = "ACTIVE"
@@ -139,7 +145,7 @@ class PurchasesRepository(
         // Atomicity requirement: All financial effects commit together or rollback together
         database.withTransaction {
             if (paidAmount > 0.0) {
-                val accId = financialAccountId ?: "acc_cash"
+                val accId = effectiveFinancialAccountId ?: error("financial account missing for paid purchase")
                 financialAccountDao.getAccountById(accId)
                     ?: throw IllegalArgumentException("Financial account not found: $accId")
             }

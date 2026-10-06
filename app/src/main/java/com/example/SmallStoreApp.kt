@@ -444,8 +444,9 @@ fun SmallStoreApp(
                                     onRecordSupplierPayment = { supplierId, amount, date, acc, notes, onComplete ->
                                         mainViewModel.recordSupplierPayment(supplierId, amount, date, acc, notes, onComplete)
                                     },
-                                    onRecordPurchaseReturn = { purchaseId, amount, reason, date, onComplete ->
-                                        mainViewModel.recordPurchaseReturn(purchaseId, amount, reason, date, onComplete)
+                                    onGetPurchaseLines = { purchaseId -> mainViewModel.getPurchaseLines(purchaseId) },
+                                    onRecordPurchaseReturn = { purchaseId, returnLines, reason, date, onComplete ->
+                                        mainViewModel.recordPurchaseReturn(purchaseId, returnLines, reason, date, onComplete)
                                     },
                                     onRecordExpense = { catId, amt, accId, pmId, dt, desc, onComp ->
                                         mainViewModel.recordExpense(catId, amt, accId, pmId, dt, desc, onComp)

@@ -119,6 +119,24 @@ interface SupplierPaymentDao {
 }
 
 @Dao
+interface PurchaseReturnLineDao {
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertLines(lines: List<PurchaseReturnLine>)
+
+    @Query("SELECT * FROM purchase_return_lines WHERE purchaseReturnId = :returnId ORDER BY createdAt ASC, id ASC")
+    suspend fun getLinesForReturn(returnId: String): List<PurchaseReturnLine>
+
+    @Query("SELECT * FROM purchase_return_lines WHERE purchaseLineId IN (:purchaseLineIds) ORDER BY createdAt ASC, id ASC")
+    suspend fun getLinesForPurchaseLines(purchaseLineIds: List<String>): List<PurchaseReturnLine>
+
+    @Query("SELECT * FROM purchase_return_lines ORDER BY createdAt ASC, id ASC")
+    suspend fun getAllLinesSync(): List<PurchaseReturnLine>
+
+    @Query("DELETE FROM purchase_return_lines")
+    suspend fun deleteAllLines()
+}
+
+@Dao
 interface PurchaseReturnDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertReturn(purchaseReturn: PurchaseReturn): Long
