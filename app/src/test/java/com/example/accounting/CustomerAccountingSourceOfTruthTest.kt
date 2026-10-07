@@ -321,4 +321,56 @@ class CustomerAccountingSourceOfTruthTest {
         assertEquals("Persisted mixed sale must produce receivable of 40.0", 40.0, summary.balance, 0.0001)
         assertEquals(40.0, summary.totalCreditSales, 0.0001)
     }
+    @Test
+    fun quickPaymentRule_rejectsAmountGreaterThanAuthoritativeBalance() {
+        val creditSale = TransactionItem(
+            id = "tx_debt_100",
+            customerName = "عميل تجريبي",
+            activityType = "شراء بالدين",
+            amount = 100.0,
+            isCredit = true,
+            date = "2026-10-07",
+            relativeTime = "الآن",
+            customerId = customerId
+        )
+
+        val authoritativeBalance = CustomerLedgerCalculator
+            .calculateCustomerBalance(customerId, listOf(creditSale))
+            .balance
+
+        assertEquals(100.0, authoritativeBalance, 0.0001)
+        assertTrue("A 150 ₪ payment must be rejected when the authoritative debt is 100 ₪", 150.0 > authoritativeBalance + 0.001)
+        assertTrue("A 100 ₪ payment must be accepted as a full payment", 100.0 <= authoritativeBalance + 0.001)
+    }
+
+    @Test
+    fun quickPaymentRule_usesLedgerBalance_notLegacyStoredCustomerBalance() {
+        val legacyEntity = CustomerEntity(
+            id = customerId,
+            customerName = "عميل تجريبي",
+            balance = 9999.0,
+            totalDebt = 9999.0,
+            phone = "0501234567",
+            lastTransactionDate = "2026-10-01",
+            hasRecentActivity = false
+        )
+        val creditSale = TransactionItem(
+            id = "tx_debt_100_source",
+            customerName = legacyEntity.customerName,
+            activityType = "شراء بالدين",
+            amount = 100.0,
+            isCredit = true,
+            date = "2026-10-07",
+            relativeTime = "الآن",
+            customerId = customerId
+        )
+
+        val authoritativeBalance = CustomerLedgerCalculator
+            .calculateCustomerBalance(customerId, listOf(creditSale))
+            .balance
+
+        assertEquals(100.0, authoritativeBalance, 0.0001)
+        assertTrue("The stale stored balance must not authorize a 150 ₪ payment", 150.0 > authoritativeBalance + 0.001)
+    }
+
 }

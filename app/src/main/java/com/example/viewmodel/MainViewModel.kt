@@ -25,7 +25,6 @@ import com.example.data.db.PaymentMethod
 import com.example.data.db.Adjustment
 import com.example.data.db.TransactionItemLineEntity
 import com.example.data.repository.StoreRepository
-import com.example.accounting.CustomerLedgerCalculator
 import com.example.accounting.SupplierBalanceSummary
 import com.example.accounting.SupplierLedgerEntry
 import com.example.accounting.InventoryMovementEntry
@@ -1305,8 +1304,14 @@ class MainViewModel @JvmOverloads constructor(
         val amount = state.quickPaymentAmount.toDoubleOrNull() ?: return
         if (amount <= 0.0) return
 
+        // Quick Payment must use the same authoritative persisted-ledger source used by
+        // StoreRepository/customer balances, not the legacy allTransactions Flow.
+        val liveBalance = repository.getCustomerBalance(customer.id).balance
+        // The app does not support customer advances/credit balances, so overpayment
+        // must be rejected before any financial record is created.
+        if (!liveBalance.isFinite() || liveBalance <= 0.001 || amount > liveBalance + 0.001) return
+
         val txId = "tx_${System.currentTimeMillis()}"
-        val liveBalance = CustomerLedgerCalculator.calculateCustomerBalance(customer.id, state.allTransactions).balance
         val isFullPayment = amount >= (liveBalance - 0.001)
         val legacyFields = LegacyAccountingBridge.toLegacyFields(
             transactionType = TransactionType.CUSTOMER_PAYMENT,
