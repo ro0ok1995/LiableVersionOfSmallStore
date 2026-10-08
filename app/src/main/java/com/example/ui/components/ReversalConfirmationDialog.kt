@@ -187,7 +187,9 @@ fun ReversalConfirmationDialog(
                         placeholder = { Text(if (isArabic) "اختر من القائمة" else "Select from the list") },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = reasonMenuExpanded) },
                         isError = showError && selectedReasonId == null,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor()
                     )
                     ExposedDropdownMenu(
                         expanded = reasonMenuExpanded,
