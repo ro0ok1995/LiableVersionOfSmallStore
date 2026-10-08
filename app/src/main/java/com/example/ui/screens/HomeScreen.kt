@@ -130,8 +130,8 @@ fun HomeScreen(
     onDismissCustomDatePicker: () -> Unit = {},
     onSetCustomDateRange: (LocalDate?, LocalDate?) -> Unit = { _, _ -> },
     onActivityClick: ((TransactionItem) -> Unit)? = null,
-    onReverseTransaction: ((TransactionItem, String) -> Unit)? = null,
-    onReturnTransaction: ((TransactionItem, List<SaleReturnLineRequest>, String, RefundRequest?) -> Unit)? = null,
+    onReverseTransaction: ((TransactionItem, String, String) -> Unit)? = null,
+    onReturnTransaction: ((TransactionItem, List<SaleReturnLineRequest>, String, String, RefundRequest?) -> Unit)? = null,
     onLoadReturnDetails: (suspend (String) -> Triple<Sale?, List<SaleLine>, Map<String, Int>>)? = null
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
@@ -434,7 +434,7 @@ fun HomeScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = if (isArabic) StoreStrings.LATEST_ACTIVITIES_AR else StoreStrings.LATEST_ACTIVITIES_EN,
+                    text = if (isArabic) "آخر نشاطات المتجر" else "Recent Store Activity",
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp
@@ -522,8 +522,8 @@ fun HomeScreen(
             transaction = transactionToReverse!!,
             currency = currency,
             isArabic = isArabic,
-            onConfirm = { reason ->
-                onReverseTransaction?.invoke(transactionToReverse!!, reason)
+            onConfirm = { reasonCode, reasonLabel ->
+                onReverseTransaction?.invoke(transactionToReverse!!, reasonCode, reasonLabel)
                 transactionToReverse = null
             },
             onDismiss = { transactionToReverse = null }
@@ -536,8 +536,8 @@ fun HomeScreen(
             currency = currency,
             isArabic = isArabic,
             onLoadDetails = onLoadReturnDetails,
-            onConfirm = { lines, reason, refundReq ->
-                onReturnTransaction(transactionToReturn!!, lines, reason, refundReq)
+            onConfirm = { lines, reasonCode, reasonLabel, refundReq ->
+                onReturnTransaction(transactionToReturn!!, lines, reasonCode, reasonLabel, refundReq)
                 transactionToReturn = null
             },
             onDismiss = { transactionToReturn = null }

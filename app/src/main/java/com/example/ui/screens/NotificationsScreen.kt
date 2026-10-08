@@ -171,6 +171,7 @@ private fun NotificationRowItem(
 ) {
     val isUnread = !item.isRead
     val isPayment = item.isPayment
+    val displayName = item.customerName.ifBlank { if (item.isPayment) "Store Payment" else "Store Activity" }
 
     Card(
         shape = RoundedCornerShape(14.dp),
@@ -212,7 +213,7 @@ private fun NotificationRowItem(
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = item.customerName,
+                    text = displayName,
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = if (isUnread) FontWeight.Bold else FontWeight.Normal,
                         fontSize = 14.sp

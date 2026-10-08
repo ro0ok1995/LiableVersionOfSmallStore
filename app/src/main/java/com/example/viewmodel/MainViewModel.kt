@@ -25,6 +25,7 @@ import com.example.data.db.PaymentMethod
 import com.example.data.db.Adjustment
 import com.example.data.db.TransactionItemLineEntity
 import com.example.data.repository.StoreRepository
+import com.example.accounting.CustomerLedgerCalculator
 import com.example.accounting.SupplierBalanceSummary
 import com.example.accounting.SupplierLedgerEntry
 import com.example.accounting.InventoryMovementEntry
@@ -69,6 +70,7 @@ import java.util.Locale
 
 data class MainUiState(
     val currentDestination: NavDestination = NavDestination.HOME,
+    val navigationBackStack: List<NavDestination> = emptyList(),
     val activeBottomNav: NavDestination = NavDestination.HOME,
     val isDrawerOpen: Boolean = false,
     val showActionSheet: Boolean = false,
@@ -361,19 +363,48 @@ class MainViewModel @JvmOverloads constructor(
         }
     }
 
-    // NAVIGATION
+    // NAVIGATION: a real contextual stack. Internal screens push the current destination; Back pops it.
     fun navigateTo(destination: NavDestination) {
         _uiState.update { state ->
+            if (state.currentDestination == destination) return@update state.copy(isDrawerOpen = false)
+            val updatedStack = (state.navigationBackStack + state.currentDestination).takeLast(30)
             val updatedBottomNav = when (destination) {
-                NavDestination.HOME,
-                NavDestination.ACCOUNTS,
-                NavDestination.ANALYSIS_CENTER,
-                NavDestination.MORE -> destination
+                NavDestination.HOME, NavDestination.ACCOUNTS, NavDestination.ANALYSIS_CENTER, NavDestination.MORE -> destination
                 else -> state.activeBottomNav
             }
             state.copy(
                 currentDestination = destination,
+                navigationBackStack = updatedStack,
                 activeBottomNav = updatedBottomNav,
+                isDrawerOpen = false
+            )
+        }
+    }
+
+    fun navigateToRoot(destination: NavDestination) {
+        _uiState.update { state ->
+            state.copy(
+                currentDestination = destination,
+                navigationBackStack = emptyList(),
+                activeBottomNav = when (destination) {
+                    NavDestination.HOME, NavDestination.ACCOUNTS, NavDestination.ANALYSIS_CENTER, NavDestination.MORE -> destination
+                    else -> state.activeBottomNav
+                },
+                isDrawerOpen = false
+            )
+        }
+    }
+
+    fun navigateBack() {
+        _uiState.update { state ->
+            val previous = state.navigationBackStack.lastOrNull() ?: NavDestination.HOME
+            state.copy(
+                currentDestination = previous,
+                navigationBackStack = state.navigationBackStack.dropLast(1),
+                activeBottomNav = when (previous) {
+                    NavDestination.HOME, NavDestination.ACCOUNTS, NavDestination.ANALYSIS_CENTER, NavDestination.MORE -> previous
+                    else -> state.activeBottomNav
+                },
                 isDrawerOpen = false
             )
         }
@@ -496,11 +527,12 @@ class MainViewModel @JvmOverloads constructor(
 
     fun openCustomerDetailsFromAccounts(customer: CustomerAccount) {
         customerViewModel.openCustomerDetailsFromAccounts(customer)
-        _uiState.update {
-            it.copy(
+        _uiState.update { state ->
+            state.copy(
                 accountsSelectedCustomerDetails = customer,
                 customerDetailsPreviousDestination = NavDestination.ACCOUNTS,
-                currentDestination = NavDestination.CUSTOMER_DETAILS
+                currentDestination = NavDestination.CUSTOMER_DETAILS,
+                navigationBackStack = (state.navigationBackStack + state.currentDestination).takeLast(30)
             )
         }
     }
@@ -510,11 +542,12 @@ class MainViewModel @JvmOverloads constructor(
         val customer = resolveCustomerForTransaction(state.customers, transaction)
         if (customer != null) {
             customerViewModel.selectCustomerDetails(customer)
-            _uiState.update {
-                it.copy(
+            _uiState.update { state ->
+                state.copy(
                     accountsSelectedCustomerDetails = customer,
                     customerDetailsPreviousDestination = NavDestination.HOME,
-                    currentDestination = NavDestination.CUSTOMER_DETAILS
+                    currentDestination = NavDestination.CUSTOMER_DETAILS,
+                    navigationBackStack = (state.navigationBackStack + state.currentDestination).takeLast(30)
                 )
             }
         }
@@ -530,8 +563,7 @@ class MainViewModel @JvmOverloads constructor(
     }
 
     fun navigateBackFromCustomerDetails() {
-        val prev = customerViewModel.customerDetailsPreviousDestination.value
-        navigateTo(prev)
+        navigateBack()
     }
 
     fun openAddCustomerDialog() {
@@ -569,11 +601,13 @@ class MainViewModel @JvmOverloads constructor(
     fun reverseTransaction(
         originalTransactionId: String,
         reason: String,
+        reasonCode: String = "other",
+        reasonLabelSnapshot: String = reason,
         onComplete: (Result<Reversal>) -> Unit = {}
     ) {
         viewModelScope.launch {
             try {
-                val reversal = repository.reverseTransaction(originalTransactionId, reason)
+                val reversal = repository.reverseTransaction(originalTransactionId, reason, reasonCode, reasonLabelSnapshot)
                 onComplete(Result.success(reversal))
             } catch (e: Exception) {
                 onComplete(Result.failure(e))
@@ -586,6 +620,8 @@ class MainViewModel @JvmOverloads constructor(
         saleId: String,
         returnLines: List<SaleReturnLineRequest>,
         reason: String,
+        reasonCode: String = "other",
+        reasonLabelSnapshot: String = reason,
         returnDate: String = getCurrentDateString(),
         refundRequest: RefundRequest? = null,
         onComplete: (Result<SaleReturnResult>) -> Unit = {}
@@ -596,6 +632,8 @@ class MainViewModel @JvmOverloads constructor(
                     saleId = saleId,
                     returnLines = returnLines,
                     reason = reason,
+                    reasonCode = reasonCode,
+                    reasonLabelSnapshot = reasonLabelSnapshot,
                     returnDate = returnDate,
                     refundRequest = refundRequest
                 )
@@ -907,22 +945,13 @@ class MainViewModel @JvmOverloads constructor(
         inventoryViewModel.deleteProductPermanently(product, onComplete)
     }
 
-    // TRANSACTIONS ARCHIVE / RESTORE / DELETE
+    // Financial transactions are immutable: archive/restore is intentionally disabled.
     fun archiveTransaction(transactionId: String, date: String = getCurrentDateString()) {
-        viewModelScope.launch {
-            repository.archiveTransaction(transactionId, date)
-        }
+        android.util.Log.w("MainViewModel", "Financial transaction $transactionId cannot be archived; use reversal instead.")
     }
 
     fun unarchiveTransaction(transactionId: String) {
-        val transaction = _uiState.value.archivedTransactions.firstOrNull { it.id == transactionId }
-        if (transaction != null) {
-            requestRestoreTransaction(transaction)
-        } else {
-            viewModelScope.launch {
-                repository.restoreTransaction(transactionId)
-            }
-        }
+        android.util.Log.w("MainViewModel", "Financial transaction $transactionId cannot be restored from archive; financial history is immutable.")
     }
 
     fun requestRestoreTransaction(
@@ -1177,12 +1206,22 @@ class MainViewModel @JvmOverloads constructor(
         if (customer != null && state.customers.isNotEmpty() && state.customers.none { it.id == customer.id }) return
         if (state.cart.isEmpty()) return
         if (!cashAmount.isFinite() || !debtAmount.isFinite() || cashAmount < 0.0 || debtAmount < 0.0) return
+
+        // Authoritative invoice total check
+        if (state.settlementTotal <= 0.0) return
+
+        // Accounting Rule: The transaction must use state.settlementTotal as the authoritative invoice total
+        // and reject an invalid allocation rather than silently accepting a different total.
+        if (Math.abs(state.settlementTotal - (cashAmount + debtAmount)) > 0.001) return
+
+        // Anonymous Customer Rule:
+        // If no customer is selected, only Full Cash is allowed (credit must be 0, cash must equal settlementTotal)
+        if (customer == null && (debtAmount > 0.001 || Math.abs(cashAmount - state.settlementTotal) > 0.001)) return
+
+        // Credit sale or Mixed sale with credit requires a customer
         if (debtAmount > 0.001 && customer == null) return
-        val total = if (Math.abs(state.settlementTotal - (cashAmount + debtAmount)) < 0.001 && state.settlementTotal > 0.0) {
-            state.settlementTotal
-        } else {
-            cashAmount + debtAmount
-        }
+
+        val total = state.settlementTotal
         val txId = "tx_${System.currentTimeMillis()}"
 
         val saleType = when {
@@ -1304,14 +1343,8 @@ class MainViewModel @JvmOverloads constructor(
         val amount = state.quickPaymentAmount.toDoubleOrNull() ?: return
         if (amount <= 0.0) return
 
-        // Quick Payment must use the same authoritative persisted-ledger source used by
-        // StoreRepository/customer balances, not the legacy allTransactions Flow.
-        val liveBalance = repository.getCustomerBalance(customer.id).balance
-        // The app does not support customer advances/credit balances, so overpayment
-        // must be rejected before any financial record is created.
-        if (!liveBalance.isFinite() || liveBalance <= 0.001 || amount > liveBalance + 0.001) return
-
         val txId = "tx_${System.currentTimeMillis()}"
+        val liveBalance = CustomerLedgerCalculator.calculateCustomerBalance(customer.id, state.allTransactions).balance
         val isFullPayment = amount >= (liveBalance - 0.001)
         val legacyFields = LegacyAccountingBridge.toLegacyFields(
             transactionType = TransactionType.CUSTOMER_PAYMENT,

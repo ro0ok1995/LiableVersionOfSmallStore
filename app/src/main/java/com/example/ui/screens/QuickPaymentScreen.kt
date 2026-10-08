@@ -220,7 +220,11 @@ fun QuickPaymentScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (isArabic) "الرصيد المستحق (الدين):" else "Current Outstanding Debt:",
+                                text = when {
+                                    customer.balance > 0.001 -> if (isArabic) "مدين (Debit) — العميل مدين لك:" else "Debit — customer owes you:"
+                                    customer.balance < -0.001 -> if (isArabic) "دائن (Credit) — أنت مدين للعميل:" else "Credit — you owe the customer:"
+                                    else -> if (isArabic) "الرصيد مسدد:" else "Balance settled:"
+                                },
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )

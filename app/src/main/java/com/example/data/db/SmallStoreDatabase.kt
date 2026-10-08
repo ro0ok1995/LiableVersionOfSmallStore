@@ -37,7 +37,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         Expense::class,
         StockMovementEntity::class
     ],
-    version = 19,
+    version = 20,
     exportSchema = false
 )
 abstract class SmallStoreDatabase : RoomDatabase() {
@@ -96,32 +96,16 @@ abstract class SmallStoreDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATION_17_18 = object : Migration(17, 18) {
+        val MIGRATION_17_18 = com.example.data.db.MIGRATION_17_18
+        val MIGRATION_18_19 = com.example.data.db.MIGRATION_18_19
+        val MIGRATION_19_20 = object : Migration(19, 20) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE sales ADD COLUMN financialAccountId TEXT DEFAULT NULL")
-            }
-        }
-
-        val MIGRATION_18_19 = object : Migration(18, 19) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("""
-                    CREATE TABLE IF NOT EXISTS purchase_return_lines (
-                        id TEXT NOT NULL PRIMARY KEY,
-                        purchaseReturnId TEXT NOT NULL,
-                        purchaseLineId TEXT NOT NULL,
-                        productId TEXT,
-                        productNameSnapshot TEXT NOT NULL,
-                        quantity INTEGER NOT NULL,
-                        unitCost REAL NOT NULL,
-                        subtotal REAL NOT NULL,
-                        createdAt INTEGER NOT NULL,
-                        FOREIGN KEY(purchaseReturnId) REFERENCES purchase_returns(id) ON UPDATE NO ACTION ON DELETE CASCADE,
-                        FOREIGN KEY(purchaseLineId) REFERENCES purchase_lines(id) ON UPDATE NO ACTION ON DELETE RESTRICT
-                    )
-                """.trimIndent())
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_purchase_return_lines_purchaseReturnId ON purchase_return_lines(purchaseReturnId)")
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_purchase_return_lines_purchaseLineId ON purchase_return_lines(purchaseLineId)")
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_purchase_return_lines_productId ON purchase_return_lines(productId)")
+                db.execSQL("ALTER TABLE sale_returns ADD COLUMN reasonCode TEXT NOT NULL DEFAULT 'other'")
+                db.execSQL("ALTER TABLE sale_returns ADD COLUMN reasonLabelSnapshot TEXT NOT NULL DEFAULT ''")
+                db.execSQL("UPDATE sale_returns SET reasonLabelSnapshot = reason WHERE reasonLabelSnapshot = ''")
+                db.execSQL("ALTER TABLE reversals ADD COLUMN reasonCode TEXT NOT NULL DEFAULT 'other'")
+                db.execSQL("ALTER TABLE reversals ADD COLUMN reasonLabelSnapshot TEXT NOT NULL DEFAULT ''")
+                db.execSQL("UPDATE reversals SET reasonLabelSnapshot = reason WHERE reasonLabelSnapshot = ''")
             }
         }
 
@@ -151,7 +135,8 @@ abstract class SmallStoreDatabase : RoomDatabase() {
                         MIGRATION_15_16,
                         MIGRATION_16_17,
                         MIGRATION_17_18,
-                        MIGRATION_18_19
+                        MIGRATION_18_19,
+                        MIGRATION_19_20
                     )
                     .build()
                 INSTANCE = instance

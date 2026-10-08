@@ -425,6 +425,16 @@ fun CustomerProfileScreen(
                                     },
                                     modifier = Modifier.testTag("customer_profile_balance")
                                 )
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Text(
+                                    text = when {
+                                        customer.balance > 0.001 -> if (isArabic) "مدين (Debit): العميل مدين لك بهذا الرصيد" else "Debit: customer owes you this balance"
+                                        customer.balance < -0.001 -> if (isArabic) "دائن (Credit): أنت مدين للعميل بهذا الرصيد" else "Credit: you owe the customer this balance"
+                                        else -> if (isArabic) "الرصيد مسدد" else "Balance settled"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
 
                             Column(horizontalAlignment = Alignment.End) {

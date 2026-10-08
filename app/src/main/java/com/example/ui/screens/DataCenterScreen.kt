@@ -21,6 +21,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.filled.SettingsSuggest
+import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.ShoppingCart
@@ -57,6 +61,7 @@ fun DataCenterScreen(
     onProductsClick: (() -> Unit)? = null,
     onBackupRestoreClick: (() -> Unit)? = null,
     onArchiveClick: (() -> Unit)? = null,
+    onReversedTransactionsClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
@@ -91,7 +96,7 @@ fun DataCenterScreen(
         ) {
             // Non-clickable screen description below title
             Text(
-                text = if (isArabic) "إدارة بيانات العملاء والمنتجات والأرشيف" else "Manage customer, product, and archive data",
+                text = if (isArabic) "إدارة البيانات الرئيسية والإعدادات المالية والتاريخ المحاسبي" else "Manage master data, financial setup, and accounting history",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
@@ -243,7 +248,61 @@ fun DataCenterScreen(
                 }
             }
 
-            // 4. Archive
+            // 3. Financial setup and operational master data
+            DataCenterInfoCard(
+                icon = Icons.Default.Category,
+                title = if (isArabic) "فئات المصروفات" else "Expense Categories",
+                description = if (isArabic) "تصنيف المصروفات التشغيلية. لا تُعامل كرأس مال أو رصيد افتتاحي." else "Classify operating expenses. They are not capital or opening balance.",
+                testTag = "data_center_item_expense_categories"
+            )
+
+            DataCenterInfoCard(
+                icon = Icons.Default.AccountBalance,
+                title = if (isArabic) "الحسابات المالية" else "Financial Accounts",
+                description = if (isArabic) "الحسابات النقدية والمالية المستخدمة في العمليات." else "Financial and cash accounts used by store operations.",
+                testTag = "data_center_item_financial_accounts"
+            )
+
+            DataCenterInfoCard(
+                icon = Icons.Default.SettingsSuggest,
+                title = if (isArabic) "الرصيد الافتتاحي والإعداد الأولي" else "Opening Balance / Initial Setup",
+                description = if (isArabic) "الرصيد الافتتاحي يُسجل كرصيد تأسيسي وليس كمصروف." else "Opening balance is initial financial state, not an expense.",
+                testTag = "data_center_item_opening_balance"
+            )
+
+            DataCenterInfoCard(
+                icon = Icons.Default.AccountBalance,
+                title = if (isArabic) "رأس المال" else "Capital",
+                description = if (isArabic) "رأس المال عنصر تمويلي مستقل، ولا يُصنف كمصروف تشغيلي." else "Capital is a separate funding element and is not an operating expense.",
+                testTag = "data_center_item_capital"
+            )
+
+            // 4. Reversed financial transactions
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, GeoOutlineVariant, RoundedCornerShape(14.dp))
+                    .clickable { onReversedTransactionsClick?.invoke() }
+                    .testTag("data_center_item_reversed_transactions")
+            ) {
+                Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f), shape = RoundedCornerShape(10.dp), modifier = Modifier.size(42.dp)) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.Undo, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(if (isArabic) "المعاملات الملغاة محاسبياً" else "Reversed Transactions", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Text(if (isArabic) "السجل التاريخي للعمليات الملغاة. لا يتم حذفها أو أرشفتها." else "Historical reversed transactions. They are never deleted or archived.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), modifier = Modifier.size(20.dp))
+                }
+            }
+
+            // 5. Archive (master data only)
             Card(
                 shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -293,3 +352,29 @@ fun DataCenterScreen(
         }
     }
 }
+@Composable
+private fun DataCenterInfoCard(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    description: String,
+    testTag: String
+) {
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+        modifier = Modifier.fillMaxWidth().border(1.dp, GeoOutlineVariant, RoundedCornerShape(14.dp)).testTag(testTag)
+    ) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(color = GeoPrimary.copy(alpha = 0.10f), shape = RoundedCornerShape(10.dp), modifier = Modifier.size(42.dp)) {
+                Box(contentAlignment = Alignment.Center) { Icon(icon, contentDescription = null, tint = GeoPrimary) }
+            }
+            Spacer(modifier = Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+

@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Reply
 import androidx.compose.material3.AlertDialog
@@ -29,12 +30,16 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -57,13 +62,38 @@ import com.example.model.RefundRequest
 import com.example.model.SaleReturnLineRequest
 import com.example.model.TransactionItem
 
+data class PredefinedReturnReason(
+    val id: String,
+    val nameAr: String,
+    val nameEn: String,
+    val descAr: String,
+    val descEn: String
+)
+
+val PREDEFINED_RETURN_REASONS = listOf(
+    PredefinedReturnReason("damaged", "المنتج تالف أو معيب", "Damaged or Defective Item", "عيب مصنعي أو كسر أو تلف يمنع الاستخدام.", "Manufacturing defect, breakage, or damage preventing use."),
+    PredefinedReturnReason("incorrect_item", "المنتج غير مطابق للطلب", "Item Does Not Match Order", "الصنف المسلم لا يطابق طلب العميل.", "The supplied item does not match the customer order."),
+    PredefinedReturnReason("expired", "المنتج منتهي الصلاحية", "Expired Product", "المنتج تجاوز تاريخ انتهاء صلاحيته.", "The product has passed its expiration date."),
+    PredefinedReturnReason("incorrect_quantity", "الكمية غير صحيحة", "Incorrect Quantity", "تم تسجيل أو تسليم كمية غير صحيحة.", "The recorded or delivered quantity is incorrect."),
+    PredefinedReturnReason("not_suitable", "المنتج غير مناسب للعميل", "Product Not Suitable", "المنتج لا يناسب العميل أو احتياجه.", "The product is not suitable for the customer or their needs."),
+    PredefinedReturnReason("customer_changed_mind", "العميل غيّر رأيه", "Customer Changed Mind", "إرجاع المنتج بناءً على رغبة العميل.", "The customer changed their mind and returned the item."),
+    PredefinedReturnReason("billing_error", "خطأ في الفاتورة", "Billing Error", "يوجد خطأ في تسجيل الفاتورة.", "The invoice was recorded incorrectly."),
+    PredefinedReturnReason("product_error", "خطأ في المنتج", "Product Error", "تم تسجيل أو اختيار المنتج بشكل غير صحيح.", "The wrong product was recorded or selected."),
+    PredefinedReturnReason("price_error", "خطأ في السعر", "Price Error", "تم تسجيل سعر غير صحيح.", "The wrong price was recorded."),
+    PredefinedReturnReason("quality_issue", "مشكلة جودة", "Quality Issue", "مشكلة تتعلق بجودة المنتج.", "A product quality issue."),
+    PredefinedReturnReason("agreed_return", "استرجاع متفق عليه", "Agreed Return", "إرجاع تم الاتفاق عليه مع العميل.", "A return agreed with the customer."),
+    PredefinedReturnReason("operational", "سبب تشغيلي", "Operational Reason", "سبب متعلق بإجراء تشغيلي في المتجر.", "A store operational reason."),
+    PredefinedReturnReason("other", "سبب آخر معتمد", "Other Approved Reason", "سبب استثنائي غير موجود في القائمة مع كتابة التفاصيل.", "An approved reason not listed above; details are required.")
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RecordSaleReturnDialog(
     transaction: TransactionItem,
     currency: String,
     isArabic: Boolean,
     onLoadDetails: suspend (String) -> Triple<Sale?, List<SaleLine>, Map<String, Int>>,
-    onConfirm: (List<SaleReturnLineRequest>, String, RefundRequest?) -> Unit,
+    onConfirm: (List<SaleReturnLineRequest>, String, String, RefundRequest?) -> Unit,
     onDismiss: () -> Unit
 ) {
     var isLoading by remember { mutableStateOf(true) }
@@ -74,10 +104,13 @@ fun RecordSaleReturnDialog(
     // Map of saleLineId to selected return quantity
     val selectedQuantities = remember { mutableStateMapOf<String, Int>() }
 
-    var reasonText by remember { mutableStateOf("") }
+    var selectedReasonId by remember { mutableStateOf<String?>(null) }
+    var customReasonText by remember { mutableStateOf("") }
+    var showReasonInfoDialog by remember { mutableStateOf(false) }
     var issueRefund by remember { mutableStateOf(false) }
     var refundAmountText by remember { mutableStateOf("") }
     var attemptedSubmit by remember { mutableStateOf(false) }
+    var isSubmitting by remember { mutableStateOf(false) }
 
     LaunchedEffect(transaction.id) {
         isLoading = true
@@ -99,7 +132,19 @@ fun RecordSaleReturnDialog(
 
     val totalSelectedItems = selectedQuantities.values.sum()
     val hasItemsSelected = totalSelectedItems > 0
-    val isReasonValid = reasonText.isNotBlank()
+    val selectedReason = PREDEFINED_RETURN_REASONS.find { it.id == selectedReasonId }
+    val isOtherReasonSelected = selectedReasonId == "other"
+    val isReasonValid = when {
+        selectedReasonId == null -> false
+        isOtherReasonSelected -> customReasonText.isNotBlank()
+        else -> true
+    }
+
+    val effectiveReason = when {
+        isOtherReasonSelected -> customReasonText.trim()
+        selectedReason != null -> if (isArabic) selectedReason.nameAr else selectedReason.nameEn
+        else -> ""
+    }
 
     val maxEligibleRefund = sale?.let {
         minOf(totalReturnAmount, it.paidAmount)
@@ -334,18 +379,102 @@ fun RecordSaleReturnDialog(
                         }
                     }
 
-                    // Reason Field
-                    OutlinedTextField(
-                        value = reasonText,
-                        onValueChange = { reasonText = it },
-                        label = { Text(if (isArabic) "سبب الإرجاع *" else "Return Reason *") },
-                        isError = attemptedSubmit && !isReasonValid,
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().testTag("return_reason_input")
-                    )
-                    if (attemptedSubmit && !isReasonValid) {
+                    // Reason Selection Header with Info Icon
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = if (isArabic) "سبب الإرجاع *" else "Return Reason *",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            IconButton(
+                                onClick = { showReasonInfoDialog = true },
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .testTag("return_reason_info_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = if (isArabic) "دليل أسباب الإرجاع" else "Return Reasons Guide",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    var reasonMenuExpanded by remember { mutableStateOf(false) }
+                    ExposedDropdownMenuBox(
+                        expanded = reasonMenuExpanded,
+                        onExpandedChange = { reasonMenuExpanded = !reasonMenuExpanded },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("predefined_return_reasons_dropdown")
+                    ) {
+                        OutlinedTextField(
+                            value = selectedReason?.let { if (isArabic) it.nameAr else it.nameEn } ?: "",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text(if (isArabic) "اختر سبب الإرجاع *" else "Select return reason *") },
+                            placeholder = { Text(if (isArabic) "اختر من القائمة" else "Select from the list") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = reasonMenuExpanded) },
+                            isError = attemptedSubmit && selectedReasonId == null,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        ExposedDropdownMenu(
+                            expanded = reasonMenuExpanded,
+                            onDismissRequest = { reasonMenuExpanded = false }
+                        ) {
+                            PREDEFINED_RETURN_REASONS.forEach { reason ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(if (isArabic) reason.nameAr else reason.nameEn, fontWeight = FontWeight.SemiBold)
+                                            Text(if (isArabic) reason.descAr else reason.descEn, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedReasonId = reason.id
+                                        reasonMenuExpanded = false
+                                    },
+                                    modifier = Modifier.testTag("reason_option_${reason.id}")
+                                )
+                            }
+                        }
+                    }
+
+                    // Custom Reason Input - ONLY displayed when "سبب آخر" is selected
+                    if (isOtherReasonSelected) {
+                        OutlinedTextField(
+                            value = customReasonText,
+                            onValueChange = { customReasonText = it },
+                            label = { Text(if (isArabic) "يرجى كتابة سبب الإرجاع *" else "Specify Return Reason *") },
+                            placeholder = { Text(if (isArabic) "اكتب تفاصيل السبب هنا..." else "Enter reason details here...") },
+                            isError = attemptedSubmit && customReasonText.isBlank(),
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("return_reason_input")
+                        )
+                        if (attemptedSubmit && customReasonText.isBlank()) {
+                            Text(
+                                text = if (isArabic) "يرجى كتابة سبب الإرجاع عند اختيار (سبب آخر) *" else "Please specify the reason details *",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+
+                    if (attemptedSubmit && selectedReasonId == null) {
                         Text(
-                            text = if (isArabic) "سبب الإرجاع إلزامي" else "Reason is required",
+                            text = if (isArabic) "يرجى اختيار سبب الإرجاع من القائمة *" else "Please select a return reason from the list *",
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -416,17 +545,18 @@ fun RecordSaleReturnDialog(
             Button(
                 onClick = {
                     attemptedSubmit = true
-                    if (canSubmit) {
+                    if (canSubmit && !isSubmitting) {
+                        isSubmitting = true
                         val requests = selectedQuantities.filter { it.value > 0 }.map { (lineId, qty) ->
                             SaleReturnLineRequest(saleLineId = lineId, quantity = qty)
                         }
                         val refundReq = if (issueRefund && refundAmount > 0.0) {
-                            RefundRequest(amount = refundAmount, reason = reasonText)
+                            RefundRequest(amount = refundAmount, reason = effectiveReason)
                         } else null
-                        onConfirm(requests, reasonText, refundReq)
+                        onConfirm(requests, selectedReasonId ?: "other", effectiveReason, refundReq)
                     }
                 },
-                enabled = !isLoading && hasItemsSelected && isReasonValid && isRefundValid,
+                enabled = !isLoading && !isSubmitting && hasItemsSelected && isReasonValid && isRefundValid,
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 modifier = Modifier.testTag("confirm_return_button")
             ) {
@@ -442,10 +572,77 @@ fun RecordSaleReturnDialog(
         dismissButton = {
             OutlinedButton(
                 onClick = onDismiss,
+                enabled = !isSubmitting,
                 modifier = Modifier.testTag("cancel_return_button")
             ) {
                 Text(if (isArabic) "إلغاء" else "Cancel")
             }
         }
     )
+
+    if (showReasonInfoDialog) {
+        AlertDialog(
+            onDismissRequest = { showReasonInfoDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(28.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = if (isArabic) "دليل أسباب الإرجاع" else "Return Reasons Guide",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    PREDEFINED_RETURN_REASONS.forEach { reason ->
+                        Card(
+                            shape = RoundedCornerShape(8.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                            ),
+                            modifier = Modifier.fillMaxWidth().testTag("info_reason_${reason.id}")
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Text(
+                                    text = if (isArabic) reason.nameAr else reason.nameEn,
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = if (isArabic) reason.descAr else reason.descEn,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    lineHeight = 16.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showReasonInfoDialog = false },
+                    modifier = Modifier.testTag("dismiss_return_reason_info_dialog")
+                ) {
+                    Text(if (isArabic) "فهمت" else "Got it")
+                }
+            },
+            modifier = Modifier.testTag("return_reason_info_dialog")
+        )
+    }
 }

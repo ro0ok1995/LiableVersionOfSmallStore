@@ -21,6 +21,8 @@ data class Reversal(
     val id: String,
     val originalTransactionId: String,
     val reason: String,
+    val reasonCode: String = "other",
+    val reasonLabelSnapshot: String = reason,
     val reversedAt: String,
     val status: String = "ACTIVE"
 ) {

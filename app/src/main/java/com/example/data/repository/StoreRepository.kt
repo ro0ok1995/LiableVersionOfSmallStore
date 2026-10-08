@@ -412,11 +412,11 @@ class StoreRepository private constructor(
     }
 
     suspend fun archiveTransaction(id: String, archivedDate: String) {
-        transactionDao.archiveTransaction(id, archivedDate)
+        android.util.Log.w("StoreRepository", "Financial transaction $id cannot be archived; use reversal instead.")
     }
 
     suspend fun restoreTransaction(id: String) {
-        transactionDao.unarchiveTransaction(id)
+        android.util.Log.w("StoreRepository", "Financial transaction $id cannot be restored from archive; financial history is immutable.")
     }
 
     /**
@@ -718,7 +718,9 @@ class StoreRepository private constructor(
      */
     suspend fun reverseTransaction(
         originalTransactionId: String,
-        reason: String
+        reason: String,
+        reasonCode: String = "other",
+        reasonLabelSnapshot: String = reason
     ): Reversal = database.withTransaction {
         require(originalTransactionId.isNotBlank()) { "originalTransactionId must not be blank" }
         require(reason.isNotBlank()) { "Reversal reason must not be blank" }
@@ -879,6 +881,8 @@ class StoreRepository private constructor(
             id = reversalId,
             originalTransactionId = originalTransactionId,
             reason = reason.trim(),
+            reasonCode = reasonCode.trim().ifBlank { "other" },
+            reasonLabelSnapshot = reasonLabelSnapshot.trim().ifBlank { reason.trim() },
             reversedAt = reversedAt,
             status = "ACTIVE"
         )
@@ -917,12 +921,16 @@ class StoreRepository private constructor(
         saleId: String,
         returnLines: List<SaleReturnLineRequest>,
         reason: String,
+        reasonCode: String = "other",
+        reasonLabelSnapshot: String = reason,
         returnDate: String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()),
         refundRequest: RefundRequest? = null
     ): SaleReturnResult = saleReturnRepository.recordSaleReturn(
         saleId = saleId,
         returnLines = returnLines,
         reason = reason,
+        reasonCode = reasonCode,
+        reasonLabelSnapshot = reasonLabelSnapshot,
         returnDate = returnDate,
         refundRequest = refundRequest
     )

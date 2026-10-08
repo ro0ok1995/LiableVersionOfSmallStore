@@ -37,6 +37,8 @@ data class SaleReturn(
     val customerId: String? = null,
     val returnDate: String,
     val reason: String,
+    val reasonCode: String = "other",
+    val reasonLabelSnapshot: String = reason,
     val amount: Double,
     val status: String = "ACTIVE",
     val createdAt: Long = System.currentTimeMillis()

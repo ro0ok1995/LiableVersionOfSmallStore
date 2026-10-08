@@ -67,6 +67,8 @@ class SaleReturnRepository(
         saleId: String,
         returnLines: List<SaleReturnLineRequest>,
         reason: String,
+        reasonCode: String = "other",
+        reasonLabelSnapshot: String = reason,
         returnDate: String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()),
         refundRequest: RefundRequest? = null
     ): SaleReturnResult {
@@ -178,6 +180,8 @@ class SaleReturnRepository(
             customerId = sale.customerId,
             returnDate = returnDate,
             reason = reason.trim(),
+            reasonCode = reasonCode.trim().ifBlank { "other" },
+            reasonLabelSnapshot = reasonLabelSnapshot.trim().ifBlank { reason.trim() },
             amount = totalReturnAmount,
             status = "ACTIVE"
         )

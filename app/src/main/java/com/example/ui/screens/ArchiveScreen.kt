@@ -97,19 +97,16 @@ import java.io.File
 enum class ArchiveTab(val index: Int) {
     CUSTOMERS(0),
     PRODUCTS(1),
-    TRANSACTIONS(2)
 }
 
 sealed class PendingDeleteTarget {
     data class Customer(val customer: CustomerAccount) : PendingDeleteTarget()
     data class Product(val product: ProductItem) : PendingDeleteTarget()
-    data class Transaction(val transaction: TransactionItem) : PendingDeleteTarget()
 }
 
 sealed class PendingRestoreTarget {
     data class Customer(val customer: CustomerAccount) : PendingRestoreTarget()
     data class Product(val product: ProductItem) : PendingRestoreTarget()
-    data class Transaction(val transaction: TransactionItem) : PendingRestoreTarget()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -117,16 +114,13 @@ sealed class PendingRestoreTarget {
 fun ArchiveScreen(
     archivedCustomers: List<CustomerAccount>,
     archivedProducts: List<ProductItem>,
-    archivedTransactions: List<TransactionItem> = emptyList(),
-    languageMode: LanguageMode,
+        languageMode: LanguageMode,
     onBackClick: () -> Unit,
     onRestoreCustomer: (CustomerAccount) -> Unit = {},
     onPermanentDeleteCustomer: (CustomerAccount) -> Unit = {},
     onRestoreProduct: (ProductItem) -> Unit = {},
     onPermanentDeleteProduct: (ProductItem) -> Unit = {},
-    onRestoreTransaction: (TransactionItem) -> Unit = {},
-    onPermanentDeleteTransaction: (TransactionItem) -> Unit = {},
-    activeConflict: ArchiveConflict? = null,
+            activeConflict: ArchiveConflict? = null,
     onResolveConflictSeparate: (ArchiveConflict) -> Unit = {},
     onDismissConflict: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -188,40 +182,6 @@ fun ArchiveScreen(
         )
     }
 
-    val sampleArchivedTransactions = remember {
-        listOf(
-            TransactionItem(
-                id = "arch_sample_tx1",
-                title = if (isArabic) "فاتورة مبيعات آجل" else "Credit Sale Invoice",
-                customerNameSnapshot = if (isArabic) "أحمد المنصور" else "Ahmed Al-Mansour",
-                activityType = if (isArabic) "شراء آجل" else "Credit Purchase",
-                amount = 280.00,
-                isCredit = true,
-                date = "2026-09-05",
-                relativeTime = if (isArabic) "منذ 10 أيام" else "10 days ago",
-                transactionType = com.example.model.TransactionType.SALE,
-                saleType = com.example.model.SaleType.CREDIT,
-                paymentStatus = com.example.model.PaymentStatus.UNPAID,
-                paidAmount = 0.0,
-                creditAmount = 280.00
-            ),
-            TransactionItem(
-                id = "arch_sample_tx2",
-                title = if (isArabic) "سداد دفعة نقدية" else "Cash Payment Receipt",
-                customerNameSnapshot = if (isArabic) "فهد السبيعي" else "Fahad Al-Subaie",
-                activityType = if (isArabic) "تسديد دفعة" else "Payment",
-                amount = 150.00,
-                isCredit = false,
-                date = "2026-08-30",
-                relativeTime = if (isArabic) "منذ 16 يوماً" else "16 days ago",
-                transactionType = com.example.model.TransactionType.CUSTOMER_PAYMENT,
-                paymentStatus = com.example.model.PaymentStatus.PAID,
-                paidAmount = 150.00,
-                creditAmount = 0.0
-            )
-        )
-    }
-
     // Determine displayed records based on actual data or sample preview
     val effectiveCustomers = if (archivedCustomers.isNotEmpty()) {
         archivedCustomers
@@ -235,14 +195,6 @@ fun ArchiveScreen(
         archivedProducts
     } else if (showSampleDataPreview) {
         sampleArchivedProducts
-    } else {
-        emptyList()
-    }
-
-    val effectiveTransactions = if (archivedTransactions.isNotEmpty()) {
-        archivedTransactions
-    } else if (showSampleDataPreview) {
-        sampleArchivedTransactions
     } else {
         emptyList()
     }
@@ -268,17 +220,7 @@ fun ArchiveScreen(
         }
     }
 
-    val filteredTransactions = remember(effectiveTransactions, searchQuery) {
-        if (searchQuery.isBlank()) effectiveTransactions
-        else {
-            val q = searchQuery.trim().lowercase()
-            effectiveTransactions.filter {
-                it.title.lowercase().contains(q) ||
-                it.customerName.lowercase().contains(q) ||
-                it.id.lowercase().contains(q)
-            }
-        }
-    }
+
 
     Column(
         modifier = modifier
@@ -296,7 +238,7 @@ fun ArchiveScreen(
                         fontSize = 18.sp
                     )
                     Text(
-                        text = if (isArabic) "السجلات المؤرشفة والملغاة" else "Archived and cancelled records",
+                        text = if (isArabic) "البيانات المؤرشفة" else "Archived master data",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -389,39 +331,12 @@ fun ArchiveScreen(
                 modifier = Modifier.testTag("archive_tab_products")
             )
 
-            // Tab 3: Transactions
-            Tab(
-                selected = selectedTabIndex == ArchiveTab.TRANSACTIONS.index,
-                onClick = { selectedTabIndex = ArchiveTab.TRANSACTIONS.index },
-                text = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ReceiptLong,
-                            contentDescription = null,
-                            modifier = Modifier.size(17.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (isArabic) StoreStrings.ARCHIVE_TAB_TRANSACTIONS_AR else StoreStrings.ARCHIVE_TAB_TRANSACTIONS_EN,
-                            fontWeight = if (selectedTabIndex == ArchiveTab.TRANSACTIONS.index) FontWeight.Bold else FontWeight.Medium,
-                            fontSize = 13.sp
-                        )
-                        Spacer(modifier = Modifier.width(5.dp))
-                        ArchiveTabBadge(count = effectiveTransactions.size, isSelected = selectedTabIndex == ArchiveTab.TRANSACTIONS.index)
-                    }
-                },
-                modifier = Modifier.testTag("archive_tab_transactions")
-            )
         }
 
         // Search Bar (Active when list has items)
         val currentTabItemCount = when (selectedTabIndex) {
             ArchiveTab.CUSTOMERS.index -> effectiveCustomers.size
             ArchiveTab.PRODUCTS.index -> effectiveProducts.size
-            else -> effectiveTransactions.size
         }
 
         if (currentTabItemCount > 0 || searchQuery.isNotBlank()) {
@@ -590,40 +505,6 @@ fun ArchiveScreen(
                         }
                     }
                 }
-
-                ArchiveTab.TRANSACTIONS.index -> {
-                    if (filteredTransactions.isEmpty()) {
-                        ArchiveEmptyState(
-                            icon = Icons.Default.ReceiptLong,
-                            title = if (isArabic) "لا توجد معاملات في الأرشيف" else "No Archived Transactions",
-                            description = if (isArabic) {
-                                "المعاملات والفواتير الملغاة أو المؤرشفة ستظهر هنا مع تفاصيل المبالغ والأطراف المرتبطة بها."
-                            } else {
-                                "Cancelled or archived transactions and invoices will appear here with full amount and customer details."
-                            },
-                            isArabic = isArabic,
-                            showSamplePreviewButton = !showSampleDataPreview,
-                            onToggleSamplePreview = { showSampleDataPreview = true },
-                            modifier = Modifier.testTag("archive_empty_transactions")
-                        )
-                    } else {
-                        LazyColumn(
-                            contentPadding = PaddingValues(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.fillMaxSize()
-                        ) {
-                            items(filteredTransactions, key = { it.id }) { transaction ->
-                                ArchivedTransactionCard(
-                                    transaction = transaction,
-                                    isArabic = isArabic,
-                                    onRestoreClick = {
-                                        pendingRestoreTarget = PendingRestoreTarget.Transaction(transaction)
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
             }
 
             SnackbarHost(
@@ -640,13 +521,11 @@ fun ArchiveScreen(
         val recordName = when (target) {
             is PendingDeleteTarget.Customer -> target.customer.customerName
             is PendingDeleteTarget.Product -> target.product.name
-            is PendingDeleteTarget.Transaction -> "${target.transaction.title} (#${target.transaction.id})"
         }
 
         val recordType = when (target) {
             is PendingDeleteTarget.Customer -> if (isArabic) "عميل" else "Customer"
             is PendingDeleteTarget.Product -> if (isArabic) "صنف / منتج" else "Product"
-            is PendingDeleteTarget.Transaction -> if (isArabic) "معاملة مالية" else "Transaction"
         }
 
         AlertDialog(
@@ -733,9 +612,6 @@ fun ArchiveScreen(
                         when (currentTarget) {
                             is PendingDeleteTarget.Customer -> onPermanentDeleteCustomer(currentTarget.customer)
                             is PendingDeleteTarget.Product -> onPermanentDeleteProduct(currentTarget.product)
-                            is PendingDeleteTarget.Transaction -> {
-                                // Accounting Golden Rule: Financial records are immutable and cannot be physically deleted.
-                            }
                         }
                         coroutineScope.launch {
                             snackbarHostState.showSnackbar(
@@ -775,7 +651,6 @@ fun ArchiveScreen(
         val recordName = when (target) {
             is PendingRestoreTarget.Customer -> target.customer.customerName
             is PendingRestoreTarget.Product -> target.product.name
-            is PendingRestoreTarget.Transaction -> "${target.transaction.title} (#${target.transaction.id})"
         }
 
         AlertDialog(
@@ -834,7 +709,6 @@ fun ArchiveScreen(
                         when (currentTarget) {
                             is PendingRestoreTarget.Customer -> onRestoreCustomer(currentTarget.customer)
                             is PendingRestoreTarget.Product -> onRestoreProduct(currentTarget.product)
-                            is PendingRestoreTarget.Transaction -> onRestoreTransaction(currentTarget.transaction)
                         }
                         coroutineScope.launch {
                             snackbarHostState.showSnackbar(
