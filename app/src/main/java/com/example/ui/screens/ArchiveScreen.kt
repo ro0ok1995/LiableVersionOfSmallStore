@@ -337,6 +337,7 @@ fun ArchiveScreen(
         val currentTabItemCount = when (selectedTabIndex) {
             ArchiveTab.CUSTOMERS.index -> effectiveCustomers.size
             ArchiveTab.PRODUCTS.index -> effectiveProducts.size
+            else -> 0
         }
 
         if (currentTabItemCount > 0 || searchQuery.isNotBlank()) {

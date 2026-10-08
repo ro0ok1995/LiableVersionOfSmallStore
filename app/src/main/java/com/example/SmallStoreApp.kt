@@ -34,6 +34,7 @@ import com.example.model.NavDestination
 import com.example.model.StoreInfo
 import com.example.model.StoreStrings
 import com.example.model.ThemeDisplayMode
+import com.example.model.typedOperationStatus
 import com.example.ui.components.GlobalBottomBar
 import com.example.ui.components.GlobalDrawerContent
 import com.example.ui.components.GlobalTopBar
@@ -304,7 +305,7 @@ fun SmallStoreApp(
                                             com.example.model.TransactionType.CUSTOMER_PAYMENT,
                                             com.example.model.TransactionType.SALE_RETURN,
                                             com.example.model.TransactionType.CUSTOMER_REFUND,
-                                            com.example.model.TransactionType.CUSTOMER_ADJUSTMENT -> mainViewModel.navigateToCustomerProfileFromActivity(tx)
+                                            com.example.model.TransactionType.BALANCE_ADJUSTMENT -> mainViewModel.navigateToCustomerProfileFromActivity(tx)
                                             else -> Unit
                                         }
                                     },

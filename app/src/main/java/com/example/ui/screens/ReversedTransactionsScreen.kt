@@ -25,6 +25,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,7 +35,9 @@ import androidx.compose.ui.unit.sp
 import com.example.model.LanguageMode
 import com.example.model.OperationStatus
 import com.example.model.TransactionItem
+import com.example.model.typedOperationStatus
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReversedTransactionsScreen(
     transactions: List<TransactionItem>,
