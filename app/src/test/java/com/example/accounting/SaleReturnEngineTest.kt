@@ -159,7 +159,10 @@ class SaleReturnEngineTest {
             creditAmount = creditAmount,
             paymentStatus = paymentStatus.name,
             transactionDate = date,
-            status = "ACTIVE"
+            status = "ACTIVE",
+            // The repository requires an existing financial account for any paid portion.
+            // The test setup seeds this account as cashAccountId.
+            financialAccountId = if (paidAmount > 0.001) cashAccountId else null
         )
         // Strict inventory validation now requires enough stock before a sale.
         lines.filter { !it.productId.isNullOrBlank() }.forEach { line ->
@@ -681,5 +684,334 @@ class SaleReturnEngineTest {
         assertEquals(0, returnsAfter.size)
         val balance = repository.getCustomerBalance(testCustomerId)
         assertEquals(200.0, balance.balance, 0.001)
+    }
+
+    /**
+     * Scenario 1: Full cash sale -> full return.
+     */
+    @Test
+    fun testScenario1_fullCashSaleFullReturn() = runBlocking {
+        val saleLine = SaleLine(
+            id = "sl_sc1",
+            saleId = "sale_sc1",
+            productId = prodA,
+            productNameSnapshot = "أرز بسمتي",
+            quantity = 5,
+            unitPrice = 40.0,
+            costPriceAtSale = 25.0,
+            subtotal = 200.0
+        )
+        val sale = createTestSale(
+            saleId = "sale_sc1",
+            invoiceNumber = "INV-SC1",
+            customerId = testCustomerId,
+            saleType = SaleType.CASH,
+            totalAmount = 200.0,
+            paidAmount = 200.0,
+            lines = listOf(saleLine)
+        )
+
+        val returnResult = repository.recordSaleReturn(
+            saleId = sale.id,
+            returnLines = listOf(SaleReturnLineRequest(saleLineId = saleLine.id, quantity = 5)),
+            reason = "إرجاع كامل نقدي مع استرداد المبلغ",
+            refundRequest = RefundRequest(
+                amount = 200.0,
+                financialAccountId = cashAccountId,
+                paymentMethodId = cashMethodId,
+                reason = "استرداد نقدي كامل"
+            )
+        )
+
+        assertEquals(200.0, returnResult.saleReturn.amount, 0.001)
+        assertEquals(5, returnResult.lines[0].quantity)
+        assertNotNull(returnResult.refund)
+        assertEquals(200.0, returnResult.refund!!.amount, 0.001)
+        assertEquals("ACTIVE", returnResult.saleReturn.status)
+        assertEquals(0, repository.getRemainingReturnableQuantities(sale.id)[saleLine.id])
+    }
+
+    /**
+     * Scenario 3: Mixed sale -> full return.
+     */
+    @Test
+    fun testScenario3_mixedSaleFullReturn() = runBlocking {
+        val saleLine = SaleLine(
+            id = "sl_sc3",
+            saleId = "sale_sc3",
+            productId = prodA,
+            productNameSnapshot = "أرز بسمتي",
+            quantity = 10,
+            unitPrice = 40.0,
+            costPriceAtSale = 25.0,
+            subtotal = 400.0
+        )
+        // Mixed: 400 total, 150 paid (cash), 250 credit
+        val sale = createTestSale(
+            saleId = "sale_sc3",
+            invoiceNumber = "INV-SC3",
+            customerId = testCustomerId,
+            saleType = SaleType.MIXED,
+            totalAmount = 400.0,
+            paidAmount = 150.0,
+            lines = listOf(saleLine)
+        )
+
+        val balanceBefore = repository.getCustomerBalance(testCustomerId)
+        assertEquals(250.0, balanceBefore.balance, 0.001)
+
+        val returnResult = repository.recordSaleReturn(
+            saleId = sale.id,
+            returnLines = listOf(SaleReturnLineRequest(saleLineId = saleLine.id, quantity = 10)),
+            reason = "إرجاع كامل لفاتورة مختلطة",
+            refundRequest = RefundRequest(
+                amount = 150.0,
+                financialAccountId = cashAccountId,
+                paymentMethodId = cashMethodId,
+                reason = "استرداد الدفعة النقدية"
+            )
+        )
+
+        assertEquals(400.0, returnResult.saleReturn.amount, 0.001)
+        assertNotNull(returnResult.refund)
+        assertEquals(150.0, returnResult.refund!!.amount, 0.001)
+        val balanceAfter = repository.getCustomerBalance(testCustomerId)
+        assertEquals(0.0, balanceAfter.balance, 0.001)
+    }
+
+    /**
+     * Scenario 4: Partial return from a cash sale.
+     */
+    @Test
+    fun testScenario4_partialReturnCashSale() = runBlocking {
+        val saleLine = SaleLine(
+            id = "sl_sc4",
+            saleId = "sale_sc4",
+            productId = prodB,
+            productNameSnapshot = "زيت ذرة",
+            quantity = 10,
+            unitPrice = 20.0,
+            costPriceAtSale = 12.0,
+            subtotal = 200.0
+        )
+        val sale = createTestSale(
+            saleId = "sale_sc4",
+            invoiceNumber = "INV-SC4",
+            customerId = testCustomerId,
+            saleType = SaleType.CASH,
+            totalAmount = 200.0,
+            paidAmount = 200.0,
+            lines = listOf(saleLine)
+        )
+
+        val returnResult = repository.recordSaleReturn(
+            saleId = sale.id,
+            returnLines = listOf(SaleReturnLineRequest(saleLineId = saleLine.id, quantity = 3)),
+            reason = "إرجاع جزئي 3 حبات نقدي",
+            refundRequest = RefundRequest(
+                amount = 60.0,
+                financialAccountId = cashAccountId,
+                paymentMethodId = cashMethodId,
+                reason = "استرداد 60 ريال"
+            )
+        )
+
+        assertEquals(60.0, returnResult.saleReturn.amount, 0.001)
+        assertEquals(3, returnResult.lines[0].quantity)
+        assertEquals(7, repository.getRemainingReturnableQuantities(sale.id)[saleLine.id])
+        assertNotNull(returnResult.refund)
+        assertEquals(60.0, returnResult.refund!!.amount, 0.001)
+    }
+
+    /**
+     * Scenario 6: Partial return from a mixed sale.
+     */
+    @Test
+    fun testScenario6_partialReturnMixedSale() = runBlocking {
+        val saleLine = SaleLine(
+            id = "sl_sc6",
+            saleId = "sale_sc6",
+            productId = prodA,
+            productNameSnapshot = "أرز بسمتي",
+            quantity = 5,
+            unitPrice = 40.0,
+            costPriceAtSale = 25.0,
+            subtotal = 200.0
+        )
+        // Mixed: 200 total, 80 paid, 120 credit
+        val sale = createTestSale(
+            saleId = "sale_sc6",
+            invoiceNumber = "INV-SC6",
+            customerId = testCustomerId,
+            saleType = SaleType.MIXED,
+            totalAmount = 200.0,
+            paidAmount = 80.0,
+            lines = listOf(saleLine)
+        )
+
+        val balanceBefore = repository.getCustomerBalance(testCustomerId)
+        assertEquals(120.0, balanceBefore.balance, 0.001)
+
+        val returnResult = repository.recordSaleReturn(
+            saleId = sale.id,
+            returnLines = listOf(SaleReturnLineRequest(saleLineId = saleLine.id, quantity = 2)),
+            reason = "إرجاع جزئي وحدتين من بيع مختلط بدون استرداد نقدي"
+        )
+
+        assertEquals(80.0, returnResult.saleReturn.amount, 0.001)
+        assertEquals(null, returnResult.refund)
+        assertEquals(3, repository.getRemainingReturnableQuantities(sale.id)[saleLine.id])
+
+        val balanceAfter = repository.getCustomerBalance(testCustomerId)
+        assertEquals(40.0, balanceAfter.balance, 0.001)
+    }
+
+    /**
+     * Scenario 7: Multiple partial returns until original quantity is fully returned.
+     */
+    @Test
+    fun testScenario7_multiplePartialReturnsUntilFullyReturned() = runBlocking {
+        val saleLine = SaleLine(
+            id = "sl_sc7",
+            saleId = "sale_sc7",
+            productId = prodA,
+            productNameSnapshot = "أرز بسمتي",
+            quantity = 10,
+            unitPrice = 40.0,
+            costPriceAtSale = 25.0,
+            subtotal = 400.0
+        )
+        val sale = createTestSale(
+            saleId = "sale_sc7",
+            invoiceNumber = "INV-SC7",
+            customerId = testCustomerId,
+            saleType = SaleType.CREDIT,
+            totalAmount = 400.0,
+            paidAmount = 0.0,
+            lines = listOf(saleLine)
+        )
+
+        val ret1 = repository.recordSaleReturn(
+            saleId = sale.id,
+            returnLines = listOf(SaleReturnLineRequest(saleLine.id, 3)),
+            reason = "دفعة مرتجع 1"
+        )
+        assertEquals(3, ret1.lines[0].quantity)
+        assertEquals(7, repository.getRemainingReturnableQuantities(sale.id)[saleLine.id])
+
+        val ret2 = repository.recordSaleReturn(
+            saleId = sale.id,
+            returnLines = listOf(SaleReturnLineRequest(saleLine.id, 4)),
+            reason = "دفعة مرتجع 2"
+        )
+        assertEquals(4, ret2.lines[0].quantity)
+        assertEquals(3, repository.getRemainingReturnableQuantities(sale.id)[saleLine.id])
+
+        val ret3 = repository.recordSaleReturn(
+            saleId = sale.id,
+            returnLines = listOf(SaleReturnLineRequest(saleLine.id, 3)),
+            reason = "دفعة مرتجع 3 والأخيرة"
+        )
+        assertEquals(3, ret3.lines[0].quantity)
+        assertEquals(0, repository.getRemainingReturnableQuantities(sale.id)[saleLine.id])
+
+        try {
+            repository.recordSaleReturn(
+                saleId = sale.id,
+                returnLines = listOf(SaleReturnLineRequest(saleLine.id, 1)),
+                reason = "محاولة إرجاع بعد استنفاذ الكمية"
+            )
+            fail("Expected exception when returning more than remaining quantity")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message!!.contains("remaining returnable"))
+        }
+
+        val balance = repository.getCustomerBalance(testCustomerId)
+        assertEquals(0.0, balance.balance, 0.001)
+    }
+
+    /**
+     * Scenario 11: No refund requested -> no fake refund transaction.
+     */
+    @Test
+    fun testScenario11_noRefundRequestedNoFakeRefundTransaction() = runBlocking {
+        val saleLine = SaleLine(
+            id = "sl_sc11",
+            saleId = "sale_sc11",
+            productId = prodA,
+            productNameSnapshot = "أرز بسمتي",
+            quantity = 2,
+            unitPrice = 40.0,
+            costPriceAtSale = 25.0,
+            subtotal = 80.0
+        )
+        val sale = createTestSale(
+            saleId = "sale_sc11",
+            invoiceNumber = "INV-SC11",
+            customerId = testCustomerId,
+            saleType = SaleType.CASH,
+            totalAmount = 80.0,
+            paidAmount = 80.0,
+            lines = listOf(saleLine)
+        )
+
+        val returnResult = repository.recordSaleReturn(
+            saleId = sale.id,
+            returnLines = listOf(SaleReturnLineRequest(saleLine.id, 1)),
+            reason = "إرجاع بدون طلب استرداد نقدي",
+            refundRequest = null
+        )
+
+        assertEquals(null, returnResult.refund)
+        val storedRefunds = repository.getRefundsForSale(sale.id)
+        assertTrue("No refund should exist in the database", storedRefunds.isEmpty())
+    }
+
+    /**
+     * Scenario 15: Accounting operation remains auditable and reversible.
+     */
+    @Test
+    fun testScenario15_saleReturnAuditableAndReversible() = runBlocking {
+        val saleLine = SaleLine(
+            id = "sl_sc15",
+            saleId = "sale_sc15",
+            productId = prodA,
+            productNameSnapshot = "أرز بسمتي",
+            quantity = 4,
+            unitPrice = 40.0,
+            costPriceAtSale = 25.0,
+            subtotal = 160.0
+        )
+        val sale = createTestSale(
+            saleId = "sale_sc15",
+            invoiceNumber = "INV-SC15",
+            customerId = testCustomerId,
+            saleType = SaleType.CREDIT,
+            totalAmount = 160.0,
+            paidAmount = 0.0,
+            lines = listOf(saleLine)
+        )
+
+        val returnResult = repository.recordSaleReturn(
+            saleId = sale.id,
+            returnLines = listOf(SaleReturnLineRequest(saleLine.id, 2)),
+            reason = "مرتجع قابل للإلغاء والتدقيق"
+        )
+
+        assertEquals("ACTIVE", returnResult.saleReturn.status)
+        assertEquals("مرتجع قابل للإلغاء والتدقيق", returnResult.saleReturn.reason)
+        assertEquals(80.0, repository.getCustomerBalance(testCustomerId).balance, 0.001)
+
+        repository.reverseTransaction(
+            originalTransactionId = returnResult.saleReturn.id,
+            reason = "إلغاء المرتجع بالخطأ"
+        )
+
+        val returnAfterReversal = repository.saleReturnRepository.getSaleReturnById(returnResult.saleReturn.id)
+        assertNotNull(returnAfterReversal)
+        assertEquals("REVERSED", returnAfterReversal!!.status)
+
+        val balanceRestored = repository.getCustomerBalance(testCustomerId)
+        assertEquals(160.0, balanceRestored.balance, 0.001)
     }
 }

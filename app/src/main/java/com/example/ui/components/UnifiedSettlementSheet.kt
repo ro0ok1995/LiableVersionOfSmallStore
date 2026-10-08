@@ -1,7 +1,7 @@
 package com.example.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -70,6 +69,22 @@ enum class SettlementContext {
 }
 
 /**
+ * Top-level settlement mode tabs: Full (كلي) vs Partial (جزئي).
+ */
+enum class SettlementMode {
+    FULL,
+    PARTIAL
+}
+
+/**
+ * Settlement payment method chosen in Full mode: Cash vs Credit.
+ */
+enum class FullPaymentMethod {
+    CASH,
+    CREDIT
+}
+
+/**
  * UNIFIED SETTLEMENT dialog/bottom-sheet of SmallStore.
  * Generic, reusable version used both after "Complete Transaction" in Purchases
  * and for legacy quick payment settlements.
@@ -80,6 +95,7 @@ fun UnifiedSettlementSheet(
     isOpen: Boolean,
     languageMode: LanguageMode = LanguageMode.ARABIC,
     settlementContext: SettlementContext = SettlementContext.RECORD_TRANSACTION,
+    isCreditAllowed: Boolean = true,
     cartItems: List<CartItem> = emptyList(),
     transactionTotal: Double = 100.0,
     initialCashAmount: String = "50",
@@ -115,6 +131,7 @@ fun UnifiedSettlementSheet(
             UnifiedSettlementSheetContent(
                 languageMode = languageMode,
                 settlementContext = settlementContext,
+                isCreditAllowed = isCreditAllowed,
                 cartItems = cartItems,
                 transactionTotal = transactionTotal,
                 initialCashAmount = initialCashAmount,
@@ -131,6 +148,7 @@ fun UnifiedSettlementSheet(
 fun UnifiedSettlementSheetContent(
     languageMode: LanguageMode = LanguageMode.ARABIC,
     settlementContext: SettlementContext = SettlementContext.RECORD_TRANSACTION,
+    isCreditAllowed: Boolean = true,
     cartItems: List<CartItem> = emptyList(),
     transactionTotal: Double = 100.0,
     initialCashAmount: String = "50",
@@ -143,8 +161,30 @@ fun UnifiedSettlementSheetContent(
     val currency = AppCurrency.SYMBOL
     val focusManager = LocalFocusManager.current
 
-    var cashAmountText by remember(initialCashAmount) { mutableStateOf(initialCashAmount) }
-    var debtAmountText by remember(initialDebtAmount) { mutableStateOf(initialDebtAmount) }
+    fun formatAmount(amount: Double): String {
+        return if (amount % 1.0 == 0.0) {
+            String.format(Locale.US, "%.0f", amount)
+        } else {
+            String.format(Locale.US, "%.2f", amount)
+        }
+    }
+
+    // Top-level Settlement Tab: Full (كلي) vs Partial (جزئي)
+    // Anonymous customer flow: If no customer is selected (isCreditAllowed == false),
+    // Partial tab is not allowed and mode is strictly forced to FULL.
+    var settlementMode by remember(isCreditAllowed) { mutableStateOf(SettlementMode.FULL) }
+    val effectiveMode = if (isCreditAllowed) settlementMode else SettlementMode.FULL
+
+    // In FULL mode: choose Cash vs Credit. Credit is only available if isCreditAllowed.
+    var fullMethod by remember(isCreditAllowed) { mutableStateOf(FullPaymentMethod.CASH) }
+    val effectiveFullMethod = if (isCreditAllowed) fullMethod else FullPaymentMethod.CASH
+
+    var cashAmountText by remember(transactionTotal, isCreditAllowed) {
+        mutableStateOf(formatAmount(transactionTotal))
+    }
+    var debtAmountText by remember(isCreditAllowed) {
+        mutableStateOf("0")
+    }
     var notesText by remember(initialNotes) { mutableStateOf(initialNotes) }
 
     val activeAccounts = remember(financialAccounts) { financialAccounts.filter { it.isActive } }
@@ -156,10 +196,38 @@ fun UnifiedSettlementSheetContent(
         )
     }
 
-    val parsedCash = cashAmountText.toDoubleOrNull() ?: 0.0
-    val parsedDebt = debtAmountText.toDoubleOrNull() ?: 0.0
+    // Calculate parsed values based on mode
+    val rawCash = cashAmountText.toDoubleOrNull() ?: 0.0
+    val rawDebt = debtAmountText.toDoubleOrNull() ?: 0.0
+
+    val parsedCash = when (effectiveMode) {
+        SettlementMode.FULL -> if (effectiveFullMethod == FullPaymentMethod.CASH) rawCash else 0.0
+        SettlementMode.PARTIAL -> rawCash
+    }
+    val parsedDebt = when (effectiveMode) {
+        SettlementMode.FULL -> if (effectiveFullMethod == FullPaymentMethod.CREDIT) rawDebt else 0.0
+        SettlementMode.PARTIAL -> rawDebt
+    }
+
     val totalPaid = parsedCash + parsedDebt
     val remainingBalance = transactionTotal - totalPaid
+
+    // Validation
+    val isRemainingZero = Math.abs(remainingBalance) <= 0.001
+    val isTotalPaidValid = Math.abs(totalPaid - transactionTotal) <= 0.001 && transactionTotal > 0.0
+    val isValidAllocation = isRemainingZero && isTotalPaidValid && (parsedCash >= -0.001) && (parsedDebt >= -0.001) &&
+        when (effectiveMode) {
+            SettlementMode.FULL -> {
+                if (effectiveFullMethod == FullPaymentMethod.CASH) {
+                    parsedDebt <= 0.001 && Math.abs(parsedCash - transactionTotal) <= 0.001
+                } else {
+                    isCreditAllowed && parsedCash <= 0.001 && Math.abs(parsedDebt - transactionTotal) <= 0.001
+                }
+            }
+            SettlementMode.PARTIAL -> {
+                isCreditAllowed && isRemainingZero
+            }
+        }
 
     val sheetTitle = when (settlementContext) {
         SettlementContext.RECORD_TRANSACTION -> {
@@ -244,7 +312,7 @@ fun UnifiedSettlementSheetContent(
                 }
             }
 
-            // READ-ONLY PRODUCT LIST SUMMARY (Displayed at the TOP of the sheet, ABOVE the notes section, only in RECORD_TRANSACTION mode)
+            // READ-ONLY PRODUCT LIST SUMMARY (RECORD_TRANSACTION mode)
             if (settlementContext == SettlementContext.RECORD_TRANSACTION && cartItems.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(16.dp))
                 SettlementFieldLabel(
@@ -314,99 +382,358 @@ fun UnifiedSettlementSheetContent(
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            // CASH AMOUNT
-            SettlementFieldLabel(
-                text = if (isArabic) StoreStrings.CASH_AMOUNT_LABEL_AR else StoreStrings.CASH_AMOUNT_LABEL_EN
-            )
-            OutlinedTextField(
-                value = cashAmountText,
-                onValueChange = { cashAmountText = it },
-                placeholder = { Text("0.00") },
-                trailingIcon = {
-                    Text(
-                        text = currency,
-                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 12.dp)
-                    )
-                },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                    focusedContainerColor = MaterialTheme.colorScheme.surface,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("settlement_cash_input")
-            )
-
-            // FINANCIAL ACCOUNT SELECTION FOR PAID PORTION
-            if (activeAccounts.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(10.dp))
-                Text(
-                    text = if (isArabic) "إيداع المبلغ في الحساب المالي:" else "Deposit paid amount into account:",
-                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+            // TOP-LEVEL SETTLEMENT TABS: "كلي" / "Full" vs "جزئي" / "Partial"
+            // If credit is not allowed (anonymous customer), only Full Cash is available; Partial tab is not displayed.
+            if (isCreditAllowed) {
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .testTag("settlement_account_row")
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    items(activeAccounts) { acc ->
+                    // TAB 1: FULL
+                    Surface(
+                        selected = effectiveMode == SettlementMode.FULL,
+                        onClick = {
+                            settlementMode = SettlementMode.FULL
+                            if (effectiveFullMethod == FullPaymentMethod.CASH) {
+                                cashAmountText = formatAmount(transactionTotal)
+                                debtAmountText = "0"
+                            } else {
+                                cashAmountText = "0"
+                                debtAmountText = formatAmount(transactionTotal)
+                            }
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (effectiveMode == SettlementMode.FULL) MaterialTheme.colorScheme.primary else Color.Transparent,
+                        contentColor = if (effectiveMode == SettlementMode.FULL) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .testTag("settlement_tab_full")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = if (isArabic) "كلي" else "Full",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+
+                    // TAB 2: PARTIAL
+                    Surface(
+                        selected = effectiveMode == SettlementMode.PARTIAL,
+                        onClick = {
+                            settlementMode = SettlementMode.PARTIAL
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (effectiveMode == SettlementMode.PARTIAL) MaterialTheme.colorScheme.primary else Color.Transparent,
+                        contentColor = if (effectiveMode == SettlementMode.PARTIAL) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .testTag("settlement_tab_partial")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = if (isArabic) "جزئي" else "Partial",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+            }
+
+            // FULL MODE PRESENTATION
+            if (effectiveMode == SettlementMode.FULL) {
+                // In Full mode with a selected customer, choose exactly ONE settlement method: Cash or Credit
+                if (isCreditAllowed) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         FilterChip(
-                            selected = selectedAccountId == acc.id,
-                            onClick = { selectedAccountId = acc.id },
-                            label = { Text(acc.name) },
-                            modifier = Modifier.testTag("settlement_chip_account_${acc.id}")
+                            selected = effectiveFullMethod == FullPaymentMethod.CASH,
+                            onClick = {
+                                fullMethod = FullPaymentMethod.CASH
+                                cashAmountText = formatAmount(transactionTotal)
+                                debtAmountText = "0"
+                            },
+                            label = {
+                                Text(
+                                    text = if (isArabic) "نقدي" else "Cash",
+                                    fontWeight = if (effectiveFullMethod == FullPaymentMethod.CASH) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("settlement_method_cash")
+                        )
+                        FilterChip(
+                            selected = effectiveFullMethod == FullPaymentMethod.CREDIT,
+                            onClick = {
+                                fullMethod = FullPaymentMethod.CREDIT
+                                debtAmountText = formatAmount(transactionTotal)
+                                cashAmountText = "0"
+                            },
+                            label = {
+                                Text(
+                                    text = if (isArabic) "آجل" else "Credit",
+                                    fontWeight = if (effectiveFullMethod == FullPaymentMethod.CREDIT) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("settlement_method_credit")
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                }
+
+                // If Cash is selected: Show only Cash input. Do NOT show Credit input.
+                if (effectiveFullMethod == FullPaymentMethod.CASH) {
+                    SettlementFieldLabel(
+                        text = if (isArabic) StoreStrings.CASH_AMOUNT_LABEL_AR else StoreStrings.CASH_AMOUNT_LABEL_EN
+                    )
+                    OutlinedTextField(
+                        value = cashAmountText,
+                        onValueChange = { input ->
+                            if (isValidNumberInput(input, transactionTotal)) {
+                                cashAmountText = input
+                            }
+                        },
+                        placeholder = { Text("0.00") },
+                        trailingIcon = {
+                            Text(
+                                text = currency,
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 12.dp)
+                            )
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                            focusedContainerColor = MaterialTheme.colorScheme.surface,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("settlement_cash_input")
+                    )
+
+                    // FINANCIAL ACCOUNT SELECTION FOR CASH
+                    if (activeAccounts.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = if (isArabic) "إيداع المبلغ في الحساب المالي:" else "Deposit paid amount into account:",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("settlement_account_row")
+                        ) {
+                            items(activeAccounts) { acc ->
+                                FilterChip(
+                                    selected = selectedAccountId == acc.id,
+                                    onClick = { selectedAccountId = acc.id },
+                                    label = { Text(acc.name) },
+                                    modifier = Modifier.testTag("settlement_chip_account_${acc.id}")
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    // If Credit is selected: Show only Credit input. Cash is not active/visible.
+                    SettlementFieldLabel(
+                        text = if (isArabic) StoreStrings.DEBT_AMOUNT_LABEL_AR else StoreStrings.DEBT_AMOUNT_LABEL_EN
+                    )
+                    OutlinedTextField(
+                        value = debtAmountText,
+                        onValueChange = { input ->
+                            if (isValidNumberInput(input, transactionTotal)) {
+                                debtAmountText = input
+                            }
+                        },
+                        placeholder = { Text("0.00") },
+                        trailingIcon = {
+                            Text(
+                                text = currency,
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 12.dp)
+                            )
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                            focusedContainerColor = MaterialTheme.colorScheme.surface,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("settlement_debt_input")
+                    )
+                }
+            } else {
+                // PARTIAL MODE: Show both Cash and Credit inputs with allocation limits
+                val currentDebt = debtAmountText.toDoubleOrNull() ?: 0.0
+                val maxCashAllowed = (transactionTotal - currentDebt).coerceAtLeast(0.0)
+
+                val currentCash = cashAmountText.toDoubleOrNull() ?: 0.0
+                val maxDebtAllowed = (transactionTotal - currentCash).coerceAtLeast(0.0)
+
+                // Cash Amount Input
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SettlementFieldLabel(
+                        text = if (isArabic) StoreStrings.CASH_AMOUNT_LABEL_AR else StoreStrings.CASH_AMOUNT_LABEL_EN
+                    )
+                    if (maxCashAllowed > 0.001) {
+                        Text(
+                            text = if (isArabic) "المتبقي (${formatAmount(maxCashAllowed)})" else "Remaining (${formatAmount(maxCashAllowed)})",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            ),
+                            modifier = Modifier
+                                .clickable { cashAmountText = formatAmount(maxCashAllowed) }
+                                .padding(bottom = 6.dp)
                         )
                     }
                 }
-            }
+                OutlinedTextField(
+                    value = cashAmountText,
+                    onValueChange = { input ->
+                        if (isValidNumberInput(input, maxCashAllowed)) {
+                            cashAmountText = input
+                        }
+                    },
+                    placeholder = { Text("0.00") },
+                    trailingIcon = {
+                        Text(
+                            text = currency,
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        )
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("settlement_cash_input")
+                )
 
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // DEBT AMOUNT
-            SettlementFieldLabel(
-                text = if (isArabic) StoreStrings.DEBT_AMOUNT_LABEL_AR else StoreStrings.DEBT_AMOUNT_LABEL_EN
-            )
-            OutlinedTextField(
-                value = debtAmountText,
-                onValueChange = { debtAmountText = it },
-                placeholder = { Text("0.00") },
-                trailingIcon = {
+                // Financial account selector for cash portion
+                if (activeAccounts.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = currency,
-                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 12.dp)
+                        text = if (isArabic) "إيداع المبلغ في الحساب المالي:" else "Deposit paid amount into account:",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                    focusedContainerColor = MaterialTheme.colorScheme.surface,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("settlement_debt_input")
-            )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("settlement_account_row")
+                    ) {
+                        items(activeAccounts) { acc ->
+                            FilterChip(
+                                selected = selectedAccountId == acc.id,
+                                onClick = { selectedAccountId = acc.id },
+                                label = { Text(acc.name) },
+                                modifier = Modifier.testTag("settlement_chip_account_${acc.id}")
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Debt Amount Input
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SettlementFieldLabel(
+                        text = if (isArabic) StoreStrings.DEBT_AMOUNT_LABEL_AR else StoreStrings.DEBT_AMOUNT_LABEL_EN
+                    )
+                    if (maxDebtAllowed > 0.001) {
+                        Text(
+                            text = if (isArabic) "المتبقي (${formatAmount(maxDebtAllowed)})" else "Remaining (${formatAmount(maxDebtAllowed)})",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            ),
+                            modifier = Modifier
+                                .clickable { debtAmountText = formatAmount(maxDebtAllowed) }
+                                .padding(bottom = 6.dp)
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = debtAmountText,
+                    onValueChange = { input ->
+                        if (isValidNumberInput(input, maxDebtAllowed)) {
+                            debtAmountText = input
+                        }
+                    },
+                    placeholder = { Text("0.00") },
+                    trailingIcon = {
+                        Text(
+                            text = currency,
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        )
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("settlement_debt_input")
+                )
+            }
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // 3. TWO COMPUTED READ-ONLY SUMMARY LINES
+            // 3. ALLOCATION SUMMARY (Invoice Total, Allocated, Remaining)
             Card(
                 shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(
@@ -422,7 +749,35 @@ fun UnifiedSettlementSheetContent(
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 14.dp)
                 ) {
-                    // Line 1: Total Paid = Cash Amount + Debt Amount
+                    // Line 1: Invoice Total
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (isArabic) "إجمالي الفاتورة" else "Invoice Total",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 13.sp
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = String.format(Locale.US, "%.2f %s", transactionTotal, currency),
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Line 2: Allocated = Cash Amount + Debt Amount
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -432,7 +787,7 @@ fun UnifiedSettlementSheetContent(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = if (isArabic) StoreStrings.TOTAL_PAID_FORMULA_AR else StoreStrings.TOTAL_PAID_FORMULA_EN,
+                                text = if (isArabic) "المبلغ المخصص" else "Allocated",
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     fontWeight = FontWeight.Medium,
                                     fontSize = 13.sp
@@ -440,7 +795,11 @@ fun UnifiedSettlementSheetContent(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "${String.format(Locale.US, "%.2f", parsedCash)} + ${String.format(Locale.US, "%.2f", parsedDebt)}",
+                                text = if (isArabic) {
+                                    "نقدي: ${String.format(Locale.US, "%.2f", parsedCash)} + آجل: ${String.format(Locale.US, "%.2f", parsedDebt)}"
+                                } else {
+                                    "Cash: ${String.format(Locale.US, "%.2f", parsedCash)} + Credit: ${String.format(Locale.US, "%.2f", parsedDebt)}"
+                                },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -451,15 +810,15 @@ fun UnifiedSettlementSheetContent(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 16.sp
                             ),
-                            color = MaterialTheme.colorScheme.statusGreen
+                            color = if (isRemainingZero) MaterialTheme.colorScheme.statusGreen else MaterialTheme.colorScheme.primary
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                    // Line 2: Remaining Balance = Transaction Total - Total Paid
+                    // Line 3: Remaining = Invoice Total - Allocated
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -469,7 +828,7 @@ fun UnifiedSettlementSheetContent(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = if (isArabic) StoreStrings.REMAINING_BALANCE_FORMULA_AR else StoreStrings.REMAINING_BALANCE_FORMULA_EN,
+                                text = if (isArabic) "المتبقي" else "Remaining",
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     fontWeight = FontWeight.Medium,
                                     fontSize = 13.sp
@@ -488,7 +847,7 @@ fun UnifiedSettlementSheetContent(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 16.sp
                             ),
-                            color = if (remainingBalance > 0) MaterialTheme.colorScheme.statusRed else MaterialTheme.colorScheme.statusGreen
+                            color = if (isRemainingZero) MaterialTheme.colorScheme.statusGreen else MaterialTheme.colorScheme.statusRed
                         )
                     }
                 }
@@ -496,7 +855,7 @@ fun UnifiedSettlementSheetContent(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // 4. OPTIONAL "NOTES" FIELD
+            // 4. OPTIONAL NOTES FIELD
             val optionalLabel = if (isArabic) StoreStrings.NOTES_LABEL_AR else StoreStrings.NOTES_LABEL_EN
             SettlementFieldLabel(text = optionalLabel)
             OutlinedTextField(
@@ -541,12 +900,16 @@ fun UnifiedSettlementSheetContent(
             ) {
                 Button(
                     onClick = {
+                        if (!isValidAllocation) return@Button
                         focusManager.clearFocus()
                         onComplete(parsedCash, parsedDebt, notesText.trim(), selectedAccountId)
                     },
+                    enabled = isValidAllocation,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                     ),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
@@ -565,6 +928,17 @@ fun UnifiedSettlementSheetContent(
             }
         }
     }
+}
+
+private fun isValidNumberInput(newText: String, maxAllowed: Double): Boolean {
+    if (newText.isEmpty()) return true
+    if (newText.contains("-")) return false
+    if (newText.count { it == '.' } > 1) return false
+    if (newText == ".") return maxAllowed >= 0.0
+    val numStr = if (newText.endsWith(".")) newText.dropLast(1) else newText
+    val value = numStr.toDoubleOrNull() ?: return false
+    if (value < 0.0) return false
+    return value <= maxAllowed + 0.001
 }
 
 @Composable

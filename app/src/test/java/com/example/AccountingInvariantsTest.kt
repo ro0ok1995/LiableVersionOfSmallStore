@@ -371,4 +371,75 @@ class AccountingInvariantsTest {
         assertEquals("Transaction 2 belongs to Customer B", customerB.id, txForCustomerB.customerId)
         assertNotEquals(txForCustomerA.customerId, txForCustomerB.customerId)
     }
+
+    /**
+     * TEST 11 — SETTLEMENT ALLOCATION INVARIANTS (FULL & PARTIAL MODES)
+     *
+     * Validates:
+     * 1. Full Mode (Cash): cashAmount == totalAmount, creditAmount == 0 -> SaleType.CASH
+     * 2. Full Mode (Credit): cashAmount == 0, creditAmount == totalAmount -> SaleType.CREDIT
+     * 3. Partial Mode (Split): cashAmount + creditAmount == totalAmount (e.g. 60 + 40 = 100) -> SaleType.MIXED
+     * 4. Over-allocation (e.g. 80 + 30 = 110 != 100) is strictly rejected
+     * 5. Under-allocation (e.g. 50 + 30 = 80 != 100) is strictly rejected
+     */
+    @Test
+    fun test11_SettlementAllocationFullAndPartialModes() {
+        val invoiceTotal = 100.0
+
+        // 1. Full Mode: Cash
+        val fullCash = SaleSettlement.create(
+            totalAmount = invoiceTotal,
+            paidAmount = invoiceTotal,
+            creditAmount = 0.0
+        )
+        assertEquals("Full Cash must produce SaleType.CASH", SaleType.CASH, fullCash.saleType)
+        assertEquals("Full Cash must produce PaymentStatus.PAID", PaymentStatus.PAID, fullCash.paymentStatus)
+        assertEquals(0.0, fullCash.creditAmount, 0.0001)
+        assertEquals(invoiceTotal, fullCash.paidAmount, 0.0001)
+
+        // 2. Full Mode: Credit
+        val fullCredit = SaleSettlement.create(
+            totalAmount = invoiceTotal,
+            paidAmount = 0.0,
+            creditAmount = invoiceTotal
+        )
+        assertEquals("Full Credit must produce SaleType.CREDIT", SaleType.CREDIT, fullCredit.saleType)
+        assertEquals("Full Credit must produce PaymentStatus.UNPAID", PaymentStatus.UNPAID, fullCredit.paymentStatus)
+        assertEquals(invoiceTotal, fullCredit.creditAmount, 0.0001)
+        assertEquals(0.0, fullCredit.paidAmount, 0.0001)
+
+        // 3. Partial Mode: Valid split (60 cash + 40 credit = 100)
+        val partialSplit = SaleSettlement.create(
+            totalAmount = invoiceTotal,
+            paidAmount = 60.0,
+            creditAmount = 40.0
+        )
+        assertEquals("Partial split must produce SaleType.MIXED", SaleType.MIXED, partialSplit.saleType)
+        assertEquals("Partial split must produce PaymentStatus.PARTIAL", PaymentStatus.PARTIAL, partialSplit.paymentStatus)
+        assertEquals(invoiceTotal, partialSplit.paidAmount + partialSplit.creditAmount, 0.0001)
+
+        // 4. Over-allocation rejected (80 + 30 = 110 != 100)
+        try {
+            SaleSettlement.create(
+                totalAmount = invoiceTotal,
+                paidAmount = 80.0,
+                creditAmount = 30.0
+            )
+            fail("Over-allocation of 110 against 100 invoice must be rejected")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message?.contains("Invalid sale settlement") == true)
+        }
+
+        // 5. Under-allocation rejected (50 + 30 = 80 != 100)
+        try {
+            SaleSettlement.create(
+                totalAmount = invoiceTotal,
+                paidAmount = 50.0,
+                creditAmount = 30.0
+            )
+            fail("Under-allocation of 80 against 100 invoice must be rejected")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message?.contains("Invalid sale settlement") == true)
+        }
+    }
 }
