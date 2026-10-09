@@ -131,6 +131,7 @@ fun HomeScreen(
     onDismissCustomDatePicker: () -> Unit = {},
     onSetCustomDateRange: (LocalDate?, LocalDate?) -> Unit = { _, _ -> },
     onActivityClick: ((TransactionItem) -> Unit)? = null,
+    onNavigateToCustomerProfile: ((CustomerAccount) -> Unit)? = null,
     onReverseTransaction: ((TransactionItem, String, String) -> Unit)? = null,
     onReturnTransaction: ((TransactionItem, List<SaleReturnLineRequest>, String, String, RefundRequest?) -> Unit)? = null,
     onLoadReturnDetails: (suspend (String) -> Triple<Sale?, List<SaleLine>, Map<String, Int>>)? = null
@@ -818,6 +819,28 @@ fun HomeScreen(
                     }
                 }
 
+                // Search Bar immediately below section title and above activity items
+                CustomerSearchField(
+                    customers = allCustomers.ifEmpty { matchingCustomers },
+                    searchQuery = searchQuery,
+                    onSearchQueryChange = onSearchQueryChange,
+                    onCustomerSelected = { customer ->
+                        onSelectCustomer(customer)
+                    },
+                    onClearSelection = {
+                        onClearSelectedCustomer()
+                        onSearchQueryChange("")
+                    },
+                    selectedCustomerId = selectedCustomer?.id,
+                    placeholderText = if (isArabic) "بحث بالاسم أو الهاتف في النشاطات..." else "Search activity by name or phone...",
+                    currency = currency,
+                    isArabic = isArabic,
+                    inputTestTag = "customer_search_input",
+                    dropdownTestTag = "customer_search_suggestions",
+                    itemTagPrefix = "customer_suggestion_",
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+
                 if (recentActivities.isEmpty()) {
                     Card(
                         shape = RoundedCornerShape(14.dp),
@@ -870,7 +893,13 @@ fun HomeScreen(
                                 isArabic = isArabic,
                                 onClick = if (onActivityClick != null) { { onActivityClick(tx) } } else null,
                                 onCustomerClick = if (matchedCustomer != null) {
-                                    { onSelectCustomer(matchedCustomer) }
+                                    if (onNavigateToCustomerProfile != null) {
+                                        { onNavigateToCustomerProfile(matchedCustomer) }
+                                    } else if (onActivityClick != null) {
+                                        { onActivityClick(tx) }
+                                    } else {
+                                        { onSelectCustomer(matchedCustomer) }
+                                    }
                                 } else null,
                                 onReverseClick = if (onReverseTransaction != null && !isReversed) {
                                     { transactionToReverse = tx }
@@ -882,28 +911,6 @@ fun HomeScreen(
                         }
                     }
                 }
-
-                // Compact Search Bar at the bottom of Recent Store Activities
-                CustomerSearchField(
-                    customers = allCustomers.ifEmpty { matchingCustomers },
-                    searchQuery = searchQuery,
-                    onSearchQueryChange = onSearchQueryChange,
-                    onCustomerSelected = { customer ->
-                        onSelectCustomer(customer)
-                    },
-                    onClearSelection = {
-                        onClearSelectedCustomer()
-                        onSearchQueryChange("")
-                    },
-                    selectedCustomerId = selectedCustomer?.id,
-                    placeholderText = if (isArabic) "بحث بالاسم أو الهاتف في النشاطات..." else "Search activity by name or phone...",
-                    currency = currency,
-                    isArabic = isArabic,
-                    inputTestTag = "customer_search_input",
-                    dropdownTestTag = "customer_search_suggestions",
-                    itemTagPrefix = "customer_suggestion_",
-                    modifier = Modifier.padding(top = 4.dp)
-                )
             }
         }
     }
@@ -993,8 +1000,12 @@ fun HomeScreen(
                                     .fillMaxWidth()
                                     .clickable(enabled = customer != null) {
                                         customer?.let {
-                                            onSelectCustomer(it)
                                             showOverdueCustomersDialog = false
+                                            if (onNavigateToCustomerProfile != null) {
+                                                onNavigateToCustomerProfile(it)
+                                            } else {
+                                                onSelectCustomer(it)
+                                            }
                                         }
                                     }
                             ) {

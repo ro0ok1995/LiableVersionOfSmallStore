@@ -291,6 +291,10 @@ fun SmallStoreApp(
                                     languageMode = uiState.languageMode,
                                     onSearchQueryChange = { mainViewModel.setHomeSearchQuery(it) },
                                     onSelectCustomer = { mainViewModel.selectHomeCustomer(it) },
+                                    onNavigateToCustomerProfile = { customer ->
+                                        mainViewModel.selectCustomerDetails(customer)
+                                        mainViewModel.navigateTo(NavDestination.CUSTOMER_DETAILS)
+                                    },
                                     onClearSelectedCustomer = { mainViewModel.clearHomeSelectedCustomer() },
                                     onSelectPeriod = { mainViewModel.setHomePeriod(it) },
                                     customStartDate = uiState.homeCustomStartDate,
