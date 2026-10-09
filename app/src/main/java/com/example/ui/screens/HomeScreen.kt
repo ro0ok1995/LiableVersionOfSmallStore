@@ -260,7 +260,7 @@ fun HomeScreen(
         contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // 1. HEADER & COMPACT QUICK SEARCH BAR
+        // 1. HEADER
         item {
             Column(
                 modifier = Modifier
@@ -269,76 +269,19 @@ fun HomeScreen(
                     .padding(horizontal = 16.dp, vertical = 8.dp)
                     .testTag("home_fixed_top_section")
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = if (isArabic) "لوحة التحكم" else "Dashboard",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 20.sp
-                            ),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = if (isArabic) "نظرة عامة على نشاط المتجر وأرصدته" else "Store activity and balance overview",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { isSearchExpanded = !isSearchExpanded }
-                            .testTag("toggle_customer_search")
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (isSearchExpanded) Icons.Default.Close else Icons.Default.Search,
-                                contentDescription = if (isArabic) "بحث العملاء" else "Customer Search",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (selectedCustomer != null) selectedCustomer.customerName else if (isArabic) "بحث عميل" else "Search",
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.primary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-
-                if (isSearchExpanded || selectedCustomer != null || searchQuery.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    CustomerSearchField(
-                        customers = allCustomers.ifEmpty { matchingCustomers },
-                        searchQuery = searchQuery,
-                        onSearchQueryChange = onSearchQueryChange,
-                        onCustomerSelected = {
-                            onSelectCustomer(it)
-                            isSearchExpanded = false
-                        },
-                        onClearSelection = onClearSelectedCustomer,
-                        selectedCustomerId = selectedCustomer?.id,
-                        currency = currency,
-                        isArabic = isArabic,
-                        inputTestTag = "customer_search_input",
-                        dropdownTestTag = "customer_search_suggestions",
-                        itemTagPrefix = "customer_suggestion_"
-                    )
-                }
+                Text(
+                    text = if (isArabic) "لوحة التحكم" else "Dashboard",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 20.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = if (isArabic) "نظرة عامة على نشاط المتجر وأرصدته" else "Store activity and balance overview",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
 
@@ -858,16 +801,108 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = if (isArabic) "آخر نشاطات المتجر" else "Recent Store Activity",
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
+                    Column {
+                        Text(
+                            text = if (isArabic) "آخر نشاطات المتجر" else "Recent Store Activity",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = if (isArabic) "${periodTransactions.size} عملية مسجلة" else "${periodTransactions.size} total entries",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { isSearchExpanded = !isSearchExpanded }
+                            .testTag("toggle_customer_search")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isSearchExpanded) Icons.Default.Close else Icons.Default.Search,
+                                contentDescription = if (isArabic) "بحث العملاء" else "Customer Search",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (selectedCustomer != null) selectedCustomer.customerName else if (isArabic) "تصفية بالعميل" else "Filter",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+
+                if (isSearchExpanded || selectedCustomer != null || searchQuery.isNotBlank()) {
+                    CustomerSearchField(
+                        customers = allCustomers.ifEmpty { matchingCustomers },
+                        searchQuery = searchQuery,
+                        onSearchQueryChange = onSearchQueryChange,
+                        onCustomerSelected = {
+                            onSelectCustomer(it)
+                            isSearchExpanded = false
+                        },
+                        onClearSelection = onClearSelectedCustomer,
+                        selectedCustomerId = selectedCustomer?.id,
+                        currency = currency,
+                        isArabic = isArabic,
+                        inputTestTag = "customer_search_input",
+                        dropdownTestTag = "customer_search_suggestions",
+                        itemTagPrefix = "customer_suggestion_"
                     )
-                    Text(
-                        text = if (isArabic) "${periodTransactions.size} عملية مسجلة" else "${periodTransactions.size} total entries",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                }
+
+                if (selectedCustomer != null) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Person,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "${if (isArabic) "تصفية حسب العميل: " else "Filtered by customer: "}${selectedCustomer.customerName}",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                            IconButton(
+                                onClick = onClearSelectedCustomer,
+                                modifier = Modifier.size(20.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = if (isArabic) "إلغاء التصفية" else "Clear filter",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
+                    }
                 }
 
                 if (recentActivities.isEmpty()) {
@@ -1038,6 +1073,7 @@ private fun PeriodChip(
         }
     }
 }
+
 
 data class DonutSegment(
     val percentage: Float,
