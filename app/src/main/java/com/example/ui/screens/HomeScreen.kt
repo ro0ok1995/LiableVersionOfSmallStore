@@ -846,22 +846,21 @@ fun HomeScreen(
 
                             val isCustomerTx = when (tx.typedTransactionType) {
                                 TransactionType.SALE,
-                                TransactionType.CUSTOMER_PAYMENT,
-                                TransactionType.CUSTOMER_OPENING_BALANCE,
-                                TransactionType.CUSTOMER_ADJUSTMENT -> true
+                                TransactionType.CUSTOMER_PAYMENT -> true
                                 TransactionType.PURCHASE,
                                 TransactionType.SUPPLIER_PAYMENT,
                                 TransactionType.EXPENSE,
                                 TransactionType.PURCHASE_RETURN,
                                 TransactionType.SALE_RETURN -> false
                                 null -> tx.customerId != null && !tx.activityType.contains("مورد") && !tx.activityType.contains("مصروف")
+                                else -> tx.customerId != null
                             }
 
                             val matchedCustomer = if (isCustomerTx) {
                                 if (tx.customerId != null) {
                                     customerPool.find { it.id == tx.customerId }
                                 } else if (tx.customerNameSnapshot.isNotBlank()) {
-                                    customerPool.find { it.name.trim() == tx.customerNameSnapshot.trim() }
+                                    customerPool.find { it.customerName.trim() == tx.customerNameSnapshot.trim() }
                                 } else null
                             } else null
 
