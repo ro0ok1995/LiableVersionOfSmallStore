@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -140,6 +141,7 @@ fun HomeScreen(
     var transactionToReverse by remember { mutableStateOf<TransactionItem?>(null) }
     var transactionToReturn by remember { mutableStateOf<TransactionItem?>(null) }
     var isSearchExpanded by remember { mutableStateOf(false) }
+    var showOverdueCustomersDialog by remember { mutableStateOf(false) }
 
     // CURRENT BALANCES (Never filtered by period):
     // 1. Customer Receivables & Debt Aging
@@ -236,9 +238,24 @@ fun HomeScreen(
         }.sumOf { it.amount }
     }
 
-    // Recent store activities (top 6 recent items)
-    val recentActivities = remember(periodTransactions) {
-        periodTransactions.take(6)
+    // Recent store activities (top 6 recent items, filtered by search query if entered)
+    val recentActivities = remember(periodTransactions, searchQuery, allCustomers, matchingCustomers) {
+        val trimmedQuery = searchQuery.trim()
+        val filtered = if (trimmedQuery.isBlank()) {
+            periodTransactions
+        } else {
+            val customerPool = allCustomers.ifEmpty { matchingCustomers }
+            val matchingCustomerIds = customerPool
+                .filter { it.customerName.contains(trimmedQuery, ignoreCase = true) || it.phone.contains(trimmedQuery) }
+                .map { it.id }
+                .toSet()
+
+            periodTransactions.filter { tx ->
+                (tx.customerId != null && tx.customerId in matchingCustomerIds) ||
+                tx.customerNameSnapshot.contains(trimmedQuery, ignoreCase = true)
+            }
+        }
+        filtered.take(6)
     }
 
     // Sales Trend by day in period (visual bar trend)
@@ -516,56 +533,6 @@ fun HomeScreen(
                                 }
                             }
                         }
-
-                        // Overdue Callout Card (if overdue > 0)
-                        if (overdueReceivables > 0.001) {
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f)),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("home_overdue_warning_card")
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(8.dp)
-                                                .clip(CircleShape)
-                                                .background(MaterialTheme.colorScheme.error)
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Column {
-                                            Text(
-                                                text = if (isArabic) "ديون متأخرة تجاوزت 30 يوماً" else "Overdue Receivables (>30d)",
-                                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                                color = MaterialTheme.colorScheme.error
-                                            )
-                                            if (overdueCustomersCount > 0) {
-                                                Text(
-                                                    text = "$overdueCustomersCount ${if (isArabic) "عملاء بحاجة للمتابعة" else "customers overdue"}",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                        }
-                                    }
-                                    Text(
-                                        text = String.format(Locale.US, "%,.2f %s", overdueReceivables, currency),
-                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.ExtraBold),
-                                        color = MaterialTheme.colorScheme.error
-                                    )
-                                }
-                            }
-                        }
                     }
                 }
             }
@@ -658,7 +625,10 @@ fun HomeScreen(
                         shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.surface,
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.25f)),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showOverdueCustomersDialog = true }
+                            .testTag("home_needs_attention_card")
                     ) {
                         Row(
                             modifier = Modifier
@@ -814,92 +784,35 @@ fun HomeScreen(
                         )
                     }
 
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { isSearchExpanded = !isSearchExpanded }
-                            .testTag("toggle_customer_search")
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    if (selectedCustomer != null) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                            modifier = Modifier.testTag("home_active_customer_filter_chip")
                         ) {
-                            Icon(
-                                imageVector = if (isSearchExpanded) Icons.Default.Close else Icons.Default.Search,
-                                contentDescription = if (isArabic) "بحث العملاء" else "Customer Search",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (selectedCustomer != null) selectedCustomer.customerName else if (isArabic) "تصفية بالعميل" else "Filter",
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.primary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-
-                if (isSearchExpanded || selectedCustomer != null || searchQuery.isNotBlank()) {
-                    CustomerSearchField(
-                        customers = allCustomers.ifEmpty { matchingCustomers },
-                        searchQuery = searchQuery,
-                        onSearchQueryChange = onSearchQueryChange,
-                        onCustomerSelected = {
-                            onSelectCustomer(it)
-                            isSearchExpanded = false
-                        },
-                        onClearSelection = onClearSelectedCustomer,
-                        selectedCustomerId = selectedCustomer?.id,
-                        currency = currency,
-                        isArabic = isArabic,
-                        inputTestTag = "customer_search_input",
-                        dropdownTestTag = "customer_search_suggestions",
-                        itemTagPrefix = "customer_suggestion_"
-                    )
-                }
-
-                if (selectedCustomer != null) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Person,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "${if (isArabic) "تصفية حسب العميل: " else "Filtered by customer: "}${selectedCustomer.customerName}",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            }
-                            IconButton(
-                                onClick = onClearSelectedCustomer,
-                                modifier = Modifier.size(20.dp)
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = if (isArabic) "إلغاء التصفية" else "Clear filter",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(14.dp)
+                                Text(
+                                    text = selectedCustomer.customerName,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                IconButton(
+                                    onClick = onClearSelectedCustomer,
+                                    modifier = Modifier.size(16.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = if (isArabic) "إلغاء التصفية" else "Clear filter",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -920,6 +833,7 @@ fun HomeScreen(
                         )
                     }
                 } else {
+                    val customerPool = allCustomers.ifEmpty { matchingCustomers }
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         recentActivities.forEach { tx ->
                             val isSale = if (tx.typedTransactionType != null) {
@@ -930,11 +844,35 @@ fun HomeScreen(
                             val isReversed = tx.typedOperationStatus == OperationStatus.REVERSED
                             val isReturnEligible = !isReversed && isSale
 
+                            val isCustomerTx = when (tx.typedTransactionType) {
+                                TransactionType.SALE,
+                                TransactionType.CUSTOMER_PAYMENT,
+                                TransactionType.CUSTOMER_OPENING_BALANCE,
+                                TransactionType.CUSTOMER_ADJUSTMENT -> true
+                                TransactionType.PURCHASE,
+                                TransactionType.SUPPLIER_PAYMENT,
+                                TransactionType.EXPENSE,
+                                TransactionType.PURCHASE_RETURN,
+                                TransactionType.SALE_RETURN -> false
+                                null -> tx.customerId != null && !tx.activityType.contains("مورد") && !tx.activityType.contains("مصروف")
+                            }
+
+                            val matchedCustomer = if (isCustomerTx) {
+                                if (tx.customerId != null) {
+                                    customerPool.find { it.id == tx.customerId }
+                                } else if (tx.customerNameSnapshot.isNotBlank()) {
+                                    customerPool.find { it.name.trim() == tx.customerNameSnapshot.trim() }
+                                } else null
+                            } else null
+
                             ActivityRowCard(
                                 transaction = tx,
                                 currency = currency,
                                 isArabic = isArabic,
                                 onClick = if (onActivityClick != null) { { onActivityClick(tx) } } else null,
+                                onCustomerClick = if (matchedCustomer != null) {
+                                    { onSelectCustomer(matchedCustomer) }
+                                } else null,
                                 onReverseClick = if (onReverseTransaction != null && !isReversed) {
                                     { transactionToReverse = tx }
                                 } else null,
@@ -945,6 +883,28 @@ fun HomeScreen(
                         }
                     }
                 }
+
+                // Compact Search Bar at the bottom of Recent Store Activities
+                CustomerSearchField(
+                    customers = allCustomers.ifEmpty { matchingCustomers },
+                    searchQuery = searchQuery,
+                    onSearchQueryChange = onSearchQueryChange,
+                    onCustomerSelected = { customer ->
+                        onSelectCustomer(customer)
+                    },
+                    onClearSelection = {
+                        onClearSelectedCustomer()
+                        onSearchQueryChange("")
+                    },
+                    selectedCustomerId = selectedCustomer?.id,
+                    placeholderText = if (isArabic) "بحث بالاسم أو الهاتف في النشاطات..." else "Search activity by name or phone...",
+                    currency = currency,
+                    isArabic = isArabic,
+                    inputTestTag = "customer_search_input",
+                    dropdownTestTag = "customer_search_suggestions",
+                    itemTagPrefix = "customer_suggestion_",
+                    modifier = Modifier.padding(top = 4.dp)
+                )
             }
         }
     }
@@ -985,6 +945,101 @@ fun HomeScreen(
                 transactionToReturn = null
             },
             onDismiss = { transactionToReturn = null }
+        )
+    }
+
+    if (showOverdueCustomersDialog) {
+        val overdueCustomerItems = remember(storeAgingSummary, allCustomers, matchingCustomers) {
+            val customerPool = allCustomers.ifEmpty { matchingCustomers }
+            storeAgingSummary.customerAgings
+                .filter { (it.bucket31To60 + it.bucket61To90 + it.bucket90Plus) > 0.001 }
+                .map { aging ->
+                    val customer = customerPool.find { it.id == aging.customerId }
+                    Triple(
+                        aging.customerName,
+                        customer?.balance?.coerceAtLeast(0.0) ?: aging.currentBalance.coerceAtLeast(0.0),
+                        customer
+                    )
+                }
+                .sortedByDescending { it.second }
+        }
+
+        AlertDialog(
+            onDismissRequest = { showOverdueCustomersDialog = false },
+            title = {
+                Text(
+                    text = if (isArabic) "العملاء المتأخرون في السداد" else "Overdue Customers",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+            },
+            text = {
+                if (overdueCustomerItems.isEmpty()) {
+                    Text(
+                        text = if (isArabic) "لا يوجد عملاء متأخرون حالياً" else "No overdue customers found",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 350.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(overdueCustomerItems) { (name, balance, customer) ->
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(enabled = customer != null) {
+                                        customer?.let {
+                                            onSelectCustomer(it)
+                                            showOverdueCustomersDialog = false
+                                        }
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Person,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = name,
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Text(
+                                        text = String.format(Locale.US, "%,.2f %s", balance, currency),
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showOverdueCustomersDialog = false }) {
+                    Text(if (isArabic) "إغلاق" else "Close")
+                }
+            }
         )
     }
 }
@@ -1163,6 +1218,7 @@ private fun ActivityRowCard(
     currency: String,
     isArabic: Boolean,
     onClick: (() -> Unit)? = null,
+    onCustomerClick: (() -> Unit)? = null,
     onReverseClick: (() -> Unit)? = null,
     onReturnClick: (() -> Unit)? = null
 ) {
@@ -1220,7 +1276,12 @@ private fun ActivityRowCard(
                         ),
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = if (onCustomerClick != null) {
+                            Modifier
+                                .clickable { onCustomerClick() }
+                                .testTag("activity_customer_name_${transaction.id}")
+                        } else Modifier
                     )
                     if (transaction.isArchived) {
                         Spacer(modifier = Modifier.width(6.dp))
