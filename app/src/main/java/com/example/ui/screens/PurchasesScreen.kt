@@ -66,6 +66,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -152,6 +153,7 @@ fun PurchasesScreen(
     onGetSupplierBalance: (suspend (supplierId: String) -> SupplierBalanceSummary)? = null,
     onGetSupplierStatement: (suspend (supplierId: String) -> List<SupplierLedgerEntry>)? = null,
     onGetPurchaseLines: suspend (purchaseId: String) -> List<com.example.data.db.PurchaseLine> = { emptyList() },
+    initialTab: Int = 0,
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
@@ -160,7 +162,10 @@ fun PurchasesScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     var showCustomerPicker by remember { mutableStateOf(false) }
-    var activeSectionTab by remember { mutableIntStateOf(0) }
+    var activeSectionTab by remember { mutableIntStateOf(initialTab) }
+    LaunchedEffect(initialTab) {
+        activeSectionTab = initialTab
+    }
 
     val totalCartItems = cart.sumOf { it.quantity }
     val totalCartAmount = cart.sumOf { it.product.price * it.quantity }

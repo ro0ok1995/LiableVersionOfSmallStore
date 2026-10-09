@@ -132,6 +132,7 @@ fun HomeScreen(
     onSetCustomDateRange: (LocalDate?, LocalDate?) -> Unit = { _, _ -> },
     onActivityClick: ((TransactionItem) -> Unit)? = null,
     onNavigateToCustomerProfile: ((CustomerAccount) -> Unit)? = null,
+    onNavigateToSuppliers: (() -> Unit)? = null,
     onReverseTransaction: ((TransactionItem, String, String) -> Unit)? = null,
     onReturnTransaction: ((TransactionItem, List<SaleReturnLineRequest>, String, String, RefundRequest?) -> Unit)? = null,
     onLoadReturnDetails: (suspend (String) -> Triple<Sale?, List<SaleLine>, Map<String, Int>>)? = null
@@ -143,6 +144,8 @@ fun HomeScreen(
     var transactionToReturn by remember { mutableStateOf<TransactionItem?>(null) }
     var isSearchExpanded by remember { mutableStateOf(false) }
     var showOverdueCustomersDialog by remember { mutableStateOf(false) }
+    var selectedDashboardTab by remember { mutableStateOf(0) } // 0: Customers, 1: Suppliers
+
 
     // CURRENT BALANCES (Never filtered by period):
     // 1. Customer Receivables & Debt Aging
@@ -239,11 +242,35 @@ fun HomeScreen(
         }.sumOf { it.amount }
     }
 
-    // Recent store activities (top 6 recent items, filtered by search query if entered)
-    val recentActivities = remember(periodTransactions, searchQuery, allCustomers, matchingCustomers) {
+    // Recent store activities (top 6 recent items, filtered by dashboard tab and search query)
+    val recentActivities = remember(periodTransactions, searchQuery, allCustomers, matchingCustomers, selectedDashboardTab) {
         val trimmedQuery = searchQuery.trim()
+
+        // 1. Filter by Dashboard Tab (Customer vs Supplier)
+        val tabFiltered = periodTransactions.filter { tx ->
+            val isSupplierTx = when (tx.typedTransactionType) {
+                TransactionType.PURCHASE,
+                TransactionType.SUPPLIER_PAYMENT,
+                TransactionType.PURCHASE_RETURN -> true
+                TransactionType.EXPENSE -> false
+                TransactionType.SALE,
+                TransactionType.CUSTOMER_PAYMENT,
+                TransactionType.SALE_RETURN -> false
+                else -> tx.activityType.contains("مورد")
+            }
+
+            if (selectedDashboardTab == 1) {
+                // Supplier Dashboard: Purchases, Supplier payments, Purchase returns
+                isSupplierTx
+            } else {
+                // Customer Dashboard: Sales, Customer payments/collections, Sale returns
+                !isSupplierTx && tx.typedTransactionType != TransactionType.EXPENSE && !tx.activityType.contains("مصروف")
+            }
+        }
+
+        // 2. Filter by search query if entered
         val filtered = if (trimmedQuery.isBlank()) {
-            periodTransactions
+            tabFiltered
         } else {
             val customerPool = allCustomers.ifEmpty { matchingCustomers }
             val matchingCustomerIds = customerPool
@@ -251,7 +278,7 @@ fun HomeScreen(
                 .map { it.id }
                 .toSet()
 
-            periodTransactions.filter { tx ->
+            tabFiltered.filter { tx ->
                 (tx.customerId != null && tx.customerId in matchingCustomerIds) ||
                 tx.customerNameSnapshot.contains(trimmedQuery, ignoreCase = true)
             }
@@ -397,219 +424,247 @@ fun HomeScreen(
             }
         }
 
-        // 3. PERIOD FLOW KPIS (2x2 Grid)
+        // 2B. DASHBOARD TAB SELECTOR (Customer vs Supplier)
         item {
-            Column(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(horizontal = 16.dp)
+                    .testTag("dashboard_tab_selector_row"),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = if (isArabic) "نشاط الفترة المحددة" else "Selected Period Flow",
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    // KPI 1: Sales
-                    KpiCard(
-                        title = if (isArabic) "المبيعات" else "Sales",
-                        subtitle = if (periodSalesCount > 0) "$periodSalesCount ${if (isArabic) "عملية" else "txs"}" else null,
-                        amount = totalPeriodSales,
-                        currency = currency,
-                        valueColor = MaterialTheme.colorScheme.primary,
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        testTag = "kpi_sales",
-                        modifier = Modifier.weight(1f)
-                    )
-                    // KPI 2: Collections
-                    KpiCard(
-                        title = if (isArabic) "التحصيلات النقدية" else "Collections",
-                        subtitle = if (isArabic) "سداد العملاء" else "Customer payments",
-                        amount = totalPeriodCollections,
-                        currency = currency,
-                        valueColor = MaterialTheme.colorScheme.statusGreen,
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        testTag = "kpi_collections",
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    // KPI 3: Expenses
-                    KpiCard(
-                        title = if (isArabic) "المصروفات" else "Expenses",
-                        subtitle = if (isArabic) "مصاريف تشغيلية" else "Operating costs",
-                        amount = totalPeriodExpenses,
-                        currency = currency,
-                        valueColor = MaterialTheme.colorScheme.error,
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        testTag = "kpi_expenses",
-                        modifier = Modifier.weight(1f)
-                    )
-                    // KPI 4: Credit Sales
-                    KpiCard(
-                        title = if (isArabic) "مبيعات بالدين" else "Credit Sales",
-                        subtitle = if (isArabic) "آجل غير مسدد" else "Deferred sales",
-                        amount = totalPeriodCreditSales,
-                        currency = currency,
-                        valueColor = MaterialTheme.colorScheme.statusAmber,
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        testTag = "kpi_credit_sales",
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+                PeriodChip(
+                    label = if (isArabic) "لوحة العملاء" else "Customer Dashboard",
+                    isSelected = selectedDashboardTab == 0,
+                    testTag = "dashboard_tab_customer",
+                    onClick = { selectedDashboardTab = 0 },
+                    modifier = Modifier.weight(1f)
+                )
+                PeriodChip(
+                    label = if (isArabic) "لوحة الموردين" else "Supplier Dashboard",
+                    isSelected = selectedDashboardTab == 1,
+                    testTag = "dashboard_tab_supplier",
+                    onClick = { selectedDashboardTab = 1 },
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
 
-        // 4 & 5. CURRENT BALANCES: CUSTOMER RECEIVABLES & OVERDUE WARNING
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    text = if (isArabic) "الأرصدة والمستحقات الحالية (لحظياً)" else "Current Outstanding Balances",
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        // 3. PERIOD FLOW KPIS (2x2 Grid)
+        if (selectedDashboardTab == 0) {
+            item {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .testTag("home_customer_receivables_card")
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            Column {
-                                Text(
-                                    text = if (isArabic) "مستحقات العملاء (الديون لك)" else "Customer Receivables",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = String.format(Locale.US, "%,.2f %s", customerReceivables, currency),
-                                    style = MaterialTheme.typography.headlineMedium.copy(
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 24.sp
-                                    ),
-                                    color = if (customerReceivables > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.testTag("stat_total_debt")
-                                )
-                            }
-                            if (customersWithDebtCount > 0) {
-                                Surface(
-                                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (isArabic) "نشاط الفترة المحددة" else "Selected Period Flow",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // KPI 1: Sales
+                        KpiCard(
+                            title = if (isArabic) "المبيعات" else "Sales",
+                            subtitle = if (periodSalesCount > 0) "$periodSalesCount ${if (isArabic) "عملية" else "txs"}" else null,
+                            amount = totalPeriodSales,
+                            currency = currency,
+                            valueColor = MaterialTheme.colorScheme.primary,
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            testTag = "kpi_sales",
+                            modifier = Modifier.weight(1f)
+                        )
+                        // KPI 2: Collections
+                        KpiCard(
+                            title = if (isArabic) "التحصيلات النقدية" else "Collections",
+                            subtitle = if (isArabic) "سداد العملاء" else "Customer payments",
+                            amount = totalPeriodCollections,
+                            currency = currency,
+                            valueColor = MaterialTheme.colorScheme.statusGreen,
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            testTag = "kpi_collections",
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // KPI 3: Expenses
+                        KpiCard(
+                            title = if (isArabic) "المصروفات" else "Expenses",
+                            subtitle = if (isArabic) "مصاريف تشغيلية" else "Operating costs",
+                            amount = totalPeriodExpenses,
+                            currency = currency,
+                            valueColor = MaterialTheme.colorScheme.error,
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            testTag = "kpi_expenses",
+                            modifier = Modifier.weight(1f)
+                        )
+                        // KPI 4: Credit Sales
+                        KpiCard(
+                            title = if (isArabic) "مبيعات بالدين" else "Credit Sales",
+                            subtitle = if (isArabic) "آجل غير مسدد" else "Deferred sales",
+                            amount = totalPeriodCreditSales,
+                            currency = currency,
+                            valueColor = MaterialTheme.colorScheme.statusAmber,
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            testTag = "kpi_credit_sales",
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+
+            // 4 & 5. CURRENT BALANCES: CUSTOMER RECEIVABLES & OVERDUE WARNING
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = if (isArabic) "الأرصدة والمستحقات الحالية (لحظياً)" else "Current Outstanding Balances",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("home_customer_receivables_card")
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Column {
                                     Text(
-                                        text = "$customersWithDebtCount ${if (isArabic) "عملاء مدينين" else "debtors"}",
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.error,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        text = if (isArabic) "مستحقات العملاء (الديون لك)" else "Customer Receivables",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = String.format(Locale.US, "%,.2f %s", customerReceivables, currency),
+                                        style = MaterialTheme.typography.headlineMedium.copy(
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontSize = 24.sp
+                                        ),
+                                        color = if (customerReceivables > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.testTag("stat_total_debt")
+                                    )
+                                }
+                                if (customersWithDebtCount > 0) {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text(
+                                            text = "$customersWithDebtCount ${if (isArabic) "عملاء مدينين" else "debtors"}",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-        }
 
-        // 6 & 7. SUPPLIER PAYABLES & PURCHASES
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                // Section 6: Current Supplier Payables
-                Card(
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("home_supplier_payables_card")
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
+            // 8. NEEDS ATTENTION SECTION
+            item {
+                if (overdueReceivables > 0.001) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         Text(
-                            text = if (isArabic) "مستحقات الموردين" else "Supplier Payables",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            text = if (isArabic) "يحتاج انتباهك" else "Needs Attention",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.error
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = String.format(Locale.US, "%,.2f %s", supplierPayables, currency),
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
-                            color = if (supplierPayables > 0) MaterialTheme.colorScheme.statusAmber else MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = if (isArabic) "رصيد الالتزام الحالي" else "Current balance owed",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
 
-                // Section 7: Purchases (Period Flow)
-                Card(
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("home_purchases_period_card")
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Text(
-                            text = if (isArabic) "مشتريات الفترة" else "Period Purchases",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = String.format(Locale.US, "%,.2f %s", totalPeriodPurchases, currency),
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = if (isArabic) "توريد بضائع بالفترة" else "Goods acquired in period",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.25f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showOverdueCustomersDialog = true }
+                                .testTag("home_needs_attention_card")
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.errorContainer,
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Default.ReceiptLong,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = if (isArabic) "متابعة تحصيل الديون المتأخرة" else "Follow up overdue receivables",
+                                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                                        )
+                                        Text(
+                                            text = if (isArabic) "$overdueCustomersCount عملاء لديهم ديون متأخرة أكثر من 30 يوماً" else "$overdueCustomersCount customers have debt older than 30 days",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = String.format(Locale.US, "%,.1f %s", overdueReceivables, currency),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
                     }
                 }
             }
-        }
 
-        // 8. NEEDS ATTENTION SECTION
-        item {
-            if (overdueReceivables > 0.001) {
+            // 9. SALES TREND SECTION (Visual trend in period)
+            item {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -617,141 +672,175 @@ fun HomeScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = if (isArabic) "يحتاج انتباهك" else "Needs Attention",
+                        text = if (isArabic) "مؤشر حركة المبيعات بالفترة" else "Sales Period Trend",
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.error
+                        color = MaterialTheme.colorScheme.onSurface
                     )
 
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surface,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.25f)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { showOverdueCustomersDialog = true }
-                            .testTag("home_needs_attention_card")
+                    Card(
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                Surface(
-                                    color = MaterialTheme.colorScheme.errorContainer,
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.size(36.dp)
+                        if (salesTrendPoints.size < 2) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(20.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = if (periodSalesTxs.isEmpty()) {
+                                        if (isArabic) "لا توجد مبيعات في الفترة المحددة لعرض المؤشر." else "No sales in selected period to plot trend."
+                                    } else {
+                                        if (isArabic) "تم تسجيل ${periodSalesTxs.size} عملية بيع بإجمالي ${String.format(Locale.US, "%,.2f %s", totalPeriodSales, currency)} في يوم واحد." else "Single day sales recorded: ${String.format(Locale.US, "%,.2f %s", totalPeriodSales, currency)}"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        } else {
+                            val maxPointAmount = salesTrendPoints.maxOf { it.second }.coerceAtLeast(1.0)
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(90.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.Bottom
                                 ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = Icons.Default.ReceiptLong,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.error,
-                                            modifier = Modifier.size(18.dp)
-                                        )
+                                    salesTrendPoints.forEach { point ->
+                                        val barRatio = (point.second / maxPointAmount).toFloat().coerceIn(0.08f, 1f)
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text(
+                                                text = String.format(Locale.US, "%.0f", point.second),
+                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth(0.55f)
+                                                    .height((60 * barRatio).dp)
+                                                    .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                                                    .background(MaterialTheme.colorScheme.primary)
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            val dayLabel = if (point.first.length >= 10) point.first.substring(5) else point.first
+                                            Text(
+                                                text = dayLabel,
+                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     }
                                 }
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Column {
-                                    Text(
-                                        text = if (isArabic) "متابعة تحصيل الديون المتأخرة" else "Follow up overdue receivables",
-                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
-                                    )
-                                    Text(
-                                        text = if (isArabic) "$overdueCustomersCount عملاء لديهم ديون متأخرة أكثر من 30 يوماً" else "$overdueCustomersCount customers have debt older than 30 days",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
                             }
-                            Text(
-                                text = String.format(Locale.US, "%,.1f %s", overdueReceivables, currency),
-                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.error
-                            )
                         }
                     }
                 }
             }
-        }
-
-        // 9. SALES TREND SECTION (Visual trend in period)
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = if (isArabic) "مؤشر حركة المبيعات بالفترة" else "Sales Period Trend",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-
-                Card(
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.fillMaxWidth()
+        } else {
+            // SUPPLIER DASHBOARD: 6 & 7. SUPPLIER PAYABLES & PURCHASES
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    if (salesTrendPoints.size < 2) {
-                        Box(
+                    Text(
+                        text = if (isArabic) "التزامات ومشتريات الموردين" else "Supplier Payables & Purchases",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Section 6: Current Supplier Payables
+                        Card(
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(20.dp),
-                            contentAlignment = Alignment.Center
+                                .weight(1f)
+                                .then(
+                                    if (onNavigateToSuppliers != null) {
+                                        Modifier.clickable(onClick = onNavigateToSuppliers)
+                                    } else Modifier
+                                )
+                                .testTag("home_supplier_payables_card")
                         ) {
-                            Text(
-                                text = if (periodSalesTxs.isEmpty()) {
-                                    if (isArabic) "لا توجد مبيعات في الفترة المحددة لعرض المؤشر." else "No sales in selected period to plot trend."
-                                } else {
-                                    if (isArabic) "تم تسجيل ${periodSalesTxs.size} عملية بيع بإجمالي ${String.format(Locale.US, "%,.2f %s", totalPeriodSales, currency)} في يوم واحد." else "Single day sales recorded: ${String.format(Locale.US, "%,.2f %s", totalPeriodSales, currency)}"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    } else {
-                        val maxPointAmount = salesTrendPoints.maxOf { it.second }.coerceAtLeast(1.0)
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(90.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.Bottom
-                            ) {
-                                salesTrendPoints.forEach { point ->
-                                    val barRatio = (point.second / maxPointAmount).toFloat().coerceIn(0.08f, 1f)
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Text(
-                                            text = String.format(Locale.US, "%.0f", point.second),
-                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth(0.55f)
-                                                .height((60 * barRatio).dp)
-                                                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
-                                                .background(MaterialTheme.colorScheme.primary)
-                                        )
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        val dayLabel = if (point.first.length >= 10) point.first.substring(5) else point.first
-                                        Text(
-                                            text = dayLabel,
-                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = if (isArabic) "مستحقات الموردين" else "Supplier Payables",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    if (onNavigateToSuppliers != null) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                            contentDescription = if (isArabic) "فتح إدارة الموردين" else "Open Supplier Management",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(14.dp)
                                         )
                                     }
                                 }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = String.format(Locale.US, "%,.2f %s", supplierPayables, currency),
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                                    color = if (supplierPayables > 0) MaterialTheme.colorScheme.statusAmber else MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (onNavigateToSuppliers != null) {
+                                        if (isArabic) "عرض وإدارة الموردين ↗" else "View & manage suppliers ↗"
+                                    } else {
+                                        if (isArabic) "رصيد الالتزام الحالي" else "Current balance owed"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (onNavigateToSuppliers != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        // Section 7: Purchases (Period Flow)
+                        Card(
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("home_purchases_period_card")
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Text(
+                                    text = if (isArabic) "مشتريات الفترة" else "Period Purchases",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = String.format(Locale.US, "%,.2f %s", totalPeriodPurchases, currency),
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (isArabic) "توريد بضائع بالفترة" else "Goods acquired in period",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     }

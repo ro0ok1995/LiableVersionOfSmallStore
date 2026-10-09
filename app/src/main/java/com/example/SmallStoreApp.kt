@@ -79,6 +79,7 @@ fun SmallStoreApp(
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val coroutineScope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
+    var purchasesInitialTab by remember { mutableIntStateOf(0) }
 
     // Sync drawer state with ViewModel
     LaunchedEffect(uiState.isDrawerOpen) {
@@ -96,6 +97,9 @@ fun SmallStoreApp(
             coroutineScope.launch { drawerState.close() }
             mainViewModel.closeDrawer()
         } else {
+            if (uiState.currentDestination == NavDestination.PURCHASES) {
+                purchasesInitialTab = 0
+            }
             mainViewModel.navigateBack()
         }
     }
@@ -295,6 +299,10 @@ fun SmallStoreApp(
                                         mainViewModel.selectCustomerDetails(customer)
                                         mainViewModel.navigateTo(NavDestination.CUSTOMER_DETAILS)
                                     },
+                                    onNavigateToSuppliers = {
+                                        purchasesInitialTab = 1
+                                        mainViewModel.navigateTo(NavDestination.PURCHASES)
+                                    },
                                     onClearSelectedCustomer = { mainViewModel.clearHomeSelectedCustomer() },
                                     onSelectPeriod = { mainViewModel.setHomePeriod(it) },
                                     customStartDate = uiState.homeCustomStartDate,
@@ -371,6 +379,19 @@ fun SmallStoreApp(
                                     },
                                     onAddCustomer = { name, phone ->
                                         mainViewModel.addCustomer(name, phone)
+                                    },
+                                    suppliers = uiState.suppliers,
+                                    purchases = uiState.purchases,
+                                    supplierPayments = uiState.supplierPayments,
+                                    onSupplierClick = { supplier ->
+                                        focusManager.clearFocus()
+                                        purchasesInitialTab = 1
+                                        mainViewModel.navigateTo(NavDestination.PURCHASES)
+                                    },
+                                    onOpenAddSupplierDialog = {
+                                        focusManager.clearFocus()
+                                        purchasesInitialTab = 1
+                                        mainViewModel.navigateTo(NavDestination.PURCHASES)
                                     }
                                 )
                             }
@@ -458,8 +479,10 @@ fun SmallStoreApp(
                                     expenseCategories = uiState.expenseCategories,
                                     financialAccounts = uiState.financialAccounts,
                                     paymentMethods = uiState.paymentMethods,
+                                    initialTab = purchasesInitialTab,
                                     onBackClick = {
                                         focusManager.clearFocus()
+                                        purchasesInitialTab = 0
                                         mainViewModel.navigateBack()
                                     },
                                     onSearchQueryChange = { mainViewModel.setPurchasesSearchQuery(it) },

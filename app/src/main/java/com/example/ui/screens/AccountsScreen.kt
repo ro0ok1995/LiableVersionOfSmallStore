@@ -73,6 +73,11 @@ import com.example.model.SettlementType
 import com.example.model.StoreStrings
 import com.example.model.TransactionItem
 import com.example.accounting.FinancialReportCalculator
+import com.example.accounting.SupplierBalanceSummary
+import com.example.accounting.SupplierLedgerCalculator
+import com.example.data.db.Purchase
+import com.example.data.db.Supplier
+import com.example.data.db.SupplierPayment
 import com.example.ui.components.CustomerSearchField
 import com.example.ui.theme.GeoOutline
 import com.example.ui.theme.GeoOutlineVariant
@@ -100,13 +105,26 @@ fun AccountsScreen(
     onOpenAddCustomerDialog: () -> Unit,
     onCloseAddCustomerDialog: () -> Unit,
     onAddCustomer: (name: String, phone: String) -> Unit,
+    suppliers: List<Supplier> = emptyList(),
+    purchases: List<Purchase> = emptyList(),
+    supplierPayments: List<SupplierPayment> = emptyList(),
+    onSupplierClick: ((Supplier) -> Unit)? = null,
+    onOpenAddSupplierDialog: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
     val currency = AppCurrency.SYMBOL
     val focusManager = LocalFocusManager.current
 
+    // 0 = Customers (default), 1 = Suppliers
+    var selectedAccountTab by remember { mutableIntStateOf(0) }
     var sortOption by remember { mutableStateOf(AccountSortOption.DEFAULT) }
+
+    // Supplier local search & filter state
+    var supplierSearchQuery by remember { mutableStateOf("") }
+    // 0 = All, 1 = Has Payable (Debt), 2 = Settled
+    var supplierFilter by remember { mutableIntStateOf(0) }
+    var showLocalAddSupplierDialog by remember { mutableStateOf(false) }
 
     val matchingCustomers = remember(searchQuery, allCustomers, accounts) {
         val pool = if (allCustomers.isNotEmpty()) allCustomers else accounts
@@ -132,6 +150,32 @@ fun AccountsScreen(
             AccountSortOption.HIGHEST_CASH -> accounts.sortedByDescending { customer ->
                 customerCashTotals[customer.id] ?: 0.0
             }
+        }
+    }
+
+    // Authoritative supplier balances calculated via SupplierLedgerCalculator
+    val supplierBalances = remember(suppliers, purchases, supplierPayments) {
+        suppliers.associate { sup ->
+            sup.id to SupplierLedgerCalculator.calculateSupplierBalance(
+                supplierId = sup.id,
+                purchases = purchases,
+                payments = supplierPayments
+            )
+        }
+    }
+
+    val filteredSuppliers = remember(suppliers, supplierSearchQuery, supplierFilter, supplierBalances) {
+        var list = suppliers
+        val q = supplierSearchQuery.trim().lowercase()
+        if (q.isNotEmpty()) {
+            list = list.filter { sup ->
+                sup.name.lowercase().contains(q) || sup.phone.lowercase().contains(q)
+            }
+        }
+        when (supplierFilter) {
+            1 -> list.filter { sup -> (supplierBalances[sup.id]?.balance ?: 0.0) > 0.001 }
+            2 -> list.filter { sup -> Math.abs(supplierBalances[sup.id]?.balance ?: 0.0) <= 0.001 }
+            else -> list
         }
     }
 
@@ -162,33 +206,118 @@ fun AccountsScreen(
                     ),
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                Button(
-                    onClick = onOpenAddCustomerDialog,
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = GeoPrimary),
-                    contentPadding = ButtonDefaults.ContentPadding,
-                    modifier = Modifier
-                        .height(38.dp)
-                        .testTag("add_customer_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = if (isArabic) StoreStrings.ADD_CUSTOMER_AR else StoreStrings.ADD_CUSTOMER_EN,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                if (selectedAccountTab == 0) {
+                    Button(
+                        onClick = onOpenAddCustomerDialog,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = GeoPrimary),
+                        contentPadding = ButtonDefaults.ContentPadding,
+                        modifier = Modifier
+                            .height(38.dp)
+                            .testTag("add_customer_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (isArabic) StoreStrings.ADD_CUSTOMER_AR else StoreStrings.ADD_CUSTOMER_EN,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                } else {
+                    Button(
+                        onClick = {
+                            if (onOpenAddSupplierDialog != null) {
+                                onOpenAddSupplierDialog()
+                            } else {
+                                showLocalAddSupplierDialog = true
+                            }
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = GeoPrimary),
+                        contentPadding = ButtonDefaults.ContentPadding,
+                        modifier = Modifier
+                            .height(38.dp)
+                            .testTag("add_supplier_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (isArabic) "مورد جديد" else "New Supplier",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Reusable Customer Search Field with Dropdown
-            CustomerSearchField(
+            // CUSTOMERS / SUPPLIERS TAB SELECTOR
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("accounts_tab_selector_row"),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    color = if (selectedAccountTab == 0) GeoPrimary else MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(10.dp),
+                    border = if (selectedAccountTab == 0) null else BorderStroke(1.dp, GeoOutlineVariant),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { selectedAccountTab = 0 }
+                        .testTag("tab_customers")
+                ) {
+                    Box(
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (isArabic) StoreStrings.CUSTOMERS_AR else StoreStrings.CUSTOMERS_EN,
+                            fontSize = 12.sp,
+                            fontWeight = if (selectedAccountTab == 0) FontWeight.Bold else FontWeight.Medium,
+                            color = if (selectedAccountTab == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Surface(
+                    color = if (selectedAccountTab == 1) GeoPrimary else MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(10.dp),
+                    border = if (selectedAccountTab == 1) null else BorderStroke(1.dp, GeoOutlineVariant),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { selectedAccountTab = 1 }
+                        .testTag("tab_suppliers")
+                ) {
+                    Box(
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (isArabic) "الموردون" else "Suppliers",
+                            fontSize = 12.sp,
+                            fontWeight = if (selectedAccountTab == 1) FontWeight.Bold else FontWeight.Medium,
+                            color = if (selectedAccountTab == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            if (selectedAccountTab == 0) {
+                // Reusable Customer Search Field with Dropdown
+                CustomerSearchField(
                 customers = if (allCustomers.isNotEmpty()) allCustomers else accounts,
                 searchQuery = searchQuery,
                 onSearchQueryChange = onSearchQueryChange,
@@ -363,89 +492,302 @@ fun AccountsScreen(
                     modifier = Modifier.testTag("sort_highest_cash")
                 )
             }
-        }
-
-        HorizontalDivider(color = GeoOutline, thickness = 1.dp)
-
-        // CUSTOMER LIST OR EMPTY STATE
-        if (sortedAccounts.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                    modifier = Modifier.testTag("accounts_empty_state")
-                ) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        shape = CircleShape,
-                        modifier = Modifier.size(64.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
+        } else {
+            // SUPPLIER SEARCH FIELD
+            OutlinedTextField(
+                value = supplierSearchQuery,
+                onValueChange = { supplierSearchQuery = it },
+                placeholder = {
+                    Text(
+                        text = if (isArabic) "بحث عن مورد بالاسم أو الهاتف..." else "Search suppliers by name or phone...",
+                        fontSize = 13.sp
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                trailingIcon = {
+                    if (supplierSearchQuery.isNotEmpty()) {
+                        IconButton(onClick = { supplierSearchQuery = "" }) {
                             Icon(
-                                imageVector = Icons.Default.Person,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(32.dp)
+                                imageVector = Icons.Default.Close,
+                                contentDescription = if (isArabic) "مسح" else "Clear",
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = if (isArabic) StoreStrings.NO_CUSTOMERS_YET_AR else StoreStrings.NO_CUSTOMERS_YET_EN,
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 15.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Button(
-                        onClick = onOpenAddCustomerDialog,
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = GeoPrimary),
-                        modifier = Modifier.testTag("empty_state_add_customer_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(10.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = GeoPrimary,
+                    unfocusedBorderColor = GeoOutlineVariant,
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("suppliers_search_input")
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // SUPPLIERS FILTER ROW: ALL / HAS DEBT / SETTLED
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("suppliers_filter_row"),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = supplierFilter == 0,
+                    onClick = { supplierFilter = 0 },
+                    label = {
                         Text(
-                            text = if (isArabic) StoreStrings.ADD_CUSTOMER_AR else StoreStrings.ADD_CUSTOMER_EN,
-                            fontWeight = FontWeight.Bold
+                            text = if (isArabic) "الكل" else "All",
+                            fontSize = 12.sp,
+                            fontWeight = if (supplierFilter == 0) FontWeight.Bold else FontWeight.Normal
                         )
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = GeoPrimary.copy(alpha = 0.12f),
+                        selectedLabelColor = GeoPrimary
+                    ),
+                    border = FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = supplierFilter == 0,
+                        borderColor = if (supplierFilter == 0) GeoPrimary else GeoOutline
+                    ),
+                    modifier = Modifier.testTag("supplier_filter_all")
+                )
+
+                FilterChip(
+                    selected = supplierFilter == 1,
+                    onClick = { supplierFilter = 1 },
+                    label = {
+                        Text(
+                            text = if (isArabic) "مستحق للمورد" else "Has Payable",
+                            fontSize = 12.sp,
+                            fontWeight = if (supplierFilter == 1) FontWeight.Bold else FontWeight.Normal
+                        )
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = GeoPrimary.copy(alpha = 0.12f),
+                        selectedLabelColor = GeoPrimary
+                    ),
+                    border = FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = supplierFilter == 1,
+                        borderColor = if (supplierFilter == 1) GeoPrimary else GeoOutline
+                    ),
+                    modifier = Modifier.testTag("supplier_filter_has_debt")
+                )
+
+                FilterChip(
+                    selected = supplierFilter == 2,
+                    onClick = { supplierFilter = 2 },
+                    label = {
+                        Text(
+                            text = if (isArabic) "خالص الحساب" else "Settled",
+                            fontSize = 12.sp,
+                            fontWeight = if (supplierFilter == 2) FontWeight.Bold else FontWeight.Normal
+                        )
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = GeoPrimary.copy(alpha = 0.12f),
+                        selectedLabelColor = GeoPrimary
+                    ),
+                    border = FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = supplierFilter == 2,
+                        borderColor = if (supplierFilter == 2) GeoPrimary else GeoOutline
+                    ),
+                    modifier = Modifier.testTag("supplier_filter_settled")
+                )
+            }
+        }
+    }
+
+        HorizontalDivider(color = GeoOutline, thickness = 1.dp)
+
+        if (selectedAccountTab == 0) {
+            // CUSTOMER LIST OR EMPTY STATE
+            if (sortedAccounts.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier.testTag("accounts_empty_state")
+                    ) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            shape = CircleShape,
+                            modifier = Modifier.size(64.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Person,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = if (isArabic) StoreStrings.NO_CUSTOMERS_YET_AR else StoreStrings.NO_CUSTOMERS_YET_EN,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 15.sp
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(
+                            onClick = onOpenAddCustomerDialog,
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = GeoPrimary),
+                            modifier = Modifier.testTag("empty_state_add_customer_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isArabic) StoreStrings.ADD_CUSTOMER_AR else StoreStrings.ADD_CUSTOMER_EN,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp)
+                        .testTag("accounts_list"),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    item {
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                    items(items = sortedAccounts, key = { it.id }) { customer ->
+                        val liveBalance = customerBalances[customer.id] ?: 0.0
+                        CustomerCardItem(
+                            customer = customer,
+                            balance = liveBalance,
+                            currency = currency,
+                            isArabic = isArabic,
+                            onClick = { onCustomerClick(customer) }
+                        )
+                    }
+                    item {
+                        Spacer(modifier = Modifier.height(16.dp))
                     }
                 }
             }
         } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 16.dp)
-                    .testTag("accounts_list"),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                item {
-                    Spacer(modifier = Modifier.height(8.dp))
+            // SUPPLIER LIST OR EMPTY STATE
+            if (filteredSuppliers.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier.testTag("suppliers_empty_state")
+                    ) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            shape = CircleShape,
+                            modifier = Modifier.size(64.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Person,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = if (isArabic) "لا يوجد موردون مسجلون بعد" else "No suppliers registered yet",
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 15.sp
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(
+                            onClick = {
+                                if (onOpenAddSupplierDialog != null) {
+                                    onOpenAddSupplierDialog()
+                                } else {
+                                    showLocalAddSupplierDialog = true
+                                }
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = GeoPrimary),
+                            modifier = Modifier.testTag("empty_state_add_supplier_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isArabic) "إضافة مورد جديد" else "Add New Supplier",
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
-                items(items = sortedAccounts, key = { it.id }) { customer ->
-                    val liveBalance = customerBalances[customer.id] ?: 0.0
-                    CustomerCardItem(
-                        customer = customer,
-                        balance = liveBalance,
-                        currency = currency,
-                        isArabic = isArabic,
-                        onClick = { onCustomerClick(customer) }
-                    )
-                }
-                item {
-                    Spacer(modifier = Modifier.height(16.dp))
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp)
+                        .testTag("suppliers_accounts_list"),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    item {
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                    items(items = filteredSuppliers, key = { it.id }) { supplier ->
+                        val summary = supplierBalances[supplier.id] ?: SupplierBalanceSummary(supplierId = supplier.id)
+                        SupplierAccountCardItem(
+                            supplier = supplier,
+                            summary = summary,
+                            currency = currency,
+                            isArabic = isArabic,
+                            onClick = { onSupplierClick?.invoke(supplier) }
+                        )
+                    }
+                    item {
+                        Spacer(modifier = Modifier.height(16.dp))
+                    }
                 }
             }
         }
@@ -674,4 +1016,124 @@ private fun AddCustomerDialog(
         shape = RoundedCornerShape(16.dp),
         containerColor = MaterialTheme.colorScheme.surface
     )
+}
+
+@Composable
+private fun SupplierAccountCardItem(
+    supplier: Supplier,
+    summary: SupplierBalanceSummary,
+    currency: String,
+    isArabic: Boolean = true,
+    onClick: () -> Unit
+) {
+    val payable = summary.balance
+    val hasPayable = payable > 0.001
+    val isSettled = Math.abs(payable) <= 0.001
+
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(width = 1.dp, color = GeoOutlineVariant, shape = RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .testTag("supplier_card_${supplier.id}")
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f),
+                shape = CircleShape,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = supplier.name.take(1),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = supplier.name,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (supplier.phone.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = supplier.phone,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontSize = 12.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+            if (isSettled) {
+                Surface(
+                    color = StatusGreenBg,
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Text(
+                        text = if (isArabic) "خالص الحساب" else "Settled",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = StatusGreen,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            } else {
+                Column(horizontalAlignment = Alignment.End) {
+                    Surface(
+                        color = if (hasPayable) StatusRedBg else StatusGreenBg,
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = String.format(
+                                Locale.US,
+                                "%s%,.2f %s",
+                                if (hasPayable) "" else "-",
+                                Math.abs(payable),
+                                currency
+                            ),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (hasPayable) StatusRed else StatusGreen,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = if (hasPayable) (if (isArabic) "مستحق للمورد" else "Payable") else (if (isArabic) "رصيد مقدم" else "Advance"),
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(6.dp))
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
 }
