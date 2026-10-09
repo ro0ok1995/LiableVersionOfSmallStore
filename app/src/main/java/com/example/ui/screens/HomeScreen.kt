@@ -856,7 +856,9 @@ fun HomeScreen(
                         )
                     }
                 } else {
-                    val customerPool = allCustomers.ifEmpty { matchingCustomers }
+                    val customerPool = remember(allCustomers, matchingCustomers) {
+                        (allCustomers + matchingCustomers).distinctBy { it.id }
+                    }
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         recentActivities.forEach { tx ->
                             val isSale = if (tx.typedTransactionType != null) {
@@ -867,40 +869,69 @@ fun HomeScreen(
                             val isReversed = tx.typedOperationStatus == OperationStatus.REVERSED
                             val isReturnEligible = !isReversed && isSale
 
-                            val isCustomerTx = when (tx.typedTransactionType) {
-                                TransactionType.SALE,
-                                TransactionType.CUSTOMER_PAYMENT -> true
+                            val isSupplierOrExpense = when (tx.typedTransactionType) {
                                 TransactionType.PURCHASE,
                                 TransactionType.SUPPLIER_PAYMENT,
-                                TransactionType.EXPENSE,
                                 TransactionType.PURCHASE_RETURN,
-                                TransactionType.SALE_RETURN -> false
-                                null -> tx.customerId != null && !tx.activityType.contains("مورد") && !tx.activityType.contains("مصروف")
-                                else -> tx.customerId != null
+                                TransactionType.EXPENSE -> true
+                                else -> tx.activityType.contains("مورد") || tx.activityType.contains("مصروف")
                             }
 
-                            val matchedCustomer = if (isCustomerTx) {
-                                if (tx.customerId != null) {
-                                    customerPool.find { it.id == tx.customerId }
-                                } else if (tx.customerNameSnapshot.isNotBlank()) {
-                                    customerPool.find { it.customerName.trim() == tx.customerNameSnapshot.trim() }
+                            val rawSnapshot = tx.customerNameSnapshot.ifBlank { tx.customerName }.trim()
+                            val normalizedSnapshot = normalizeCustomerName(rawSnapshot)
+                            val isAnonymousSnapshot = isAnonymousCustomerName(rawSnapshot)
+
+                            val matchedCustomer: CustomerAccount? = if (!isSupplierOrExpense && !isAnonymousSnapshot) {
+                                var match: CustomerAccount? = null
+
+                                // 1. If the activity has a valid "customerId", resolve by ID from existing customer collections
+                                val candidateId = tx.customerId?.trim()
+                                if (!candidateId.isNullOrEmpty()) {
+                                    match = customerPool.firstOrNull {
+                                        it.id.trim() == candidateId || it.id.trim().equals(candidateId, ignoreCase = true)
+                                    }
+                                }
+
+                                // 2. If the ID is absent or does not resolve, fallback to existing customer-name snapshot
+                                // only when it uniquely identifies one real customer
+                                // 3. Normalize names safely by trimming surrounding whitespace and handling case differences
+                                if (match == null && normalizedSnapshot.isNotEmpty()) {
+                                    val uniqueMatches = customerPool.filter { customer ->
+                                        !isAnonymousCustomerName(customer.customerName) &&
+                                        normalizeCustomerName(customer.customerName) == normalizedSnapshot
+                                    }
+                                    if (uniqueMatches.size == 1) {
+                                        match = uniqueMatches.first()
+                                    }
+                                }
+
+                                // 4. Do not treat generic/anonymous customer as a real customer profile
+                                if (match != null && isAnonymousCustomerName(match.customerName)) {
+                                    null
+                                } else {
+                                    match
+                                }
+                            } else {
+                                null
+                            }
+
+                            val customerNavigationAction: (() -> Unit)? = if (matchedCustomer != null) {
+                                if (onNavigateToCustomerProfile != null) {
+                                    { onNavigateToCustomerProfile(matchedCustomer) }
+                                } else if (onActivityClick != null) {
+                                    { onActivityClick(tx) }
                                 } else null
+                            } else if (!isSupplierOrExpense && !isAnonymousSnapshot && !tx.customerId.isNullOrBlank() && onActivityClick != null) {
+                                // Safe fallback through existing activity navigation flow if customerId is valid
+                                { onActivityClick(tx) }
                             } else null
 
                             ActivityRowCard(
                                 transaction = tx,
                                 currency = currency,
                                 isArabic = isArabic,
-                                onClick = if (onActivityClick != null) { { onActivityClick(tx) } } else null,
-                                onCustomerClick = if (matchedCustomer != null) {
-                                    if (onNavigateToCustomerProfile != null) {
-                                        { onNavigateToCustomerProfile(matchedCustomer) }
-                                    } else if (onActivityClick != null) {
-                                        { onActivityClick(tx) }
-                                    } else {
-                                        { onSelectCustomer(matchedCustomer) }
-                                    }
-                                } else null,
+                                onClick = customerNavigationAction,
+                                onCustomerClick = customerNavigationAction,
                                 onReverseClick = if (onReverseTransaction != null && !isReversed) {
                                     { transactionToReverse = tx }
                                 } else null,
@@ -1407,5 +1438,34 @@ private fun ActivityRowCard(
                 }
             }
         }
+    }
+}
+
+private fun normalizeCustomerName(name: String?): String {
+    if (name.isNullOrBlank()) return ""
+    return name
+        .trim()
+        .replace(Regex("\\s+"), " ")
+        .replace('أ', 'ا')
+        .replace('إ', 'ا')
+        .replace('آ', 'ا')
+        .replace('ة', 'ه')
+        .replace('ى', 'ي')
+        .lowercase()
+}
+
+private fun isAnonymousCustomerName(name: String?): Boolean {
+    if (name.isNullOrBlank()) return true
+    val trimmed = name.trim()
+    val normalized = normalizeCustomerName(trimmed)
+    return when {
+        normalized == "عميل عام" || normalized == "عميل كاش" || normalized == "عميل نقدي" ||
+        normalized == "زبون كاش" || normalized == "زبون نقدي" || normalized == "زبون عام" ||
+        normalized == "عميل افتراضي" || normalized == "عميل" || normalized == "زبون" -> true
+        trimmed.equals("Cash Customer", ignoreCase = true) -> true
+        trimmed.equals("Cash", ignoreCase = true) -> true
+        trimmed.equals("كاش", ignoreCase = true) -> true
+        trimmed.equals("General", ignoreCase = true) -> true
+        else -> false
     }
 }
