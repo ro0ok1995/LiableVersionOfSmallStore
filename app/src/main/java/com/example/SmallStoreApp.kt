@@ -14,8 +14,10 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -164,6 +166,7 @@ fun SmallStoreApp(
                     NavDestination.HOME -> if (isArabic) "مرحباً بك، $storeOwnerName" else "Welcome, $storeOwnerName"
                     NavDestination.ACCOUNTS -> if (isArabic) StoreStrings.ACCOUNTS_AR else StoreStrings.ACCOUNTS_EN
                     NavDestination.CUSTOMER_DETAILS -> if (isArabic) StoreStrings.CUSTOMER_PROFILE_AR else StoreStrings.CUSTOMER_PROFILE_EN
+                    NavDestination.SUPPLIER_DETAILS -> if (isArabic) "تفاصيل المورد" else "Supplier Details"
                     NavDestination.ANALYSIS_CENTER -> if (isArabic) StoreStrings.ANALYSIS_CENTER_AR else StoreStrings.ANALYSIS_CENTER_EN
                     NavDestination.MORE, NavDestination.MORE_SETTINGS -> if (isArabic) StoreStrings.MORE_AR else StoreStrings.MORE_EN
                     NavDestination.PURCHASES -> if (isArabic) StoreStrings.PURCHASES_AR else StoreStrings.PURCHASES_EN
@@ -440,6 +443,13 @@ fun SmallStoreApp(
                                         }
                                     }
                                 )
+                            }
+
+                            NavDestination.SUPPLIER_DETAILS -> {
+                                LaunchedEffect(Unit) {
+                                    purchasesInitialTab = 1
+                                    mainViewModel.navigateTo(NavDestination.PURCHASES)
+                                }
                             }
 
                             NavDestination.ANALYSIS_CENTER -> {
