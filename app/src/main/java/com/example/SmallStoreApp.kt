@@ -14,9 +14,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
@@ -54,8 +51,6 @@ import com.example.ui.screens.ContactSupportScreen
 import com.example.ui.screens.CustomerManagementScreen
 import com.example.ui.screens.ProductManagementScreen
 import com.example.ui.screens.CustomerProfileScreen
-import com.example.ui.screens.SupplierProfileScreen
-import com.example.ui.components.SupplierInitialAction
 import com.example.ui.screens.DataCenterScreen
 import com.example.ui.screens.GenericContentScreen
 import com.example.ui.screens.HomeScreen
@@ -85,8 +80,6 @@ fun SmallStoreApp(
     val coroutineScope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
     var purchasesInitialTab by remember { mutableIntStateOf(0) }
-    var supplierInitialAction by remember { mutableStateOf(SupplierInitialAction.NONE) }
-    var accountsInitialTab by remember { mutableIntStateOf(0) }
 
     // Sync drawer state with ViewModel
     LaunchedEffect(uiState.isDrawerOpen) {
@@ -163,7 +156,7 @@ fun SmallStoreApp(
                     else -> false
                 }
                 val showGlobalTopBar = isTopLevelScreen || uiState.currentDestination in setOf(
-                    NavDestination.CUSTOMER_DETAILS, NavDestination.SUPPLIER_DETAILS, NavDestination.PURCHASES, NavDestination.QUICK_PAYMENT
+                    NavDestination.CUSTOMER_DETAILS, NavDestination.PURCHASES, NavDestination.QUICK_PAYMENT
                 )
 
                 val storeOwnerName = uiState.storeInfo.ownerName.ifBlank { uiState.storeInfo.storeName }
@@ -171,7 +164,6 @@ fun SmallStoreApp(
                     NavDestination.HOME -> if (isArabic) "مرحباً بك، $storeOwnerName" else "Welcome, $storeOwnerName"
                     NavDestination.ACCOUNTS -> if (isArabic) StoreStrings.ACCOUNTS_AR else StoreStrings.ACCOUNTS_EN
                     NavDestination.CUSTOMER_DETAILS -> if (isArabic) StoreStrings.CUSTOMER_PROFILE_AR else StoreStrings.CUSTOMER_PROFILE_EN
-                    NavDestination.SUPPLIER_DETAILS -> if (isArabic) "ملف المورد" else "Supplier Profile"
                     NavDestination.ANALYSIS_CENTER -> if (isArabic) StoreStrings.ANALYSIS_CENTER_AR else StoreStrings.ANALYSIS_CENTER_EN
                     NavDestination.MORE, NavDestination.MORE_SETTINGS -> if (isArabic) StoreStrings.MORE_AR else StoreStrings.MORE_EN
                     NavDestination.PURCHASES -> if (isArabic) StoreStrings.PURCHASES_AR else StoreStrings.PURCHASES_EN
@@ -252,7 +244,6 @@ fun SmallStoreApp(
                                     uiState.allTransactions,
                                     uiState.purchases,
                                     uiState.supplierPayments,
-                                    uiState.purchaseReturns,
                                     uiState.expenses,
                                     uiState.suppliers,
                                     uiState.expenseCategories
@@ -265,13 +256,10 @@ fun SmallStoreApp(
                                     val supplierPaymentActivities = uiState.supplierPayments.map {
                                         it.toTransactionItem(supplierNames[it.supplierId]?.name ?: "")
                                     }
-                                    val purchaseReturnActivities = uiState.purchaseReturns.map {
-                                        it.toTransactionItem(supplierNames[it.supplierId]?.name ?: "")
-                                    }
                                     val expenseActivities = uiState.expenses.map {
                                         it.toTransactionItem(categoryNames[it.categoryId]?.name ?: "")
                                     }
-                                    (uiState.allTransactions + purchaseActivities + supplierPaymentActivities + purchaseReturnActivities + expenseActivities)
+                                    (uiState.allTransactions + purchaseActivities + supplierPaymentActivities + expenseActivities)
                                         .filter { it.typedOperationStatus != com.example.model.OperationStatus.REVERSED }
                                         .distinctBy { it.id }
                                         .sortedWith(compareByDescending<com.example.model.TransactionItem> { it.date }.thenByDescending { it.id })
@@ -330,14 +318,6 @@ fun SmallStoreApp(
                                             com.example.model.TransactionType.SALE_RETURN,
                                             com.example.model.TransactionType.CUSTOMER_REFUND,
                                             com.example.model.TransactionType.BALANCE_ADJUSTMENT -> mainViewModel.navigateToCustomerProfileFromActivity(tx)
-                                            com.example.model.TransactionType.PURCHASE,
-                                            com.example.model.TransactionType.SUPPLIER_PAYMENT,
-                                            com.example.model.TransactionType.PURCHASE_RETURN -> {
-                                                uiState.suppliers.firstOrNull { it.id == tx.customerId }?.let { supplier ->
-                                                    mainViewModel.selectSupplierDetails(supplier)
-                                                    mainViewModel.navigateTo(NavDestination.SUPPLIER_DETAILS)
-                                                }
-                                            }
                                             else -> Unit
                                         }
                                     },
@@ -357,15 +337,6 @@ fun SmallStoreApp(
                                         val lines = mainViewModel.getSaleLinesForSale(saleId)
                                         val returnable = mainViewModel.getRemainingReturnableQuantities(saleId)
                                         Triple(sale, lines, returnable)
-                                    },
-                                    suppliers = uiState.suppliers,
-                                    supplierPurchases = uiState.purchases,
-                                    supplierPayments = uiState.supplierPayments,
-                                    supplierReturns = uiState.purchaseReturns,
-                                    onGetSupplierBalance = { supplierId -> mainViewModel.getSupplierBalance(supplierId) },
-                                    onNavigateToSupplierProfile = { supplier ->
-                                        mainViewModel.selectSupplierDetails(supplier)
-                                        mainViewModel.navigateTo(NavDestination.SUPPLIER_DETAILS)
                                     }
                                 )
                             }
@@ -409,64 +380,22 @@ fun SmallStoreApp(
                                     onAddCustomer = { name, phone ->
                                         mainViewModel.addCustomer(name, phone)
                                     },
-                                    suppliers = uiState.suppliers.filter { !it.isArchived },
+                                    suppliers = uiState.suppliers,
                                     purchases = uiState.purchases,
                                     supplierPayments = uiState.supplierPayments,
-                                    purchaseReturns = uiState.purchaseReturns,
+                                    onGetSupplierBalance = { supplierId ->
+                                        mainViewModel.getSupplierBalance(supplierId)
+                                    },
                                     onSupplierClick = { supplier ->
                                         focusManager.clearFocus()
-                                        mainViewModel.selectSupplierDetails(supplier)
-                                        mainViewModel.navigateTo(NavDestination.SUPPLIER_DETAILS)
+                                        purchasesInitialTab = 1
+                                        mainViewModel.navigateTo(NavDestination.PURCHASES)
                                     },
                                     onOpenAddSupplierDialog = {
                                         focusManager.clearFocus()
                                         purchasesInitialTab = 1
                                         mainViewModel.navigateTo(NavDestination.PURCHASES)
-                                    },
-                                    onGetSupplierBalance = { supplierId -> mainViewModel.getSupplierBalance(supplierId) },
-                                    initialSelectedAccountTab = accountsInitialTab
-                                )
-                            }
-
-                            NavDestination.SUPPLIER_DETAILS -> {
-                                SupplierProfileScreen(
-                                    supplier = uiState.selectedSupplierDetails?.let { selected -> uiState.suppliers.firstOrNull { it.id == selected.id } ?: selected },
-                                    suppliers = uiState.suppliers,
-                                    purchases = uiState.purchases,
-                                    payments = uiState.supplierPayments,
-                                    returns = uiState.purchaseReturns,
-                                    languageMode = uiState.languageMode,
-                                    onBack = { mainViewModel.navigateBack() },
-                                    onEdit = { supplier -> mainViewModel.updateSupplier(supplier) },
-                                    onPurchaseAction = { supplier ->
-                                        mainViewModel.selectSupplierDetails(supplier)
-                                        purchasesInitialTab = 1
-                                        supplierInitialAction = SupplierInitialAction.PURCHASE
-                                        mainViewModel.navigateTo(NavDestination.PURCHASES)
-                                    },
-                                    onPaymentAction = { supplier ->
-                                        mainViewModel.selectSupplierDetails(supplier)
-                                        purchasesInitialTab = 1
-                                        supplierInitialAction = SupplierInitialAction.PAYMENT
-                                        mainViewModel.navigateTo(NavDestination.PURCHASES)
-                                    },
-                                    onReturnAction = { supplier ->
-                                        mainViewModel.selectSupplierDetails(supplier)
-                                        purchasesInitialTab = 1
-                                        supplierInitialAction = SupplierInitialAction.RETURN
-                                        mainViewModel.navigateTo(NavDestination.PURCHASES)
-                                    },
-                                    onStatementAction = { supplier ->
-                                        mainViewModel.selectSupplierDetails(supplier)
-                                        analysisViewModel.selectTab(AnalysisTab.ACCOUNT_STATEMENT)
-                                        mainViewModel.navigateTo(NavDestination.ANALYSIS_CENTER)
-                                    },
-                                    onArchive = { supplier ->
-                                        mainViewModel.updateSupplier(supplier.copy(isArchived = true)) { result ->
-                                            if (result.isSuccess) mainViewModel.navigateTo(NavDestination.ACCOUNTS)
-                                        }
-                                    },
-                                    onGetSupplierBalance = { supplierId -> mainViewModel.getSupplierBalance(supplierId) }
+                                    }
                                 )
                             }
 
@@ -521,14 +450,7 @@ fun SmallStoreApp(
                                     storeInfo = uiState.storeInfo,
                                     products = uiState.products,
                                     transactionLines = uiState.transactionLines,
-                                    languageMode = uiState.languageMode,
-                                    suppliers = uiState.suppliers.filter { !it.isArchived },
-                                    supplierPurchases = uiState.purchases,
-                                    supplierPayments = uiState.supplierPayments,
-                                    supplierReturns = uiState.purchaseReturns,
-                                    initialSupplierId = uiState.selectedSupplierDetails?.id,
-                                    onGetSupplierStatement = { supplierId -> mainViewModel.getSupplierStatement(supplierId) },
-                                    onGetSupplierBalance = { supplierId -> mainViewModel.getSupplierBalance(supplierId) }
+                                    languageMode = uiState.languageMode
                                 )
                             }
 
@@ -561,12 +483,9 @@ fun SmallStoreApp(
                                     financialAccounts = uiState.financialAccounts,
                                     paymentMethods = uiState.paymentMethods,
                                     initialTab = purchasesInitialTab,
-                                    initialSupplierId = uiState.selectedSupplierDetails?.id,
-                                    initialSupplierAction = supplierInitialAction,
                                     onBackClick = {
                                         focusManager.clearFocus()
                                         purchasesInitialTab = 0
-                                        supplierInitialAction = SupplierInitialAction.NONE
                                         mainViewModel.navigateBack()
                                     },
                                     onSearchQueryChange = { mainViewModel.setPurchasesSearchQuery(it) },
@@ -674,7 +593,6 @@ fun SmallStoreApp(
                                     languageMode = uiState.languageMode,
                                     customersCount = uiState.customers.size,
                                     productsCount = uiState.products.size,
-                                    suppliersCount = uiState.suppliers.count { !it.isArchived },
                                     onBackClick = {
                                         focusManager.clearFocus()
                                         mainViewModel.navigateBack()
@@ -686,11 +604,6 @@ fun SmallStoreApp(
                                     onProductsClick = {
                                         focusManager.clearFocus()
                                         mainViewModel.navigateTo(NavDestination.PRODUCT_MANAGEMENT)
-                                    },
-                                    onSuppliersClick = {
-                                        focusManager.clearFocus()
-                                        accountsInitialTab = 1
-                                        mainViewModel.navigateTo(NavDestination.ACCOUNTS)
                                     },
                                     onBackupRestoreClick = {
                                         focusManager.clearFocus()
@@ -813,7 +726,6 @@ fun SmallStoreApp(
                                 ArchiveScreen(
                                     archivedCustomers = uiState.archivedCustomers,
                                     archivedProducts = uiState.archivedProducts,
-                                    archivedSuppliers = uiState.suppliers.filter { it.isArchived },
                                     languageMode = uiState.languageMode,
                                     onBackClick = {
                                         focusManager.clearFocus()
@@ -831,7 +743,6 @@ fun SmallStoreApp(
                                     onPermanentDeleteProduct = { product ->
                                         mainViewModel.deleteProductPermanently(product)
                                     },
-                                    onRestoreSupplier = { supplier -> mainViewModel.updateSupplier(supplier) },
                                     activeConflict = uiState.pendingArchiveConflict,
                                     onResolveConflictSeparate = { conflict ->
                                         mainViewModel.resolveConflictAsSeparate(conflict)

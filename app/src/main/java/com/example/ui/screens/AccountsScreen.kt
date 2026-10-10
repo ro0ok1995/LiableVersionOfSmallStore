@@ -52,8 +52,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -80,7 +80,6 @@ import com.example.accounting.SupplierLedgerCalculator
 import com.example.data.db.Purchase
 import com.example.data.db.Supplier
 import com.example.data.db.SupplierPayment
-import com.example.data.db.PurchaseReturn
 import com.example.ui.components.CustomerSearchField
 import com.example.ui.theme.GeoOutline
 import com.example.ui.theme.GeoOutlineVariant
@@ -111,11 +110,9 @@ fun AccountsScreen(
     suppliers: List<Supplier> = emptyList(),
     purchases: List<Purchase> = emptyList(),
     supplierPayments: List<SupplierPayment> = emptyList(),
-    purchaseReturns: List<PurchaseReturn> = emptyList(),
+    onGetSupplierBalance: (suspend (String) -> SupplierBalanceSummary)? = null,
     onSupplierClick: ((Supplier) -> Unit)? = null,
     onOpenAddSupplierDialog: (() -> Unit)? = null,
-    onGetSupplierBalance: (suspend (String) -> SupplierBalanceSummary)? = null,
-    initialSelectedAccountTab: Int = 0,
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
@@ -123,8 +120,7 @@ fun AccountsScreen(
     val focusManager = LocalFocusManager.current
 
     // 0 = Customers (default), 1 = Suppliers
-    var selectedAccountTab by remember { mutableIntStateOf(initialSelectedAccountTab.coerceIn(0, 1)) }
-    androidx.compose.runtime.LaunchedEffect(initialSelectedAccountTab) { selectedAccountTab = initialSelectedAccountTab.coerceIn(0, 1) }
+    var selectedAccountTab by remember { mutableIntStateOf(0) }
     var sortOption by remember { mutableStateOf(AccountSortOption.DEFAULT) }
 
     // Supplier local search & filter state
@@ -132,6 +128,11 @@ fun AccountsScreen(
     // 0 = All, 1 = Has Payable (Debt), 2 = Settled
     var supplierFilter by remember { mutableIntStateOf(0) }
     var showLocalAddSupplierDialog by remember { mutableStateOf(false) }
+
+    // Exclude archived suppliers from the active supplier list
+    val activeSuppliers = remember(suppliers) {
+        suppliers.filter { !it.isArchived }
+    }
 
     val matchingCustomers = remember(searchQuery, allCustomers, accounts) {
         val pool = if (allCustomers.isNotEmpty()) allCustomers else accounts
@@ -160,24 +161,39 @@ fun AccountsScreen(
         }
     }
 
-    // Prefer repository-calculated balances, which include opening balances and adjustments.
-    var supplierBalances by remember { mutableStateOf<Map<String, SupplierBalanceSummary>>(emptyMap()) }
-    LaunchedEffect(suppliers, purchases, supplierPayments, purchaseReturns, onGetSupplierBalance) {
-        supplierBalances = suppliers.associate { supplier ->
-            val authoritative = if (onGetSupplierBalance != null) {
-                runCatching { onGetSupplierBalance(supplier.id) }.getOrNull()
-            } else null
-            supplier.id to (authoritative ?: SupplierLedgerCalculator.calculateSupplierBalance(
-                supplierId = supplier.id,
-                purchases = purchases,
-                payments = supplierPayments,
-                returns = purchaseReturns
-            ))
+    // Authoritative supplier balances including all ledger events (returns, adjustments, opening balances)
+    var authoritativeSupplierBalances by remember { mutableStateOf<Map<String, SupplierBalanceSummary>>(emptyMap()) }
+
+    LaunchedEffect(activeSuppliers, purchases, supplierPayments, onGetSupplierBalance) {
+        if (onGetSupplierBalance != null) {
+            val map = mutableMapOf<String, SupplierBalanceSummary>()
+            activeSuppliers.forEach { sup ->
+                map[sup.id] = onGetSupplierBalance(sup.id)
+            }
+            authoritativeSupplierBalances = map
         }
     }
 
-    val filteredSuppliers = remember(suppliers, supplierSearchQuery, supplierFilter, supplierBalances) {
-        var list = suppliers
+    val fallbackSupplierBalances = remember(activeSuppliers, purchases, supplierPayments) {
+        activeSuppliers.associate { sup ->
+            sup.id to SupplierLedgerCalculator.calculateSupplierBalance(
+                supplierId = sup.id,
+                purchases = purchases,
+                payments = supplierPayments
+            )
+        }
+    }
+
+    val supplierBalances = remember(authoritativeSupplierBalances, fallbackSupplierBalances) {
+        if (authoritativeSupplierBalances.isNotEmpty()) {
+            fallbackSupplierBalances + authoritativeSupplierBalances
+        } else {
+            fallbackSupplierBalances
+        }
+    }
+
+    val filteredSuppliers = remember(activeSuppliers, supplierSearchQuery, supplierFilter, supplierBalances) {
+        var list = activeSuppliers
         val q = supplierSearchQuery.trim().lowercase()
         if (q.isNotEmpty()) {
             list = list.filter { sup ->
