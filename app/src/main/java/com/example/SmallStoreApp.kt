@@ -106,6 +106,10 @@ fun SmallStoreApp(
         } else {
             if (uiState.currentDestination == NavDestination.PURCHASES) {
                 purchasesInitialTab = 0
+                supplierInitialAction = SupplierInitialAction.NONE
+            }
+            if (uiState.currentDestination == NavDestination.ACCOUNTS) {
+                accountsInitialTab = 0
             }
             mainViewModel.navigateBack()
         }
@@ -218,6 +222,13 @@ fun SmallStoreApp(
                                 languageMode = uiState.languageMode,
                                 onNavigate = { dest ->
                                     focusManager.clearFocus()
+                                    if (dest == NavDestination.ACCOUNTS) {
+                                        accountsInitialTab = 0
+                                    }
+                                    if (dest == NavDestination.PURCHASES) {
+                                        purchasesInitialTab = 0
+                                        supplierInitialAction = SupplierInitialAction.NONE
+                                    }
                                     mainViewModel.navigateToRoot(dest)
                                 },
                                 onPlusClick = {

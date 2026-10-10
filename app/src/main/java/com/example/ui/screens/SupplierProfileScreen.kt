@@ -67,9 +67,17 @@ fun SupplierProfileScreen(
         }
         return
     }
-    var balance by remember(current.id) { mutableStateOf(SupplierBalanceSummary(current.id)) }
+    val initialBalance = remember(current.id, purchases, payments, returns) {
+        SupplierLedgerCalculator.calculateSupplierBalance(
+            supplierId = current.id,
+            purchases = purchases,
+            payments = payments,
+            returns = returns
+        )
+    }
+    var balance by remember(current.id, initialBalance) { mutableStateOf(initialBalance) }
     LaunchedEffect(current.id, purchases, payments, returns) {
-        balance = runCatching { onGetSupplierBalance(current.id) }.getOrDefault(SupplierBalanceSummary(current.id))
+        balance = runCatching { onGetSupplierBalance(current.id) }.getOrDefault(initialBalance)
     }
     val invoices = remember(current.id, purchases, returns, invoiceFilter, invoiceSearch) {
         purchases.filter { it.supplierId == current.id }

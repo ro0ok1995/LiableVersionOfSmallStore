@@ -124,7 +124,7 @@ fun AccountsScreen(
 
     // 0 = Customers (default), 1 = Suppliers
     var selectedAccountTab by remember { mutableIntStateOf(initialSelectedAccountTab.coerceIn(0, 1)) }
-    androidx.compose.runtime.LaunchedEffect(initialSelectedAccountTab) { selectedAccountTab = initialSelectedAccountTab.coerceIn(0, 1) }
+    LaunchedEffect(initialSelectedAccountTab) { selectedAccountTab = initialSelectedAccountTab.coerceIn(0, 1) }
     var sortOption by remember { mutableStateOf(AccountSortOption.DEFAULT) }
 
     // Supplier local search & filter state
@@ -132,6 +132,11 @@ fun AccountsScreen(
     // 0 = All, 1 = Has Payable (Debt), 2 = Settled
     var supplierFilter by remember { mutableIntStateOf(0) }
     var showLocalAddSupplierDialog by remember { mutableStateOf(false) }
+
+    // Exclude archived suppliers from the active supplier list
+    val activeSuppliers = remember(suppliers) {
+        suppliers.filter { !it.isArchived }
+    }
 
     val matchingCustomers = remember(searchQuery, allCustomers, accounts) {
         val pool = if (allCustomers.isNotEmpty()) allCustomers else accounts
@@ -160,10 +165,24 @@ fun AccountsScreen(
         }
     }
 
+    // Synchronous initial fallback calculation prevents zero/blank balances on initial frame
+    val initialSupplierBalances = remember(activeSuppliers, purchases, supplierPayments, purchaseReturns) {
+        activeSuppliers.associate { supplier ->
+            supplier.id to SupplierLedgerCalculator.calculateSupplierBalance(
+                supplierId = supplier.id,
+                purchases = purchases,
+                payments = supplierPayments,
+                returns = purchaseReturns
+            )
+        }
+    }
+
     // Prefer repository-calculated balances, which include opening balances and adjustments.
-    var supplierBalances by remember { mutableStateOf<Map<String, SupplierBalanceSummary>>(emptyMap()) }
-    LaunchedEffect(suppliers, purchases, supplierPayments, purchaseReturns, onGetSupplierBalance) {
-        supplierBalances = suppliers.associate { supplier ->
+    var supplierBalances by remember(initialSupplierBalances) {
+        mutableStateOf<Map<String, SupplierBalanceSummary>>(initialSupplierBalances)
+    }
+    LaunchedEffect(activeSuppliers, purchases, supplierPayments, purchaseReturns, onGetSupplierBalance) {
+        val updated = activeSuppliers.associate { supplier ->
             val authoritative = if (onGetSupplierBalance != null) {
                 runCatching { onGetSupplierBalance(supplier.id) }.getOrNull()
             } else null
@@ -174,10 +193,11 @@ fun AccountsScreen(
                 returns = purchaseReturns
             ))
         }
+        supplierBalances = updated
     }
 
-    val filteredSuppliers = remember(suppliers, supplierSearchQuery, supplierFilter, supplierBalances) {
-        var list = suppliers
+    val filteredSuppliers = remember(activeSuppliers, supplierSearchQuery, supplierFilter, supplierBalances) {
+        var list = activeSuppliers
         val q = supplierSearchQuery.trim().lowercase()
         if (q.isNotEmpty()) {
             list = list.filter { sup ->
