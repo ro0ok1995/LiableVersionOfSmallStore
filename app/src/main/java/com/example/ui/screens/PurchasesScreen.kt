@@ -107,6 +107,7 @@ import com.example.data.db.FinancialAccount
 import com.example.data.db.PaymentMethod
 import com.example.ui.components.ExpensesSection
 import com.example.ui.components.SupplierPurchasesSection
+import com.example.ui.components.SupplierInitialAction
 import com.example.ui.theme.GeoOutline
 import com.example.ui.theme.GeoOutlineVariant
 import com.example.ui.theme.GeoPrimary
@@ -154,6 +155,8 @@ fun PurchasesScreen(
     onGetSupplierStatement: (suspend (supplierId: String) -> List<SupplierLedgerEntry>)? = null,
     onGetPurchaseLines: suspend (purchaseId: String) -> List<com.example.data.db.PurchaseLine> = { emptyList() },
     initialTab: Int = 0,
+    initialSupplierId: String? = null,
+    initialSupplierAction: SupplierInitialAction = SupplierInitialAction.NONE,
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
@@ -484,6 +487,8 @@ fun PurchasesScreen(
                 onGetSupplierStatement = onGetSupplierStatement ?: { emptyList() },
                 onGetPurchaseLines = onGetPurchaseLines,
                 onRecordPurchaseReturn = onRecordPurchaseReturn,
+                initialSupplierId = initialSupplierId,
+                initialAction = initialSupplierAction,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)

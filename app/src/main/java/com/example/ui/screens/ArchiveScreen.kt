@@ -84,6 +84,7 @@ import com.example.model.LanguageMode
 import com.example.model.ProductItem
 import com.example.model.StoreStrings
 import com.example.model.TransactionItem
+import com.example.data.db.Supplier
 import com.example.ui.theme.GeoOutline
 import com.example.ui.theme.GeoOutlineVariant
 import com.example.ui.theme.GeoPrimary
@@ -97,6 +98,7 @@ import java.io.File
 enum class ArchiveTab(val index: Int) {
     CUSTOMERS(0),
     PRODUCTS(1),
+    SUPPLIERS(2),
 }
 
 sealed class PendingDeleteTarget {
@@ -107,6 +109,7 @@ sealed class PendingDeleteTarget {
 sealed class PendingRestoreTarget {
     data class Customer(val customer: CustomerAccount) : PendingRestoreTarget()
     data class Product(val product: ProductItem) : PendingRestoreTarget()
+    data class SupplierRecord(val supplier: Supplier) : PendingRestoreTarget()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -114,12 +117,14 @@ sealed class PendingRestoreTarget {
 fun ArchiveScreen(
     archivedCustomers: List<CustomerAccount>,
     archivedProducts: List<ProductItem>,
+    archivedSuppliers: List<Supplier> = emptyList(),
         languageMode: LanguageMode,
     onBackClick: () -> Unit,
     onRestoreCustomer: (CustomerAccount) -> Unit = {},
     onPermanentDeleteCustomer: (CustomerAccount) -> Unit = {},
     onRestoreProduct: (ProductItem) -> Unit = {},
     onPermanentDeleteProduct: (ProductItem) -> Unit = {},
+    onRestoreSupplier: (Supplier) -> Unit = {},
             activeConflict: ArchiveConflict? = null,
     onResolveConflictSeparate: (ArchiveConflict) -> Unit = {},
     onDismissConflict: () -> Unit = {},
@@ -208,6 +213,11 @@ fun ArchiveScreen(
                 it.customerName.lowercase().contains(q) || it.phone.contains(q)
             }
         }
+    }
+
+    val filteredSuppliers = remember(archivedSuppliers, searchQuery) {
+        val q = searchQuery.trim().lowercase()
+        if (q.isBlank()) archivedSuppliers else archivedSuppliers.filter { it.name.lowercase().contains(q) || it.phone.lowercase().contains(q) }
     }
 
     val filteredProducts = remember(effectiveProducts, searchQuery) {
@@ -330,6 +340,20 @@ fun ArchiveScreen(
                 },
                 modifier = Modifier.testTag("archive_tab_products")
             )
+            Tab(
+                selected = selectedTabIndex == ArchiveTab.SUPPLIERS.index,
+                onClick = { selectedTabIndex = ArchiveTab.SUPPLIERS.index },
+                text = {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                        Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(17.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (isArabic) "الموردون" else "Suppliers", fontSize = 13.sp, fontWeight = if (selectedTabIndex == ArchiveTab.SUPPLIERS.index) FontWeight.Bold else FontWeight.Medium)
+                        Spacer(Modifier.width(4.dp))
+                        ArchiveTabBadge(count = archivedSuppliers.size, isSelected = selectedTabIndex == ArchiveTab.SUPPLIERS.index)
+                    }
+                },
+                modifier = Modifier.testTag("archive_tab_suppliers")
+            )
 
         }
 
@@ -337,6 +361,7 @@ fun ArchiveScreen(
         val currentTabItemCount = when (selectedTabIndex) {
             ArchiveTab.CUSTOMERS.index -> effectiveCustomers.size
             ArchiveTab.PRODUCTS.index -> effectiveProducts.size
+            ArchiveTab.SUPPLIERS.index -> archivedSuppliers.size
             else -> 0
         }
 
@@ -349,6 +374,7 @@ fun ArchiveScreen(
                         text = when (selectedTabIndex) {
                             ArchiveTab.CUSTOMERS.index -> if (isArabic) "بحث في العملاء المؤرشفين..." else "Search archived customers..."
                             ArchiveTab.PRODUCTS.index -> if (isArabic) "بحث في الأصناف المؤرشفة..." else "Search archived products..."
+                            ArchiveTab.SUPPLIERS.index -> if (isArabic) "بحث في الموردين المؤرشفين..." else "Search archived suppliers..."
                             else -> if (isArabic) "بحث في المعاملات المؤرشفة..." else "Search archived transactions..."
                         },
                         style = MaterialTheme.typography.bodyMedium
@@ -506,6 +532,34 @@ fun ArchiveScreen(
                         }
                     }
                 }
+                ArchiveTab.SUPPLIERS.index -> {
+                    if (filteredSuppliers.isEmpty()) {
+                        ArchiveEmptyState(
+                            icon = Icons.Default.Person,
+                            title = if (isArabic) "لا يوجد موردون في الأرشيف" else "No Archived Suppliers",
+                            description = if (isArabic) "الموردون المؤرشفون يظهرون هنا دون حذف فواتيرهم أو مدفوعاتهم أو سجلهم المالي." else "Archived suppliers remain here with their invoices, payments, and financial history intact.",
+                            isArabic = isArabic,
+                            showSamplePreviewButton = false,
+                            onToggleSamplePreview = {},
+                            modifier = Modifier.testTag("archive_empty_suppliers")
+                        )
+                    } else {
+                        LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
+                            items(filteredSuppliers, key = { it.id }) { supplier ->
+                                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), modifier = Modifier.fillMaxWidth().testTag("archived_supplier_${supplier.id}")) {
+                                    Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                            Text(supplier.name, fontWeight = FontWeight.Bold)
+                                            Text(supplier.phone, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text(if (isArabic) "السجل المالي محفوظ" else "Financial history preserved", style = MaterialTheme.typography.labelSmall, color = StatusGreen)
+                                        }
+                                        Button(onClick = { pendingRestoreTarget = PendingRestoreTarget.SupplierRecord(supplier) }) { Text(if (isArabic) "استعادة" else "Restore") }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             SnackbarHost(
@@ -652,6 +706,7 @@ fun ArchiveScreen(
         val recordName = when (target) {
             is PendingRestoreTarget.Customer -> target.customer.customerName
             is PendingRestoreTarget.Product -> target.product.name
+            is PendingRestoreTarget.SupplierRecord -> target.supplier.name
         }
 
         AlertDialog(
@@ -710,6 +765,7 @@ fun ArchiveScreen(
                         when (currentTarget) {
                             is PendingRestoreTarget.Customer -> onRestoreCustomer(currentTarget.customer)
                             is PendingRestoreTarget.Product -> onRestoreProduct(currentTarget.product)
+                            is PendingRestoreTarget.SupplierRecord -> onRestoreSupplier(currentTarget.supplier.copy(isArchived = false))
                         }
                         coroutineScope.launch {
                             snackbarHostState.showSnackbar(

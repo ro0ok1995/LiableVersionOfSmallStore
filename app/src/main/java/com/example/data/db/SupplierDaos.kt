@@ -157,6 +157,9 @@ interface PurchaseReturnDao {
     suspend fun getReturnsByPurchaseIdSync(purchaseId: String): List<PurchaseReturn>
 
     @Query("SELECT * FROM purchase_returns ORDER BY returnDate DESC, createdAt DESC")
+    fun getAllReturns(): Flow<List<PurchaseReturn>>
+
+    @Query("SELECT * FROM purchase_returns ORDER BY returnDate DESC, createdAt DESC")
     suspend fun getAllReturnsSync(): List<PurchaseReturn>
 
     @Query("DELETE FROM purchase_returns")

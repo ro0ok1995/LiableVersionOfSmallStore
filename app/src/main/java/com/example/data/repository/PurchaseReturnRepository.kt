@@ -31,6 +31,8 @@ class PurchaseReturnRepository(
     private val stockMovementDao: StockMovementDao = database.stockMovementDao(),
     private val transactionDao: TransactionDao = database.transactionDao()
 ) {
+    val allPurchaseReturns = purchaseReturnDao.getAllReturns()
+
     suspend fun getReturnById(id: String): PurchaseReturn? = purchaseReturnDao.getReturnById(id)
 
     suspend fun getReturnLines(returnId: String): List<PurchaseReturnLine> =

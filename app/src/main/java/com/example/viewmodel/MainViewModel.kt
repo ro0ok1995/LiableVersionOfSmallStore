@@ -98,8 +98,10 @@ data class MainUiState(
     val unresolvedCustomerConflicts: List<CustomerConflictItem> = emptyList(),
     val unresolvedConflictCount: Int = 0,
     val suppliers: List<Supplier> = emptyList(),
+    val selectedSupplierDetails: Supplier? = null,
     val purchases: List<Purchase> = emptyList(),
     val supplierPayments: List<SupplierPayment> = emptyList(),
+    val purchaseReturns: List<PurchaseReturn> = emptyList(),
     val expenseCategories: List<ExpenseCategory> = emptyList(),
     val expenses: List<Expense> = emptyList(),
     val financialAccounts: List<FinancialAccount> = emptyList(),
@@ -318,6 +320,9 @@ class MainViewModel @JvmOverloads constructor(
             supplierPurchaseViewModel.supplierPayments.collect { list ->
                 _uiState.update { it.copy(supplierPayments = list) }
             }
+        }
+        viewModelScope.launch {
+            supplierPurchaseViewModel.purchaseReturns.collect { list -> _uiState.update { it.copy(purchaseReturns = list) } }
         }
 
         viewModelScope.launch {
@@ -658,6 +663,25 @@ class MainViewModel @JvmOverloads constructor(
 
     suspend fun getSaleById(saleId: String): Sale? {
         return repository.salesRepository.getSaleById(saleId)
+    }
+
+    // Supplier profile context is ID-based and shared across entry points.
+    fun selectSupplierDetails(supplier: Supplier) {
+        _uiState.update { it.copy(selectedSupplierDetails = supplier) }
+    }
+
+    fun updateSupplier(supplier: Supplier, onComplete: (Result<Supplier>) -> Unit = {}) {
+        viewModelScope.launch {
+            runCatching {
+                repository.updateSupplier(supplier)
+                supplier
+            }.onSuccess { updated ->
+                _uiState.update { state ->
+                    state.copy(selectedSupplierDetails = if (state.selectedSupplierDetails?.id == updated.id) updated else state.selectedSupplierDetails)
+                }
+                onComplete(Result.success(updated))
+            }.onFailure { onComplete(Result.failure(it)) }
+        }
     }
 
     // Phase 9: Suppliers & Purchases

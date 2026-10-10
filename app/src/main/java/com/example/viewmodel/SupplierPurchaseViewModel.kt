@@ -38,9 +38,13 @@ class SupplierPurchaseViewModel @JvmOverloads constructor(
     private val _supplierPayments = MutableStateFlow<List<SupplierPayment>>(emptyList())
     val supplierPayments: StateFlow<List<SupplierPayment>> = _supplierPayments.asStateFlow()
 
+    private val _purchaseReturns = MutableStateFlow<List<PurchaseReturn>>(emptyList())
+    val purchaseReturns: StateFlow<List<PurchaseReturn>> = _purchaseReturns.asStateFlow()
+
     val allSuppliers: Flow<List<Supplier>> = repository.allSuppliers
     val allPurchases: Flow<List<Purchase>> = repository.allPurchases
     val allSupplierPayments: Flow<List<SupplierPayment>> = repository.allSupplierPayments
+    val allPurchaseReturns: Flow<List<PurchaseReturn>> = repository.allPurchaseReturns
 
     init {
         viewModelScope.launch {
@@ -59,6 +63,9 @@ class SupplierPurchaseViewModel @JvmOverloads constructor(
             repository.allSupplierPayments.collect { list ->
                 _supplierPayments.value = list
             }
+        }
+        viewModelScope.launch {
+            repository.allPurchaseReturns.collect { list -> _purchaseReturns.value = list }
         }
     }
 

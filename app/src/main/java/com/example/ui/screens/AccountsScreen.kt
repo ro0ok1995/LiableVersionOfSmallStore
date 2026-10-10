@@ -50,8 +50,10 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -78,6 +80,7 @@ import com.example.accounting.SupplierLedgerCalculator
 import com.example.data.db.Purchase
 import com.example.data.db.Supplier
 import com.example.data.db.SupplierPayment
+import com.example.data.db.PurchaseReturn
 import com.example.ui.components.CustomerSearchField
 import com.example.ui.theme.GeoOutline
 import com.example.ui.theme.GeoOutlineVariant
@@ -108,8 +111,11 @@ fun AccountsScreen(
     suppliers: List<Supplier> = emptyList(),
     purchases: List<Purchase> = emptyList(),
     supplierPayments: List<SupplierPayment> = emptyList(),
+    purchaseReturns: List<PurchaseReturn> = emptyList(),
     onSupplierClick: ((Supplier) -> Unit)? = null,
     onOpenAddSupplierDialog: (() -> Unit)? = null,
+    onGetSupplierBalance: (suspend (String) -> SupplierBalanceSummary)? = null,
+    initialSelectedAccountTab: Int = 0,
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
@@ -117,7 +123,8 @@ fun AccountsScreen(
     val focusManager = LocalFocusManager.current
 
     // 0 = Customers (default), 1 = Suppliers
-    var selectedAccountTab by remember { mutableIntStateOf(0) }
+    var selectedAccountTab by remember { mutableIntStateOf(initialSelectedAccountTab.coerceIn(0, 1)) }
+    androidx.compose.runtime.LaunchedEffect(initialSelectedAccountTab) { selectedAccountTab = initialSelectedAccountTab.coerceIn(0, 1) }
     var sortOption by remember { mutableStateOf(AccountSortOption.DEFAULT) }
 
     // Supplier local search & filter state
@@ -153,14 +160,19 @@ fun AccountsScreen(
         }
     }
 
-    // Authoritative supplier balances calculated via SupplierLedgerCalculator
-    val supplierBalances = remember(suppliers, purchases, supplierPayments) {
-        suppliers.associate { sup ->
-            sup.id to SupplierLedgerCalculator.calculateSupplierBalance(
-                supplierId = sup.id,
+    // Prefer repository-calculated balances, which include opening balances and adjustments.
+    var supplierBalances by remember { mutableStateOf<Map<String, SupplierBalanceSummary>>(emptyMap()) }
+    LaunchedEffect(suppliers, purchases, supplierPayments, purchaseReturns, onGetSupplierBalance) {
+        supplierBalances = suppliers.associate { supplier ->
+            val authoritative = if (onGetSupplierBalance != null) {
+                runCatching { onGetSupplierBalance(supplier.id) }.getOrNull()
+            } else null
+            supplier.id to (authoritative ?: SupplierLedgerCalculator.calculateSupplierBalance(
+                supplierId = supplier.id,
                 purchases = purchases,
-                payments = supplierPayments
-            )
+                payments = supplierPayments,
+                returns = purchaseReturns
+            ))
         }
     }
 

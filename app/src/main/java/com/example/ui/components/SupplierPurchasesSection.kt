@@ -96,6 +96,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+enum class SupplierInitialAction { NONE, PURCHASE, PAYMENT, RETURN }
+
 @Composable
 fun SupplierPurchasesSection(
     suppliers: List<Supplier>,
@@ -110,13 +112,16 @@ fun SupplierPurchasesSection(
     onGetSupplierStatement: suspend (supplierId: String) -> List<SupplierLedgerEntry>,
     onGetPurchaseLines: suspend (purchaseId: String) -> List<PurchaseLine>,
     onRecordPurchaseReturn: ((purchaseId: String, returnLines: List<PurchaseReturnLineRequest>, reason: String, date: String, onComplete: (Result<PurchaseReturn>) -> Unit) -> Unit)? = null,
+    initialSupplierId: String? = null,
+    initialAction: SupplierInitialAction = SupplierInitialAction.NONE,
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
     val currency = AppCurrency.SYMBOL
     val coroutineScope = rememberCoroutineScope()
 
-    var selectedSupplierId by remember { mutableStateOf<String?>(suppliers.firstOrNull()?.id) }
+    var selectedSupplierId by remember { mutableStateOf<String?>(initialSupplierId ?: suppliers.firstOrNull()?.id) }
+    LaunchedEffect(initialSupplierId, suppliers) { if (initialSupplierId != null && suppliers.any { it.id == initialSupplierId }) selectedSupplierId = initialSupplierId else if (suppliers.none { it.id == selectedSupplierId }) selectedSupplierId = suppliers.firstOrNull()?.id }
     val selectedSupplier = suppliers.firstOrNull { it.id == selectedSupplierId } ?: suppliers.firstOrNull()
 
     var balanceSummary by remember { mutableStateOf<SupplierBalanceSummary?>(null) }
@@ -129,6 +134,15 @@ fun SupplierPurchasesSection(
     var returnQuantities by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var showStatementDialog by remember { mutableStateOf(false) }
     var statementEntries by remember { mutableStateOf<List<SupplierLedgerEntry>>(emptyList()) }
+
+    LaunchedEffect(initialAction, selectedSupplier?.id) {
+        when (initialAction) {
+            SupplierInitialAction.PURCHASE -> showRecordPurchaseDialog = true
+            SupplierInitialAction.PAYMENT -> showRecordPaymentDialog = true
+            SupplierInitialAction.RETURN -> { /* Select the specific invoice before starting a return. */ }
+            SupplierInitialAction.NONE -> Unit
+        }
+    }
 
     fun refreshBalance() {
         val sId = selectedSupplier?.id ?: return

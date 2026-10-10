@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
@@ -51,6 +52,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -84,6 +86,12 @@ import com.example.model.SettlementType
 import com.example.model.StoreStrings
 import com.example.data.db.Sale
 import com.example.data.db.SaleLine
+import com.example.data.db.Supplier
+import com.example.data.db.Purchase
+import com.example.data.db.SupplierPayment
+import com.example.data.db.PurchaseReturn
+import com.example.accounting.SupplierLedgerCalculator
+import com.example.accounting.SupplierBalanceSummary
 import com.example.ui.components.RecordSaleReturnDialog
 import com.example.model.TransactionItem
 import com.example.model.TransactionType
@@ -132,10 +140,16 @@ fun HomeScreen(
     onSetCustomDateRange: (LocalDate?, LocalDate?) -> Unit = { _, _ -> },
     onActivityClick: ((TransactionItem) -> Unit)? = null,
     onNavigateToCustomerProfile: ((CustomerAccount) -> Unit)? = null,
+    onNavigateToSupplierProfile: ((Supplier) -> Unit)? = null,
     onNavigateToSuppliers: (() -> Unit)? = null,
     onReverseTransaction: ((TransactionItem, String, String) -> Unit)? = null,
     onReturnTransaction: ((TransactionItem, List<SaleReturnLineRequest>, String, String, RefundRequest?) -> Unit)? = null,
-    onLoadReturnDetails: (suspend (String) -> Triple<Sale?, List<SaleLine>, Map<String, Int>>)? = null
+    onLoadReturnDetails: (suspend (String) -> Triple<Sale?, List<SaleLine>, Map<String, Int>>)? = null,
+    suppliers: List<Supplier> = emptyList(),
+    supplierPurchases: List<Purchase> = emptyList(),
+    supplierPayments: List<SupplierPayment> = emptyList(),
+    supplierReturns: List<PurchaseReturn> = emptyList(),
+    onGetSupplierBalance: (suspend (String) -> SupplierBalanceSummary)? = null
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
     val currency = AppCurrency.SYMBOL
@@ -145,6 +159,8 @@ fun HomeScreen(
     var isSearchExpanded by remember { mutableStateOf(false) }
     var showOverdueCustomersDialog by remember { mutableStateOf(false) }
     var selectedDashboardTab by remember { mutableStateOf(0) } // 0: Customers, 1: Suppliers
+    var selectedSupplier by remember { mutableStateOf<Supplier?>(null) }
+    var supplierSearchQuery by remember { mutableStateOf("") }
 
 
     // CURRENT BALANCES (Never filtered by period):
@@ -175,24 +191,53 @@ fun HomeScreen(
     val overdueReceivables = storeAgingSummary.sum31To60 + storeAgingSummary.sum61To90 + storeAgingSummary.sum90Plus
     val overdueCustomersCount = storeAgingSummary.customerAgings.count { (it.bucket31To60 + it.bucket61To90 + it.bucket90Plus) > 0.001 }
 
-    // Supplier Payables (Balance from supplier activities in allTransactions)
-    val supplierPayables = remember(allTransactions) {
-        // Purchases create supplier liability (+credit/payable), Payments reduce liability (-debit)
-        allTransactions.filter { 
-            it.typedOperationStatus != OperationStatus.REVERSED && (
-                it.typedTransactionType == TransactionType.PURCHASE ||
-                it.typedTransactionType == TransactionType.SUPPLIER_PAYMENT
-            )
-        }.groupBy { it.customerId ?: it.id }.values.sumOf { txGroup ->
-            val totalPurchased = txGroup.filter { it.typedTransactionType == TransactionType.PURCHASE }.sumOf { it.amount }
-            val totalPaid = txGroup.filter { it.typedTransactionType == TransactionType.SUPPLIER_PAYMENT }.sumOf { it.amount }
-            (totalPurchased - totalPaid).coerceAtLeast(0.0)
+    // Supplier payables use the same authoritative ledger calculator as the Supplier Profile.
+    // This avoids reconstructing balances from generic transaction labels or customerId.
+    var supplierPayables by remember { mutableStateOf(0.0) }
+    LaunchedEffect(suppliers, supplierPurchases, supplierPayments, supplierReturns, onGetSupplierBalance) {
+        val activeSuppliers = suppliers.filter { !it.isArchived }
+        supplierPayables = activeSuppliers.sumOf { supplier ->
+            val summary = if (onGetSupplierBalance != null) {
+                runCatching { onGetSupplierBalance(supplier.id) }.getOrNull()
+            } else null
+            (summary?.balance ?: SupplierLedgerCalculator.calculateSupplierBalance(
+                supplierId = supplier.id,
+                purchases = supplierPurchases,
+                payments = supplierPayments,
+                returns = supplierReturns
+            ).balance).coerceAtLeast(0.0)
         }
+    }
+    val periodSupplierPurchasesList = remember(supplierPurchases, selectedPeriod, customStartDate, customEndDate) {
+        supplierPurchases.filter { purchase ->
+            purchase.status != "REVERSED" && DateFilterUtils.isDateInPeriod(
+                dateStr = purchase.purchaseDate,
+                period = selectedPeriod,
+                customStartDate = customStartDate,
+                customEndDate = customEndDate
+            )
+        }
+    }
+    val periodSupplierPurchases = remember(periodSupplierPurchasesList) {
+        periodSupplierPurchasesList.sumOf { it.totalAmount }
+    }
+    val periodInvoiceCount = remember(periodSupplierPurchasesList) {
+        periodSupplierPurchasesList.size
+    }
+    val periodSupplierPayments = remember(supplierPayments, selectedPeriod, customStartDate, customEndDate) {
+        supplierPayments.filter { payment ->
+            payment.status != "REVERSED" && DateFilterUtils.isDateInPeriod(
+                dateStr = payment.paymentDate,
+                period = selectedPeriod,
+                customStartDate = customStartDate,
+                customEndDate = customEndDate
+            )
+        }.sumOf { it.amount }
     }
 
     // PERIOD FLOWS (Filtered strictly by selected period):
-    val periodTransactions = remember(transactions, selectedPeriod, selectedCustomer, customStartDate, customEndDate) {
-        val base = if (selectedCustomer != null) {
+    val periodTransactions = remember(transactions, selectedPeriod, selectedCustomer, selectedDashboardTab, customStartDate, customEndDate) {
+        val base = if (selectedDashboardTab == 0 && selectedCustomer != null) {
             transactions.filter { it.customerId == selectedCustomer.id }
         } else {
             transactions
@@ -242,48 +287,188 @@ fun HomeScreen(
         }.sumOf { it.amount }
     }
 
-    // Recent store activities (top 6 recent items, filtered by dashboard tab and search query)
-    val recentActivities = remember(periodTransactions, searchQuery, allCustomers, matchingCustomers, selectedDashboardTab) {
-        val trimmedQuery = searchQuery.trim()
+    // Authoritative Supplier Period Activities (from actual purchases, supplier payments, and purchase returns)
+    val supplierPeriodActivities = remember(
+        supplierPurchases,
+        supplierPayments,
+        supplierReturns,
+        suppliers,
+        selectedPeriod,
+        customStartDate,
+        customEndDate,
+        isArabic
+    ) {
+        val supplierMap = suppliers.associateBy { it.id }
 
-        // 1. Filter by Dashboard Tab (Customer vs Supplier)
-        val tabFiltered = periodTransactions.filter { tx ->
-            val isSupplierTx = when (tx.typedTransactionType) {
-                TransactionType.PURCHASE,
-                TransactionType.SUPPLIER_PAYMENT,
-                TransactionType.PURCHASE_RETURN -> true
-                TransactionType.EXPENSE -> false
-                TransactionType.SALE,
-                TransactionType.CUSTOMER_PAYMENT,
-                TransactionType.SALE_RETURN -> false
-                else -> tx.activityType.contains("مورد")
-            }
+        val purchaseItems = supplierPurchases.filter { purchase ->
+            purchase.status != "REVERSED" && DateFilterUtils.isDateInPeriod(
+                dateStr = purchase.purchaseDate,
+                period = selectedPeriod,
+                customStartDate = customStartDate,
+                customEndDate = customEndDate
+            )
+        }.map { purchase ->
+            val sup = supplierMap[purchase.supplierId]
+            val supName = sup?.name ?: ""
+            val invoiceSuffix = if (purchase.invoiceNumber.isNotBlank()) " ${purchase.invoiceNumber}" else ""
+            TransactionItem(
+                id = purchase.id,
+                title = if (isArabic) "فاتورة مشتريات$invoiceSuffix" else "Purchase Invoice$invoiceSuffix",
+                customerNameSnapshot = supName,
+                activityType = if (isArabic) "فاتورة مشتريات" else "Purchase",
+                amount = purchase.totalAmount,
+                isCredit = purchase.creditAmount > 0.0,
+                date = purchase.purchaseDate,
+                relativeTime = "الآن",
+                notes = purchase.notes ?: (if (isArabic) "مشتريات من مورد" else "Purchase from supplier"),
+                customerId = purchase.supplierId,
+                isArchived = false,
+                archivedDate = null,
+                customerName = supName,
+                transactionType = TransactionType.PURCHASE,
+                saleType = null,
+                paymentStatus = purchase.typedPaymentStatus,
+                operationStatus = purchase.typedOperationStatus,
+                paidAmount = purchase.paidAmount,
+                creditAmount = purchase.creditAmount
+            )
+        }
 
-            if (selectedDashboardTab == 1) {
-                // Supplier Dashboard: Purchases, Supplier payments, Purchase returns
-                isSupplierTx
+        val paymentItems = supplierPayments.filter { payment ->
+            payment.status != "REVERSED" && DateFilterUtils.isDateInPeriod(
+                dateStr = payment.paymentDate,
+                period = selectedPeriod,
+                customStartDate = customStartDate,
+                customEndDate = customEndDate
+            )
+        }.map { payment ->
+            val sup = supplierMap[payment.supplierId]
+            val supName = sup?.name ?: ""
+            TransactionItem(
+                id = payment.id,
+                title = if (isArabic) "سداد مورد: $supName" else "Supplier Payment: $supName",
+                customerNameSnapshot = supName,
+                activityType = if (isArabic) "سداد مورد" else "Supplier Payment",
+                amount = payment.amount,
+                isCredit = false,
+                date = payment.paymentDate,
+                relativeTime = "الآن",
+                notes = payment.notes ?: (if (isArabic) "سداد للمورد" else "Payment to supplier"),
+                customerId = payment.supplierId,
+                isArchived = false,
+                archivedDate = null,
+                customerName = supName,
+                transactionType = TransactionType.SUPPLIER_PAYMENT,
+                saleType = null,
+                paymentStatus = null,
+                operationStatus = payment.typedOperationStatus,
+                paidAmount = payment.amount,
+                creditAmount = 0.0
+            )
+        }
+
+        val returnItems = supplierReturns.filter { ret ->
+            ret.status != "REVERSED" && DateFilterUtils.isDateInPeriod(
+                dateStr = ret.returnDate,
+                period = selectedPeriod,
+                customStartDate = customStartDate,
+                customEndDate = customEndDate
+            )
+        }.map { ret ->
+            val sup = supplierMap[ret.supplierId]
+            val supName = sup?.name ?: ""
+            TransactionItem(
+                id = ret.id,
+                title = if (isArabic) "مرتجع مشتريات" else "Purchase Return",
+                customerNameSnapshot = supName,
+                activityType = if (isArabic) "مرتجع مشتريات" else "Purchase Return",
+                amount = ret.amount,
+                isCredit = false,
+                date = ret.returnDate,
+                relativeTime = "الآن",
+                notes = ret.reason ?: (if (isArabic) "مرتجع بضاعة لمورد" else "Return to supplier"),
+                customerId = ret.supplierId,
+                isArchived = false,
+                archivedDate = null,
+                customerName = supName,
+                transactionType = TransactionType.PURCHASE_RETURN,
+                saleType = null,
+                paymentStatus = null,
+                operationStatus = ret.typedOperationStatus,
+                paidAmount = 0.0,
+                creditAmount = 0.0
+            )
+        }
+
+        (purchaseItems + paymentItems + returnItems)
+            .distinctBy { it.id }
+            .sortedWith(compareByDescending<TransactionItem> { it.date }.thenByDescending { it.id })
+    }
+
+    // Recent store activities (top 6 recent items, filtered by dashboard tab and tab-specific search query)
+    val recentActivities = remember(
+        selectedDashboardTab,
+        periodTransactions,
+        searchQuery,
+        allCustomers,
+        matchingCustomers,
+        supplierPeriodActivities,
+        supplierSearchQuery,
+        selectedSupplier,
+        suppliers
+    ) {
+        if (selectedDashboardTab == 1) {
+            // SUPPLIER DASHBOARD: Real supplier purchases, payments, and returns
+            val trimmedSupplierQuery = supplierSearchQuery.trim()
+            val filteredBySelectedSupplier = if (selectedSupplier != null) {
+                supplierPeriodActivities.filter { it.customerId == selectedSupplier?.id }
+            } else if (trimmedSupplierQuery.isNotBlank()) {
+                val matchingSupplierIds = suppliers
+                    .filter { it.name.contains(trimmedSupplierQuery, ignoreCase = true) || it.phone.contains(trimmedSupplierQuery) }
+                    .map { it.id }
+                    .toSet()
+                supplierPeriodActivities.filter { tx ->
+                    (tx.customerId != null && tx.customerId in matchingSupplierIds) ||
+                    tx.customerNameSnapshot.contains(trimmedSupplierQuery, ignoreCase = true) ||
+                    tx.title.contains(trimmedSupplierQuery, ignoreCase = true)
+                }
             } else {
-                // Customer Dashboard: Sales, Customer payments/collections, Sale returns
+                supplierPeriodActivities
+            }
+            filteredBySelectedSupplier.take(6)
+        } else {
+            // CUSTOMER DASHBOARD: Sales, customer payments, sale returns
+            val trimmedQuery = searchQuery.trim()
+            val customerTxs = periodTransactions.filter { tx ->
+                val isSupplierTx = when (tx.typedTransactionType) {
+                    TransactionType.PURCHASE,
+                    TransactionType.SUPPLIER_PAYMENT,
+                    TransactionType.PURCHASE_RETURN -> true
+                    TransactionType.EXPENSE -> false
+                    TransactionType.SALE,
+                    TransactionType.CUSTOMER_PAYMENT,
+                    TransactionType.SALE_RETURN -> false
+                    else -> tx.activityType.contains("مورد")
+                }
                 !isSupplierTx && tx.typedTransactionType != TransactionType.EXPENSE && !tx.activityType.contains("مصروف")
             }
-        }
 
-        // 2. Filter by search query if entered
-        val filtered = if (trimmedQuery.isBlank()) {
-            tabFiltered
-        } else {
-            val customerPool = allCustomers.ifEmpty { matchingCustomers }
-            val matchingCustomerIds = customerPool
-                .filter { it.customerName.contains(trimmedQuery, ignoreCase = true) || it.phone.contains(trimmedQuery) }
-                .map { it.id }
-                .toSet()
+            val filtered = if (trimmedQuery.isBlank()) {
+                customerTxs
+            } else {
+                val customerPool = allCustomers.ifEmpty { matchingCustomers }
+                val matchingCustomerIds = customerPool
+                    .filter { it.customerName.contains(trimmedQuery, ignoreCase = true) || it.phone.contains(trimmedQuery) }
+                    .map { it.id }
+                    .toSet()
 
-            tabFiltered.filter { tx ->
-                (tx.customerId != null && tx.customerId in matchingCustomerIds) ||
-                tx.customerNameSnapshot.contains(trimmedQuery, ignoreCase = true)
+                customerTxs.filter { tx ->
+                    (tx.customerId != null && tx.customerId in matchingCustomerIds) ||
+                    tx.customerNameSnapshot.contains(trimmedQuery, ignoreCase = true)
+                }
             }
+            filtered.take(6)
         }
-        filtered.take(6)
     }
 
     // Sales Trend by day in period (visual bar trend)
@@ -745,7 +930,112 @@ fun HomeScreen(
                 }
             }
         } else {
-            // SUPPLIER DASHBOARD: 6 & 7. SUPPLIER PAYABLES & PURCHASES
+            // SUPPLIER DASHBOARD: 2x2 Grid of Period Flow & Outstanding Debts
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (isArabic) "نشاط الفترة المحددة" else "Selected Period Flow",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    // Row 1: Right = Purchases This Period, Left = Supplier Payables (in red)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        val purchasesCard = @Composable {
+                            KpiCard(
+                                title = if (isArabic) "المشتريات" else "Purchases",
+                                subtitle = if (periodInvoiceCount > 0) "$periodInvoiceCount ${if (isArabic) "فاتورة" else "invoices"}" else null,
+                                amount = periodSupplierPurchases,
+                                currency = currency,
+                                valueColor = MaterialTheme.colorScheme.primary,
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                testTag = "home_purchases_period_card",
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        val payablesCard = @Composable {
+                            KpiCard(
+                                title = if (isArabic) "مستحقات الموردين" else "Supplier Payables",
+                                subtitle = if (isArabic) "التزامات مستحقة" else "Outstanding obligations",
+                                amount = supplierPayables,
+                                currency = currency,
+                                valueColor = MaterialTheme.colorScheme.error,
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                testTag = "kpi_supplier_payables",
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        if (isArabic) {
+                            // In Arabic (RTL): first child is Right, second is Left
+                            purchasesCard()
+                            payablesCard()
+                        } else {
+                            // In English (LTR): first child is Left, second is Right
+                            payablesCard()
+                            purchasesCard()
+                        }
+                    }
+
+                    // Row 2: Right = Invoice Count for This Period, Left = Supplier Payments This Period
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        val invoiceCountCard = @Composable {
+                            KpiCard(
+                                title = if (isArabic) "عدد الفواتير" else "Invoice Count",
+                                subtitle = if (isArabic) "فواتير الفترة" else "Period invoices",
+                                amount = 0.0,
+                                currency = currency,
+                                valueText = "$periodInvoiceCount ${if (isArabic) "فاتورة" else "invoices"}",
+                                valueColor = MaterialTheme.colorScheme.primary,
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                testTag = "home_supplier_invoices_period_card",
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        val paymentsCard = @Composable {
+                            KpiCard(
+                                title = if (isArabic) "مدفوعات الموردين" else "Supplier Payments",
+                                subtitle = if (isArabic) "سداد بالفترة" else "Paid in period",
+                                amount = periodSupplierPayments,
+                                currency = currency,
+                                valueColor = MaterialTheme.colorScheme.primary,
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                testTag = "home_supplier_payments_period_card",
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        if (isArabic) {
+                            // In Arabic (RTL): first child is Right, second is Left
+                            invoiceCountCard()
+                            paymentsCard()
+                        } else {
+                            // In English (LTR): first child is Left, second is Right
+                            paymentsCard()
+                            invoiceCountCard()
+                        }
+                    }
+                }
+            }
+
+            // 3. Below the two rows: Full-width Outstanding Supplier Debts / Amount Owed to Suppliers
             item {
                 Column(
                     modifier = Modifier
@@ -754,94 +1044,82 @@ fun HomeScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = if (isArabic) "التزامات ومشتريات الموردين" else "Supplier Payables & Purchases",
+                        text = if (isArabic) "الأرصدة والمستحقات الحالية (لحظياً)" else "Current Outstanding Balances",
                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(
+                                if (onNavigateToSuppliers != null) {
+                                    Modifier.clickable(onClick = onNavigateToSuppliers)
+                                } else Modifier
+                            )
+                            .testTag("home_supplier_payables_card")
                     ) {
-                        // Section 6: Current Supplier Payables
-                        Card(
-                            shape = RoundedCornerShape(14.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            modifier = Modifier
-                                .weight(1f)
-                                .then(
-                                    if (onNavigateToSuppliers != null) {
-                                        Modifier.clickable(onClick = onNavigateToSuppliers)
-                                    } else Modifier
-                                )
-                                .testTag("home_supplier_payables_card")
-                        ) {
-                            Column(modifier = Modifier.padding(14.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = if (isArabic) "مستحقات الموردين" else "Supplier Payables",
-                                        style = MaterialTheme.typography.bodySmall,
+                                        text = if (isArabic) "إجمالي ديون الموردين (المستحقات عليك)" else "Amount Owed to Suppliers",
+                                        style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
-                                    if (onNavigateToSuppliers != null) {
-                                        Icon(
-                                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                            contentDescription = if (isArabic) "فتح إدارة الموردين" else "Open Supplier Management",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(14.dp)
-                                        )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = String.format(Locale.US, "%,.2f %s", supplierPayables, currency),
+                                        style = MaterialTheme.typography.headlineMedium.copy(
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontSize = 24.sp
+                                        ),
+                                        color = if (supplierPayables > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.testTag("stat_total_supplier_debt")
+                                    )
+                                }
+                                if (onNavigateToSuppliers != null) {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                                        ) {
+                                            Text(
+                                                text = if (isArabic) "الموردين" else "Suppliers",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                                contentDescription = if (isArabic) "فتح إدارة الموردين" else "Open Supplier Management",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
                                     }
                                 }
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = String.format(Locale.US, "%,.2f %s", supplierPayables, currency),
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
-                                    color = if (supplierPayables > 0) MaterialTheme.colorScheme.statusAmber else MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = if (onNavigateToSuppliers != null) {
-                                        if (isArabic) "عرض وإدارة الموردين ↗" else "View & manage suppliers ↗"
-                                    } else {
-                                        if (isArabic) "رصيد الالتزام الحالي" else "Current balance owed"
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (onNavigateToSuppliers != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
                             }
-                        }
-
-                        // Section 7: Purchases (Period Flow)
-                        Card(
-                            shape = RoundedCornerShape(14.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("home_purchases_period_card")
-                        ) {
-                            Column(modifier = Modifier.padding(14.dp)) {
-                                Text(
-                                    text = if (isArabic) "مشتريات الفترة" else "Period Purchases",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = String.format(Locale.US, "%,.2f %s", totalPeriodPurchases, currency),
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = if (isArabic) "توريد بضائع بالفترة" else "Goods acquired in period",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = if (onNavigateToSuppliers != null) {
+                                    if (isArabic) "عرض وإدارة الموردين والمستحقات ↗" else "View & manage suppliers ↗"
+                                } else {
+                                    if (isArabic) "إجمالي رصيد الالتزام القائم حالياً" else "Total outstanding balance owed"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (onNavigateToSuppliers != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
@@ -867,14 +1145,15 @@ fun HomeScreen(
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
+                        val totalEntriesCount = if (selectedDashboardTab == 1) supplierPeriodActivities.size else periodTransactions.size
                         Text(
-                            text = if (isArabic) "${periodTransactions.size} عملية مسجلة" else "${periodTransactions.size} total entries",
+                            text = if (isArabic) "$totalEntriesCount عملية مسجلة" else "$totalEntriesCount total entries",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 
-                    if (selectedCustomer != null) {
+                    if (selectedDashboardTab == 0 && selectedCustomer != null) {
                         Surface(
                             shape = RoundedCornerShape(8.dp),
                             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
@@ -905,30 +1184,85 @@ fun HomeScreen(
                                 }
                             }
                         }
+                    } else if (selectedDashboardTab == 1 && selectedSupplier != null) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                            modifier = Modifier.testTag("home_active_supplier_filter_chip")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = selectedSupplier!!.name,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                IconButton(
+                                    onClick = { selectedSupplier = null },
+                                    modifier = Modifier.size(16.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = if (isArabic) "إلغاء التصفية" else "Clear filter",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
 
                 // Search Bar immediately below section title and above activity items
-                CustomerSearchField(
-                    customers = allCustomers.ifEmpty { matchingCustomers },
-                    searchQuery = searchQuery,
-                    onSearchQueryChange = onSearchQueryChange,
-                    onCustomerSelected = { customer ->
-                        onSelectCustomer(customer)
-                    },
-                    onClearSelection = {
-                        onClearSelectedCustomer()
-                        onSearchQueryChange("")
-                    },
-                    selectedCustomerId = selectedCustomer?.id,
-                    placeholderText = if (isArabic) "بحث بالاسم أو الهاتف في النشاطات..." else "Search activity by name or phone...",
-                    currency = currency,
-                    isArabic = isArabic,
-                    inputTestTag = "customer_search_input",
-                    dropdownTestTag = "customer_search_suggestions",
-                    itemTagPrefix = "customer_suggestion_",
-                    modifier = Modifier.padding(top = 2.dp)
-                )
+                if (selectedDashboardTab == 0) {
+                    // Customer Search Bar
+                    CustomerSearchField(
+                        customers = allCustomers.ifEmpty { matchingCustomers },
+                        searchQuery = searchQuery,
+                        onSearchQueryChange = onSearchQueryChange,
+                        onCustomerSelected = { customer ->
+                            onSelectCustomer(customer)
+                        },
+                        onClearSelection = {
+                            onClearSelectedCustomer()
+                            onSearchQueryChange("")
+                        },
+                        selectedCustomerId = selectedCustomer?.id,
+                        placeholderText = if (isArabic) "بحث بالاسم أو الهاتف في النشاطات..." else "Search activity by name or phone...",
+                        currency = currency,
+                        isArabic = isArabic,
+                        inputTestTag = "customer_search_input",
+                        dropdownTestTag = "customer_search_suggestions",
+                        itemTagPrefix = "customer_suggestion_",
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                } else {
+                    // Supplier Search Bar
+                    SupplierSearchField(
+                        suppliers = suppliers.filter { !it.isArchived },
+                        searchQuery = supplierSearchQuery,
+                        onSearchQueryChange = { supplierSearchQuery = it },
+                        onSupplierSelected = { supplier ->
+                            selectedSupplier = supplier
+                        },
+                        onClearSelection = {
+                            selectedSupplier = null
+                            supplierSearchQuery = ""
+                        },
+                        selectedSupplierId = selectedSupplier?.id,
+                        placeholderText = if (isArabic) "بحث عن مورد بالاسم أو الهاتف في النشاطات..." else "Search supplier activity by name or phone...",
+                        isArabic = isArabic,
+                        inputTestTag = "supplier_search_input",
+                        dropdownTestTag = "supplier_search_suggestions",
+                        itemTagPrefix = "supplier_suggestion_",
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
 
                 if (recentActivities.isEmpty()) {
                     Card(
@@ -958,13 +1292,14 @@ fun HomeScreen(
                             val isReversed = tx.typedOperationStatus == OperationStatus.REVERSED
                             val isReturnEligible = !isReversed && isSale
 
-                            val isSupplierOrExpense = when (tx.typedTransactionType) {
+                            val isSupplierTx = when (tx.typedTransactionType) {
                                 TransactionType.PURCHASE,
                                 TransactionType.SUPPLIER_PAYMENT,
-                                TransactionType.PURCHASE_RETURN,
-                                TransactionType.EXPENSE -> true
-                                else -> tx.activityType.contains("مورد") || tx.activityType.contains("مصروف")
+                                TransactionType.PURCHASE_RETURN -> true
+                                else -> tx.activityType.contains("مورد")
                             }
+
+                            val isSupplierOrExpense = isSupplierTx || tx.typedTransactionType == TransactionType.EXPENSE || tx.activityType.contains("مصروف")
 
                             val rawSnapshot = tx.customerNameSnapshot.ifBlank { tx.customerName }.trim()
                             val normalizedSnapshot = normalizeCustomerName(rawSnapshot)
@@ -983,7 +1318,6 @@ fun HomeScreen(
 
                                 // 2. If the ID is absent or does not resolve, fallback to existing customer-name snapshot
                                 // only when it uniquely identifies one real customer
-                                // 3. Normalize names safely by trimming surrounding whitespace and handling case differences
                                 if (match == null && normalizedSnapshot.isNotEmpty()) {
                                     val uniqueMatches = customerPool.filter { customer ->
                                         !isAnonymousCustomerName(customer.customerName) &&
@@ -994,7 +1328,7 @@ fun HomeScreen(
                                     }
                                 }
 
-                                // 4. Do not treat generic/anonymous customer as a real customer profile
+                                // 3. Do not treat generic/anonymous customer as a real customer profile
                                 if (match != null && isAnonymousCustomerName(match.customerName)) {
                                     null
                                 } else {
@@ -1003,6 +1337,14 @@ fun HomeScreen(
                             } else {
                                 null
                             }
+
+                            // Authoritative Supplier resolution by ID
+                            val matchedSupplier: Supplier? = if (isSupplierTx) {
+                                val candidateId = tx.customerId?.trim()
+                                if (!candidateId.isNullOrEmpty()) {
+                                    suppliers.firstOrNull { it.id.trim() == candidateId }
+                                } else null
+                            } else null
 
                             val customerNavigationAction: (() -> Unit)? = if (matchedCustomer != null) {
                                 if (onNavigateToCustomerProfile != null) {
@@ -1015,12 +1357,24 @@ fun HomeScreen(
                                 { onActivityClick(tx) }
                             } else null
 
+                            val supplierNavigationAction: (() -> Unit)? = if (matchedSupplier != null) {
+                                if (onNavigateToSupplierProfile != null) {
+                                    { onNavigateToSupplierProfile(matchedSupplier) }
+                                } else if (onActivityClick != null) {
+                                    { onActivityClick(tx) }
+                                } else null
+                            } else if (isSupplierTx && !tx.customerId.isNullOrBlank() && onActivityClick != null) {
+                                { onActivityClick(tx) }
+                            } else null
+
+                            val navigationAction = if (isSupplierTx) supplierNavigationAction else customerNavigationAction
+
                             ActivityRowCard(
                                 transaction = tx,
                                 currency = currency,
                                 isArabic = isArabic,
-                                onClick = customerNavigationAction,
-                                onCustomerClick = customerNavigationAction,
+                                onClick = navigationAction,
+                                onCustomerClick = navigationAction,
                                 onReverseClick = if (onReverseTransaction != null && !isReversed) {
                                     { transactionToReverse = tx }
                                 } else null,
@@ -1183,7 +1537,8 @@ private fun KpiCard(
     valueColor: Color,
     containerColor: Color,
     testTag: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    valueText: String? = null
 ) {
     Card(
         shape = RoundedCornerShape(14.dp),
@@ -1205,7 +1560,7 @@ private fun KpiCard(
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = String.format(Locale.US, "%,.2f %s", amount, currency),
+                text = valueText ?: String.format(Locale.US, "%,.2f %s", amount, currency),
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.ExtraBold,
                     fontSize = 15.sp
@@ -1399,7 +1754,7 @@ private fun ActivityRowCard(
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = transaction.customerNameSnapshot,
+                        text = transaction.customerNameSnapshot.ifBlank { transaction.customerName }.ifBlank { transaction.title },
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp
@@ -1556,5 +1911,223 @@ private fun isAnonymousCustomerName(name: String?): Boolean {
         trimmed.equals("كاش", ignoreCase = true) -> true
         trimmed.equals("General", ignoreCase = true) -> true
         else -> false
+    }
+}
+
+@Composable
+private fun SupplierSearchField(
+    suppliers: List<Supplier>,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    onSupplierSelected: (Supplier) -> Unit,
+    onClearSelection: () -> Unit,
+    modifier: Modifier = Modifier,
+    selectedSupplierId: String? = null,
+    placeholderText: String? = null,
+    isArabic: Boolean = true,
+    inputTestTag: String = "supplier_search_input",
+    dropdownTestTag: String = "supplier_search_suggestions",
+    itemTagPrefix: String = "supplier_suggestion_"
+) {
+    val focusManager = LocalFocusManager.current
+    val interactionSource = remember { MutableInteractionSource() }
+    var isFocused by remember { mutableStateOf(false) }
+    var isDropdownOpen by remember { mutableStateOf(false) }
+
+    LaunchedEffect(interactionSource) {
+        interactionSource.interactions.collect { interaction ->
+            if (interaction is PressInteraction.Release) {
+                isDropdownOpen = true
+            }
+        }
+    }
+
+    val layoutDirection = if (isArabic) LayoutDirection.Rtl else LayoutDirection.Ltr
+
+    val filteredSuppliers = remember(suppliers, searchQuery) {
+        if (searchQuery.isBlank()) suppliers
+        else {
+            val q = searchQuery.trim().lowercase()
+            suppliers.filter {
+                it.name.lowercase().contains(q) || it.phone.contains(q)
+            }
+        }
+    }
+
+    val placeholder = placeholderText ?: if (isArabic) "بحث عن مورد بالاسم أو الهاتف في النشاطات..." else "Search supplier activity by name or phone..."
+
+    BackHandler(enabled = isDropdownOpen) {
+        isDropdownOpen = false
+        focusManager.clearFocus()
+    }
+
+    CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
+        Column(modifier = modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { newQuery ->
+                    onSearchQueryChange(newQuery)
+                    isDropdownOpen = true
+                },
+                interactionSource = interactionSource,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { focusState ->
+                        isFocused = focusState.isFocused
+                        if (focusState.isFocused) {
+                            isDropdownOpen = true
+                        }
+                    }
+                    .testTag(inputTestTag),
+                placeholder = {
+                    Text(
+                        text = placeholder,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = if (isArabic) "بحث" else "Search",
+                        tint = if (isFocused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                },
+                trailingIcon = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(end = 4.dp)
+                    ) {
+                        if (searchQuery.isNotBlank() || selectedSupplierId != null) {
+                            IconButton(
+                                onClick = {
+                                    onSearchQueryChange("")
+                                    onClearSelection()
+                                    isDropdownOpen = false
+                                    focusManager.clearFocus()
+                                },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .testTag("${inputTestTag}_clear")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = if (isArabic) "مسح البحث" else "Clear search",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        } else if (suppliers.isNotEmpty()) {
+                            IconButton(
+                                onClick = {
+                                    isDropdownOpen = !isDropdownOpen
+                                },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isDropdownOpen) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                    contentDescription = if (isArabic) "قائمة الموردين" else "Supplier list",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = if (selectedSupplierId != null) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outlineVariant
+                ),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(
+                    onSearch = {
+                        isDropdownOpen = false
+                        focusManager.clearFocus()
+                    }
+                )
+            )
+
+            if (isDropdownOpen) {
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp)
+                        .testTag(dropdownTestTag)
+                ) {
+                    if (filteredSuppliers.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (isArabic) "لا يوجد موردون مطابقون" else "No matching suppliers found",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 240.dp)
+                        ) {
+                            items(filteredSuppliers.take(6), key = { it.id }) { supplier ->
+                                Surface(
+                                    color = if (supplier.id == selectedSupplierId) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else Color.Transparent,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            onSupplierSelected(supplier)
+                                            isDropdownOpen = false
+                                            focusManager.clearFocus()
+                                        }
+                                        .testTag("$itemTagPrefix${supplier.id}")
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = supplier.name,
+                                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            if (supplier.phone.isNotBlank()) {
+                                                Text(
+                                                    text = supplier.phone,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                HorizontalDivider(
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                                    thickness = 0.5.dp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

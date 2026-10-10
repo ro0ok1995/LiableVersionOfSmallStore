@@ -124,6 +124,7 @@ class StoreRepository private constructor(
     val activeSuppliers: Flow<List<Supplier>> = supplierRepository.activeSuppliers
     val allPurchases: Flow<List<Purchase>> = purchasesRepository.allPurchases
     val allSupplierPayments: Flow<List<SupplierPayment>> = supplierPaymentRepository.allSupplierPayments
+    val allPurchaseReturns: Flow<List<PurchaseReturn>> = purchaseReturnRepository.allPurchaseReturns
     val allExpenseCategories: Flow<List<ExpenseCategory>> = expenseRepository.allExpenseCategories
     val allExpenses: Flow<List<Expense>> = expenseRepository.allExpenses
     val allPersistentStockMovements: Flow<List<PersistentStockMovement>> = inventoryRepository.allPersistentStockMovements

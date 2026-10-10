@@ -14,6 +14,7 @@ enum class NavDestination {
     MORE_SETTINGS,
     MORE,
     CUSTOMER_DETAILS,
+    SUPPLIER_DETAILS,
     QUICK_PAYMENT,
     STORE_INFORMATION,
     APP_SETTINGS,

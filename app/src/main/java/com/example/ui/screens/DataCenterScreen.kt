@@ -56,9 +56,11 @@ fun DataCenterScreen(
     languageMode: LanguageMode,
     customersCount: Int = 0,
     productsCount: Int = 0,
+    suppliersCount: Int = 0,
     onBackClick: () -> Unit,
     onCustomersClick: (() -> Unit)? = null,
     onProductsClick: (() -> Unit)? = null,
+    onSuppliersClick: (() -> Unit)? = null,
     onBackupRestoreClick: (() -> Unit)? = null,
     onArchiveClick: (() -> Unit)? = null,
     onReversedTransactionsClick: (() -> Unit)? = null,
@@ -152,7 +154,28 @@ fun DataCenterScreen(
                 }
             }
 
-            // 2. Products
+            // 2. Suppliers — managed through the shared Accounts supplier list.
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                modifier = Modifier.fillMaxWidth().border(1.dp, GeoOutlineVariant, RoundedCornerShape(14.dp))
+                    .clickable { onSuppliersClick?.invoke() }.testTag("data_center_item_suppliers")
+            ) {
+                Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(color = GeoPrimary.copy(alpha = 0.10f), shape = RoundedCornerShape(10.dp), modifier = Modifier.size(42.dp)) {
+                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Person, contentDescription = null, tint = GeoPrimary) }
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(if (isArabic) "الموردون" else "Suppliers", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Spacer(Modifier.height(2.dp))
+                        Text(if (isArabic) "إدارة سجلات الموردين النشطين ($suppliersCount مورد)" else "Find and manage active supplier records ($suppliersCount suppliers)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), modifier = Modifier.size(20.dp))
+                }
+            }
+
+            // 3. Products
             Card(
                 shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
