@@ -163,7 +163,7 @@ class MainViewModel @JvmOverloads constructor(
 
     init {
         viewModelScope.launch {
-            repository.seedIfEmpty()
+            repository.seedIfEmpty(getApplication())
             val saved = repository.isStoreInfoSaved()
             isStoreInfoSaved.value = saved
             if (!saved && !hasCheckedFirstLaunch) {

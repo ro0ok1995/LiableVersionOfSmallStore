@@ -264,7 +264,12 @@ class StoreRepository private constructor(
         storeInfoRepository.saveStoreInfo(info, markAsSaved)
     }
 
-    suspend fun seedIfEmpty() {
+    suspend fun seedIfEmpty(context: Context? = null) {
+        if (com.example.data.demo.DemoConfig.isDemoMode(context)) {
+            com.example.data.demo.DemoDataSeeder.seedDemoDataIfEmpty(this, database)
+            return
+        }
+
         if (customerDao.getCustomerCount() == 0) {
             database.withTransaction {
                 customerDao.insertCustomers(SampleData.sampleCustomers.map { it.toEntity() })
