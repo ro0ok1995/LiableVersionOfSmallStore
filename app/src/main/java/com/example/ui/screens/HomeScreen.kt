@@ -1252,9 +1252,15 @@ fun HomeScreen(
                     SupplierSearchField(
                         suppliers = suppliers.filter { !it.isArchived },
                         searchQuery = supplierSearchQuery,
-                        onSearchQueryChange = { supplierSearchQuery = it },
+                        onSearchQueryChange = { newQuery ->
+                            supplierSearchQuery = newQuery
+                            if (selectedSupplier != null && selectedSupplier?.name != newQuery) {
+                                selectedSupplier = null
+                            }
+                        },
                         onSupplierSelected = { supplier ->
                             selectedSupplier = supplier
+                            supplierSearchQuery = supplier.name
                         },
                         onClearSelection = {
                             selectedSupplier = null
@@ -1921,7 +1927,7 @@ private fun isAnonymousCustomerName(name: String?): Boolean {
 }
 
 @Composable
-private fun SupplierSearchField(
+internal fun SupplierSearchField(
     suppliers: List<Supplier>,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
@@ -2026,20 +2032,21 @@ private fun SupplierSearchField(
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
-                        } else if (suppliers.isNotEmpty()) {
-                            IconButton(
-                                onClick = {
-                                    isDropdownOpen = !isDropdownOpen
-                                },
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (isDropdownOpen) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                                    contentDescription = if (isArabic) "قائمة الموردين" else "Supplier list",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
+                        }
+                        IconButton(
+                            onClick = {
+                                isDropdownOpen = !isDropdownOpen
+                            },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .testTag("${inputTestTag}_arrow")
+                        ) {
+                            Icon(
+                                imageVector = if (isDropdownOpen) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = if (isArabic) "قائمة الموردين" else "Supplier list",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                     }
                 },
@@ -2090,7 +2097,7 @@ private fun SupplierSearchField(
                                 .fillMaxWidth()
                                 .heightIn(max = 240.dp)
                         ) {
-                            items(filteredSuppliers.take(6), key = { it.id }) { supplier ->
+                            items(filteredSuppliers, key = { it.id }) { supplier ->
                                 Surface(
                                     color = if (supplier.id == selectedSupplierId) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else Color.Transparent,
                                     modifier = Modifier
@@ -2106,20 +2113,38 @@ private fun SupplierSearchField(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .padding(horizontal = 14.dp, vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = if (supplier.id == selectedSupplierId) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primaryContainer,
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Text(
+                                                    text = supplier.name.firstOrNull()?.uppercase() ?: "S",
+                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                    color = if (supplier.id == selectedSupplierId) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onPrimaryContainer
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(
                                                 text = supplier.name,
-                                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                                color = MaterialTheme.colorScheme.onSurface
+                                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
                                             )
                                             if (supplier.phone.isNotBlank()) {
+                                                Spacer(modifier = Modifier.height(2.dp))
                                                 Text(
                                                     text = supplier.phone,
                                                     style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
                                                 )
                                             }
                                         }

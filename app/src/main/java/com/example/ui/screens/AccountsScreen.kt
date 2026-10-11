@@ -129,6 +129,7 @@ fun AccountsScreen(
 
     // Supplier local search & filter state
     var supplierSearchQuery by remember { mutableStateOf("") }
+    var selectedSupplier by remember { mutableStateOf<Supplier?>(null) }
     // 0 = All, 1 = Has Payable (Debt), 2 = Settled
     var supplierFilter by remember { mutableIntStateOf(0) }
     var showLocalAddSupplierDialog by remember { mutableStateOf(false) }
@@ -196,12 +197,16 @@ fun AccountsScreen(
         supplierBalances = updated
     }
 
-    val filteredSuppliers = remember(activeSuppliers, supplierSearchQuery, supplierFilter, supplierBalances) {
+    val filteredSuppliers = remember(activeSuppliers, supplierSearchQuery, supplierFilter, supplierBalances, selectedSupplier) {
         var list = activeSuppliers
-        val q = supplierSearchQuery.trim().lowercase()
-        if (q.isNotEmpty()) {
-            list = list.filter { sup ->
-                sup.name.lowercase().contains(q) || sup.phone.lowercase().contains(q)
+        if (selectedSupplier != null) {
+            list = list.filter { it.id == selectedSupplier?.id }
+        } else {
+            val q = supplierSearchQuery.trim().lowercase()
+            if (q.isNotEmpty()) {
+                list = list.filter { sup ->
+                    sup.name.lowercase().contains(q) || sup.phone.lowercase().contains(q)
+                }
             }
         }
         when (supplierFilter) {
@@ -525,46 +530,30 @@ fun AccountsScreen(
                 )
             }
         } else {
-            // SUPPLIER SEARCH FIELD
-            OutlinedTextField(
-                value = supplierSearchQuery,
-                onValueChange = { supplierSearchQuery = it },
-                placeholder = {
-                    Text(
-                        text = if (isArabic) "بحث عن مورد بالاسم أو الهاتف..." else "Search suppliers by name or phone...",
-                        fontSize = 13.sp
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                trailingIcon = {
-                    if (supplierSearchQuery.isNotEmpty()) {
-                        IconButton(onClick = { supplierSearchQuery = "" }) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = if (isArabic) "مسح" else "Clear",
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
+            // SUPPLIER SEARCH FIELD WITH ARROW-TRIGGERED DROPDOWN
+            SupplierSearchField(
+                suppliers = activeSuppliers,
+                searchQuery = supplierSearchQuery,
+                onSearchQueryChange = { newQuery ->
+                    supplierSearchQuery = newQuery
+                    if (selectedSupplier != null && selectedSupplier?.name != newQuery) {
+                        selectedSupplier = null
                     }
                 },
-                singleLine = true,
-                shape = RoundedCornerShape(10.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = GeoPrimary,
-                    unfocusedBorderColor = GeoOutlineVariant,
-                    focusedContainerColor = MaterialTheme.colorScheme.surface,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("suppliers_search_input")
+                onSupplierSelected = { supplier ->
+                    selectedSupplier = supplier
+                    supplierSearchQuery = supplier.name
+                },
+                onClearSelection = {
+                    selectedSupplier = null
+                    supplierSearchQuery = ""
+                },
+                selectedSupplierId = selectedSupplier?.id,
+                placeholderText = if (isArabic) "بحث عن مورد بالاسم أو الهاتف..." else "Search suppliers by name or phone...",
+                isArabic = isArabic,
+                inputTestTag = "suppliers_search_input",
+                dropdownTestTag = "suppliers_search_results_overlay",
+                itemTagPrefix = "supplier_search_result_item_"
             )
 
             Spacer(modifier = Modifier.height(8.dp))
