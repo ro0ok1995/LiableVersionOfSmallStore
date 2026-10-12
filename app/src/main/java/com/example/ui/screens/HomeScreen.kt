@@ -96,7 +96,6 @@ import com.example.data.db.Supplier
 import com.example.data.db.Purchase
 import com.example.data.db.SupplierPayment
 import com.example.data.db.PurchaseReturn
-import com.example.accounting.SupplierLedgerCalculator
 import com.example.accounting.SupplierBalanceSummary
 import com.example.ui.components.RecordSaleReturnDialog
 import com.example.model.TransactionItem
@@ -199,19 +198,27 @@ fun HomeScreen(
 
     // Supplier payables use the same authoritative ledger calculator as the Supplier Profile.
     // This avoids reconstructing balances from generic transaction labels or customerId.
-    var supplierPayables by remember { mutableStateOf(0.0) }
+    var supplierPayables by remember { mutableStateOf<Double?>(null) }
+    var supplierAdvances by remember { mutableStateOf<Double?>(null) }
     LaunchedEffect(suppliers, supplierPurchases, supplierPayments, supplierReturns, onGetSupplierBalance) {
         val activeSuppliers = suppliers.filter { !it.isArchived }
-        supplierPayables = activeSuppliers.sumOf { supplier ->
-            val summary = if (onGetSupplierBalance != null) {
+        if (onGetSupplierBalance == null) {
+            // Do not show an incomplete fallback: it omits opening balances and adjustments.
+            supplierPayables = null
+            supplierAdvances = null
+        } else {
+            val summaries = activeSuppliers.map { supplier ->
                 runCatching { onGetSupplierBalance(supplier.id) }.getOrNull()
-            } else null
-            (summary?.balance ?: SupplierLedgerCalculator.calculateSupplierBalance(
-                supplierId = supplier.id,
-                purchases = supplierPurchases,
-                payments = supplierPayments,
-                returns = supplierReturns
-            ).balance).coerceAtLeast(0.0)
+            }
+            if (summaries.any { it == null }) {
+                // Avoid silently presenting a partial/incorrect total when any supplier ledger fails.
+                supplierPayables = null
+                supplierAdvances = null
+            } else {
+                val balances = summaries.filterNotNull().map { it.balance }
+                supplierPayables = balances.sumOf { it.coerceAtLeast(0.0) }
+                supplierAdvances = balances.sumOf { (-it).coerceAtLeast(0.0) }
+            }
         }
     }
     val periodSupplierPurchasesList = remember(supplierPurchases, selectedPeriod, customStartDate, customEndDate) {
@@ -234,6 +241,16 @@ fun HomeScreen(
         supplierPayments.filter { payment ->
             payment.status != "REVERSED" && DateFilterUtils.isDateInPeriod(
                 dateStr = payment.paymentDate,
+                period = selectedPeriod,
+                customStartDate = customStartDate,
+                customEndDate = customEndDate
+            )
+        }.sumOf { it.amount }
+    }
+    val periodSupplierReturns = remember(supplierReturns, selectedPeriod, customStartDate, customEndDate) {
+        supplierReturns.filter { purchaseReturn ->
+            purchaseReturn.status != "REVERSED" && DateFilterUtils.isDateInPeriod(
+                dateStr = purchaseReturn.returnDate,
                 period = selectedPeriod,
                 customStartDate = customStartDate,
                 customEndDate = customEndDate
@@ -977,8 +994,9 @@ fun HomeScreen(
                             KpiCard(
                                 title = if (isArabic) "مستحقات الموردين" else "Supplier Payables",
                                 subtitle = if (isArabic) "التزامات مستحقة" else "Outstanding obligations",
-                                amount = supplierPayables,
+                                amount = supplierPayables ?: 0.0,
                                 currency = currency,
+                                valueText = supplierPayables?.let { String.format(Locale.US, "%,.2f %s", it, currency) } ?: if (isArabic) "غير متاح" else "Unavailable",
                                 valueColor = MaterialTheme.colorScheme.error,
                                 containerColor = MaterialTheme.colorScheme.surface,
                                 testTag = "kpi_supplier_payables",
@@ -1002,16 +1020,15 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        val invoiceCountCard = @Composable {
+                        val returnsCard = @Composable {
                             KpiCard(
-                                title = if (isArabic) "عدد الفواتير" else "Invoice Count",
-                                subtitle = if (isArabic) "فواتير الفترة" else "Period invoices",
-                                amount = 0.0,
+                                title = if (isArabic) "مرتجعات المشتريات" else "Purchase Returns",
+                                subtitle = if (isArabic) "مرتجعات الفترة" else "Returns in period",
+                                amount = periodSupplierReturns,
                                 currency = currency,
-                                valueText = "$periodInvoiceCount ${if (isArabic) "فاتورة" else "invoices"}",
-                                valueColor = MaterialTheme.colorScheme.primary,
+                                valueColor = MaterialTheme.colorScheme.tertiary,
                                 containerColor = MaterialTheme.colorScheme.surface,
-                                testTag = "home_supplier_invoices_period_card",
+                                testTag = "home_supplier_returns_period_card",
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -1030,12 +1047,12 @@ fun HomeScreen(
 
                         if (isArabic) {
                             // In Arabic (RTL): first child is Right, second is Left
-                            invoiceCountCard()
+                            returnsCard()
                             paymentsCard()
                         } else {
                             // In English (LTR): first child is Left, second is Right
                             paymentsCard()
-                            invoiceCountCard()
+                            returnsCard()
                         }
                     }
                 }
@@ -1082,14 +1099,21 @@ fun HomeScreen(
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = String.format(Locale.US, "%,.2f %s", supplierPayables, currency),
+                                        text = supplierPayables?.let { String.format(Locale.US, "%,.2f %s", it, currency) } ?: if (isArabic) "تعذر تحميل الرصيد" else "Balance unavailable",
                                         style = MaterialTheme.typography.headlineMedium.copy(
                                             fontWeight = FontWeight.ExtraBold,
                                             fontSize = 24.sp
                                         ),
-                                        color = if (supplierPayables > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                                        color = if ((supplierPayables ?: 0.0) > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.testTag("stat_total_supplier_debt")
                                     )
+                                    if (supplierAdvances != null && (supplierAdvances ?: 0.0) > 0.0001) {
+                                        Text(
+                                            text = if (isArabic) "أرصدة مقدمة للموردين: ${String.format(Locale.US, "%,.2f %s", supplierAdvances, currency)}" else "Supplier advances: ${String.format(Locale.US, "%,.2f %s", supplierAdvances, currency)}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.tertiary
+                                        )
+                                    }
                                 }
                                 if (onNavigateToSuppliers != null) {
                                     Surface(

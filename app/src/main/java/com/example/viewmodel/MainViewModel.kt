@@ -165,11 +165,11 @@ class MainViewModel @JvmOverloads constructor(
         viewModelScope.launch {
             repository.seedIfEmpty(getApplication())
             val saved = repository.isStoreInfoSaved()
-            isStoreInfoSaved.value = saved
             if (!saved && !hasCheckedFirstLaunch) {
                 hasCheckedFirstLaunch = true
                 _uiState.update { it.copy(currentDestination = NavDestination.STORE_INFORMATION) }
             }
+            isStoreInfoSaved.value = saved
         }
 
         viewModelScope.launch {

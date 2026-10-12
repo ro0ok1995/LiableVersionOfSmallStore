@@ -904,25 +904,30 @@ private fun CustomerCardItem(
                     )
                 }
             } else {
+                val owesStore = balance > 0.001
                 Column(horizontalAlignment = Alignment.End) {
                     Surface(
-                        color = if (hasDebt) StatusRedBg else StatusGreenBg,
+                        color = if (owesStore) StatusRedBg else StatusGreenBg,
                         shape = RoundedCornerShape(6.dp)
                     ) {
                         Text(
-                            text = String.format(
-                                Locale.US,
-                                "%s%,.2f %s",
-                                if (hasDebt) "" else "-",
-                                balance,
-                                currency
-                            ),
+                            text = String.format(Locale.US, "%,.2f %s", Math.abs(balance), currency),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (hasDebt) StatusRed else StatusGreen,
+                            color = if (owesStore) StatusRed else StatusGreen,
                             modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
                         )
                     }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = if (owesStore) {
+                            if (isArabic) "عليه للمتجر" else "Owes store"
+                        } else {
+                            if (isArabic) "له عند المتجر" else "Store owes"
+                        },
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                        color = if (owesStore) StatusRed else StatusGreen
+                    )
                 }
             }
             Spacer(modifier = Modifier.width(6.dp))
@@ -1127,13 +1132,7 @@ private fun SupplierAccountCardItem(
                         shape = RoundedCornerShape(6.dp)
                     ) {
                         Text(
-                            text = String.format(
-                                Locale.US,
-                                "%s%,.2f %s",
-                                if (hasPayable) "" else "-",
-                                Math.abs(payable),
-                                currency
-                            ),
+                            text = String.format(Locale.US, "%,.2f %s", Math.abs(payable), currency),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (hasPayable) StatusRed else StatusGreen,
@@ -1142,9 +1141,9 @@ private fun SupplierAccountCardItem(
                     }
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = if (hasPayable) (if (isArabic) "مستحق للمورد" else "Payable") else (if (isArabic) "رصيد مقدم" else "Advance"),
+                        text = if (hasPayable) (if (isArabic) "للمورد نقود" else "Store owes supplier") else (if (isArabic) "لنا نقود عند المورد" else "Supplier owes store"),
                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = if (hasPayable) StatusRed else StatusGreen
                     )
                 }
             }

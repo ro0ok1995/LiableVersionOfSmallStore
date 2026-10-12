@@ -872,17 +872,20 @@ object DemoDataSeeder {
         // =========================================================================
         // 10. STORE INFORMATION
         // =========================================================================
-        database.storeInfoDao().insertOrUpdate(
-            StoreInfoEntity(
-                id = 1,
-                storeName = "بقالة الخير والبركة",
-                ownerName = "محمد السالم",
-                phone = "0501234567",
-                address = "الرياض - حي الملز",
-                taxNumber = "300123456700003",
-                crNumber = "1010123456",
-                isSaved = true
+        val existingStoreInfo = database.storeInfoDao().getStoreInfoSync()
+        if (existingStoreInfo == null) {
+            database.storeInfoDao().insertOrUpdate(
+                StoreInfoEntity(
+                    id = 1,
+                    storeName = "بقالة الخير والبركة",
+                    ownerName = "محمد السالم",
+                    phone = "0501234567",
+                    address = "الرياض - حي الملز",
+                    taxNumber = "300123456700003",
+                    crNumber = "1010123456",
+                    isSaved = false
+                )
             )
-        )
+        }
     }
 }

@@ -11,12 +11,22 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
@@ -48,6 +58,7 @@ import com.example.data.db.SupplierPayment
 import com.example.data.db.PurchaseReturn
 import com.example.accounting.SupplierLedgerEntry
 import com.example.accounting.SupplierLedgerCalculator
+import com.example.accounting.SupplierLedgerEntryType
 import com.example.model.LanguageMode
 import com.example.model.ProductItem
 import com.example.model.StoreInfo
@@ -233,14 +244,13 @@ fun AnalysisCenterScreen(
                             testTag = "analysis_customer_selector"
                         )
                         } else {
-                            Column(modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
-                                Text(if (isArabic) "المورد المحدد" else "Selected supplier", style = MaterialTheme.typography.labelMedium)
-                                Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    suppliers.filter { !it.isArchived }.forEach { supplier ->
-                                        FilterChip(selected = selectedSupplier?.id == supplier.id, onClick = { selectedSupplierId = supplier.id }, label = { Text(supplier.name, maxLines = 1) })
-                                    }
-                                }
-                            }
+                            SupplierSelectorField(
+                                suppliers = suppliers.filter { !it.isArchived },
+                                selectedSupplier = selectedSupplier,
+                                onSupplierSelected = { selectedSupplierId = it.id },
+                                isArabic = isArabic,
+                                modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+                            )
                         }
                     }
                 }
@@ -326,6 +336,72 @@ fun AnalysisCenterScreen(
 }
 
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun SupplierSelectorField(
+    suppliers: List<Supplier>,
+    selectedSupplier: Supplier?,
+    onSupplierSelected: (Supplier) -> Unit,
+    isArabic: Boolean,
+    modifier: Modifier = Modifier
+) {
+    var isSheetOpen by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    Surface(
+        onClick = { query = ""; isSheetOpen = true },
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (selectedSupplier != null) GeoPrimary.copy(alpha = 0.45f) else GeoOutlineVariant),
+        modifier = modifier.testTag("analysis_supplier_selector")
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(if (isArabic) "المورد المحدد" else "Selected supplier", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(selectedSupplier?.name ?: if (isArabic) "اختر مورداً" else "Select a supplier", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                selectedSupplier?.phone?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+            Text("⌄", color = GeoPrimary, style = MaterialTheme.typography.titleLarge)
+        }
+    }
+    if (isSheetOpen) {
+        ModalBottomSheet(onDismissRequest = { isSheetOpen = false }) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(if (isArabic) "اختيار المورد" else "Choose supplier", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth().testTag("analysis_supplier_search"),
+                    singleLine = true,
+                    placeholder = { Text(if (isArabic) "ابحث باسم المورد أو الهاتف..." else "Search supplier name or phone...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    trailingIcon = { if (query.isNotEmpty()) androidx.compose.material3.IconButton(onClick = { query = "" }) { Icon(Icons.Default.Close, contentDescription = if (isArabic) "مسح البحث" else "Clear search") } },
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors()
+                )
+                val filtered = suppliers.filter { query.isBlank() || it.name.contains(query.trim(), ignoreCase = true) || it.phone.contains(query.trim(), ignoreCase = true) }
+                if (filtered.isEmpty()) {
+                    Text(if (isArabic) "لا توجد نتائج مطابقة" else "No matching suppliers", modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+                        items(filtered, key = { it.id }) { supplier ->
+                            Surface(onClick = { onSupplierSelected(supplier); isSheetOpen = false }, color = if (supplier.id == selectedSupplier?.id) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface, shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                                Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+                                    Text(supplier.name, fontWeight = if (supplier.id == selectedSupplier?.id) FontWeight.Bold else FontWeight.Medium)
+                                    if (supplier.phone.isNotBlank()) Text(supplier.phone, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun SupplierStatisticsContent(
     supplier: Supplier?, suppliers: List<Supplier>, purchases: List<Purchase>, payments: List<SupplierPayment>, returns: List<PurchaseReturn>,
@@ -343,52 +419,126 @@ private fun SupplierStatisticsContent(
     val periodPayments = remember(payments, startDate, endDate) { payments.filter { (startDate == null || it.paymentDate >= startDate) && (endDate == null || it.paymentDate <= endDate) && it.status != "REVERSED" }.sumOf { it.amount } }
     val periodReturns = remember(returns, startDate, endDate) { returns.filter { (startDate == null || it.returnDate >= startDate) && (endDate == null || it.returnDate <= endDate) && it.status != "REVERSED" }.sumOf { it.amount } }
     val summary = supplier?.let { authoritativeBalances[it.id] ?: SupplierLedgerCalculator.calculateSupplierBalance(it.id, purchases, payments, returns) }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(if (isArabic) "إحصائيات الموردين" else "Supplier statistics", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        SupplierMetricCard(if (isArabic) "إجمالي مستحقات الموردين الحالية" else "Current total supplier payables", totalPayables, currency)
-        SupplierMetricCard(if (isArabic) "المشتريات خلال الفترة" else "Purchases in selected period", periodPurchases, currency)
-        SupplierMetricCard(if (isArabic) "المدفوعات خلال الفترة" else "Payments in selected period", periodPayments, currency)
-        SupplierMetricCard(if (isArabic) "المرتجعات خلال الفترة" else "Returns in selected period", periodReturns, currency)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SupplierMetricCard(if (isArabic) "المستحقات الحالية" else "Current payables", totalPayables, currency, Modifier.weight(1f))
+            SupplierMetricCard(if (isArabic) "المشتريات خلال الفترة" else "Period purchases", periodPurchases, currency, Modifier.weight(1f))
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SupplierMetricCard(if (isArabic) "المدفوعات خلال الفترة" else "Period payments", periodPayments, currency, Modifier.weight(1f))
+            SupplierMetricCard(if (isArabic) "المرتجعات خلال الفترة" else "Period returns", periodReturns, currency, Modifier.weight(1f))
+        }
         if (supplier != null && summary != null) {
-            Text(if (isArabic) "ملخص المورد المحدد: ${supplier.name}" else "Selected supplier: ${supplier.name}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            SupplierMetricCard(if (isArabic) "الرصيد الحالي" else "Current balance", summary.balance, currency)
-            if (summary.balance < 0.0) SupplierMetricCard(if (isArabic) "الرصيد المقدم" else "Supplier advance", -summary.balance, currency)
-        } else if (suppliers.isEmpty()) Text(if (isArabic) "لا يوجد موردون نشطون" else "No active suppliers")
-        Text(if (isArabic) "مؤشرات الفترة تستخدم تاريخ كل حركة؛ الرصيد الحالي يشمل الحركات النشطة التاريخية." else "Period metrics use each movement date; current balance includes active historical movements.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(if (isArabic) "ملخص المورد المحدد" else "Selected supplier summary", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(supplier.name, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SupplierMetricCard(if (isArabic) "الرصيد الحالي المستحق" else "Current balance", summary.balance, currency, Modifier.weight(1f), emphasize = true)
+                SupplierMetricCard(if (isArabic) "دفعة مقدمة" else "Supplier advance", (-summary.balance).coerceAtLeast(0.0), currency, Modifier.weight(1f))
+            }
+        } else if (suppliers.isEmpty()) {
+            Text(if (isArabic) "لا يوجد موردون نشطون" else "No active suppliers", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text(if (isArabic) "المؤشرات الدورية تعتمد على تاريخ الحركة، أما الرصيد الحالي فيعكس الحركات النشطة." else "Period metrics use movement dates; current balance reflects active ledger movements.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
-private fun SupplierMetricCard(label: String, value: Double, currency: String) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(String.format(Locale.US, "%,.2f %s", value, currency), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+private fun SupplierMetricCard(label: String, value: Double, currency: String, modifier: Modifier = Modifier, emphasize: Boolean = false) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = if (emphasize) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.48f) else MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (emphasize) GeoPrimary.copy(alpha = 0.22f) else GeoOutlineVariant.copy(alpha = 0.65f)),
+        modifier = modifier
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, minLines = 2)
+            Text(String.format(Locale.US, "%,.2f %s", value, currency), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = if (value < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface, maxLines = 2)
         }
     }
 }
 
 @Composable
 private fun SupplierStatementContent(entries: List<SupplierLedgerEntry>, supplierName: String, startDate: String?, endDate: String?, isArabic: Boolean, currency: String) {
-    val visible = remember(entries, startDate, endDate) { entries.filter { (startDate == null || it.date >= startDate) && (endDate == null || it.date <= endDate) } }
+    var query by remember { mutableStateOf("") }
+    var selectedFilter by remember { mutableStateOf("ALL") }
+    val visiblePeriod = remember(entries, startDate, endDate) { entries.filter { (startDate == null || it.date >= startDate) && (endDate == null || it.date <= endDate) } }
     val opening = remember(entries, startDate) { if (startDate == null) 0.0 else entries.lastOrNull { it.date < startDate }?.runningBalance ?: 0.0 }
-    val closing = visible.lastOrNull()?.runningBalance ?: opening
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(if (isArabic) "كشف حساب المورد" else "Supplier account statement", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        Text(supplierName, style = MaterialTheme.typography.titleMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            SupplierMetricCard(if (isArabic) "الرصيد الافتتاحي" else "Opening balance", opening, currency)
+    val filteredEntries = remember(visiblePeriod, query, selectedFilter) {
+        visiblePeriod.filter { entry ->
+            val typeMatches = when (selectedFilter) {
+                "PURCHASE" -> entry.entryType == SupplierLedgerEntryType.PURCHASE
+                "PAYMENT" -> entry.entryType == SupplierLedgerEntryType.SUPPLIER_PAYMENT
+                "RETURN" -> entry.entryType == SupplierLedgerEntryType.PURCHASE_RETURN
+                else -> true
+            }
+            typeMatches && (query.isBlank() || entry.description.contains(query.trim(), ignoreCase = true) || entry.referenceId.contains(query.trim(), ignoreCase = true) || entry.date.contains(query.trim(), ignoreCase = true))
         }
-        if (visible.isEmpty()) Text(if (isArabic) "لا توجد حركات في الفترة المحددة" else "No movements in the selected period", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        visible.forEach { entry ->
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(entry.date, style = MaterialTheme.typography.labelMedium); Text(String.format(Locale.US, "%,.2f %s", entry.runningBalance, currency), fontWeight = FontWeight.Bold) }
-                    Text(entry.description, fontWeight = FontWeight.SemiBold)
-                    Text("${if (isArabic) "مدين" else "Debit"}: ${String.format(Locale.US, "%,.2f", entry.debit)}  •  ${if (isArabic) "دائن" else "Credit"}: ${String.format(Locale.US, "%,.2f", entry.credit)}", style = MaterialTheme.typography.bodySmall)
+    }
+    val closing = visiblePeriod.lastOrNull()?.runningBalance ?: opening
+    val totalDebit = visiblePeriod.sumOf { it.debit }
+    val totalCredit = visiblePeriod.sumOf { it.credit }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(if (isArabic) "كشف حساب المورد" else "Supplier account statement", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text(supplierName, style = MaterialTheme.typography.titleMedium, color = GeoPrimary, fontWeight = FontWeight.SemiBold)
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SupplierMetricCard(if (isArabic) "الرصيد الافتتاحي" else "Opening balance", opening, currency, Modifier.weight(1f))
+                SupplierMetricCard(if (isArabic) "إجمالي المدين" else "Total debit", totalDebit, currency, Modifier.weight(1f))
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SupplierMetricCard(if (isArabic) "إجمالي الدائن" else "Total credit", totalCredit, currency, Modifier.weight(1f))
+                SupplierMetricCard(if (isArabic) "الرصيد الختامي" else "Closing balance", closing, currency, Modifier.weight(1f), emphasize = true)
+            }
+        }
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            modifier = Modifier.fillMaxWidth().testTag("supplier_statement_search"),
+            singleLine = true,
+            placeholder = { Text(if (isArabic) "بحث في الحركات أو المرجع أو التاريخ..." else "Search movements, reference or date...") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            trailingIcon = { if (query.isNotEmpty()) androidx.compose.material3.IconButton(onClick = { query = "" }) { Icon(Icons.Default.Close, contentDescription = if (isArabic) "مسح البحث" else "Clear search") } },
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+            colors = OutlinedTextFieldDefaults.colors()
+        )
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("ALL", "PURCHASE", "PAYMENT", "RETURN").forEach { filter ->
+                FilterChip(selected = selectedFilter == filter, onClick = { selectedFilter = filter }, label = {
+                    Text(when (filter) {
+                        "PURCHASE" -> if (isArabic) "المشتريات" else "Purchases"
+                        "PAYMENT" -> if (isArabic) "المدفوعات" else "Payments"
+                        "RETURN" -> if (isArabic) "المرتجعات" else "Returns"
+                        else -> if (isArabic) "الكل" else "All"
+                    })
+                })
+            }
+        }
+        Text(if (isArabic) "الحركات (${filteredEntries.size})" else "Movements (${filteredEntries.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        if (filteredEntries.isEmpty()) {
+            Text(if (isArabic) "لا توجد حركات مطابقة للفترة والبحث المحددين" else "No movements match the selected period and search", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 18.dp))
+        } else {
+            filteredEntries.forEach { entry ->
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = androidx.compose.foundation.BorderStroke(1.dp, GeoOutlineVariant.copy(alpha = 0.6f)), modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text(entry.date, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(String.format(Locale.US, "%,.2f %s", entry.runningBalance, currency), fontWeight = FontWeight.Bold, color = if (entry.runningBalance < 0) MaterialTheme.colorScheme.error else GeoPrimary)
+                        }
+                        Text(entry.description, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        HorizontalDivider(color = GeoOutlineVariant.copy(alpha = 0.6f))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Column(Modifier.weight(1f)) {
+                                Text(if (isArabic) "مدين · يخفض المستحق" else "Debit · reduces payable", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(String.format(Locale.US, "%,.2f %s", entry.debit, currency), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = if (entry.debit > 0) com.example.ui.theme.StatusGreen else MaterialTheme.colorScheme.onSurface)
+                            }
+                            Column(Modifier.weight(1f)) {
+                                Text(if (isArabic) "دائن · يزيد المستحق" else "Credit · increases payable", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(String.format(Locale.US, "%,.2f %s", entry.credit, currency), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = if (entry.credit > 0) com.example.ui.theme.StatusRed else MaterialTheme.colorScheme.onSurface)
+                            }
+                        }
+                    }
                 }
             }
         }
-        SupplierMetricCard(if (isArabic) "الرصيد الختامي" else "Closing balance", closing, currency)
     }
 }
