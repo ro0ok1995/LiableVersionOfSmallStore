@@ -56,6 +56,7 @@ import com.example.ui.screens.ArchiveScreen
 import com.example.ui.screens.BackupRestoreScreen
 import com.example.ui.screens.ContactSupportScreen
 import com.example.ui.screens.CustomerManagementScreen
+import com.example.ui.screens.SupplierManagementScreen
 import com.example.ui.screens.ProductManagementScreen
 import com.example.ui.screens.CustomerProfileScreen
 import com.example.ui.screens.SupplierProfileScreen
@@ -212,6 +213,7 @@ fun SmallStoreApp(
                     NavDestination.APP_SETTINGS -> if (isArabic) StoreStrings.APP_SETTINGS_AR else StoreStrings.APP_SETTINGS_EN
                     NavDestination.DATA_CENTER -> if (isArabic) StoreStrings.DATA_CENTER_AR else StoreStrings.DATA_CENTER_EN
                     NavDestination.CUSTOMER_MANAGEMENT -> if (isArabic) "إدارة العملاء" else "Customer Management"
+                    NavDestination.SUPPLIER_MANAGEMENT -> if (isArabic) "إدارة الموردين" else "Supplier Management"
                     NavDestination.PRODUCT_MANAGEMENT -> if (isArabic) "إدارة المنتجات" else "Product Management"
                     NavDestination.ARCHIVE -> if (isArabic) StoreStrings.SECTION_ARCHIVE_TRASH_AR else StoreStrings.SECTION_ARCHIVE_TRASH_EN
                     NavDestination.REVERSED_TRANSACTIONS -> if (isArabic) "المعاملات الملغاة محاسبياً" else "Reversed Transactions"
@@ -727,8 +729,7 @@ fun SmallStoreApp(
                                     },
                                     onSuppliersClick = {
                                         focusManager.clearFocus()
-                                        accountsInitialTab = 1
-                                        mainViewModel.navigateTo(NavDestination.ACCOUNTS)
+                                        mainViewModel.navigateTo(NavDestination.SUPPLIER_MANAGEMENT)
                                     },
                                     onBackupRestoreClick = {
                                         focusManager.clearFocus()
@@ -805,6 +806,22 @@ fun SmallStoreApp(
                                     onUnarchiveCustomer = { customerId ->
                                         mainViewModel.unarchiveCustomer(customerId)
                                     }
+                                )
+                            }
+
+                            NavDestination.SUPPLIER_MANAGEMENT -> {
+                                SupplierManagementScreen(
+                                    suppliers = uiState.suppliers,
+                                    languageMode = uiState.languageMode,
+                                    onBackClick = {
+                                        focusManager.clearFocus()
+                                        mainViewModel.navigateBack()
+                                    },
+                                    onAddSupplier = { name, phone ->
+                                        mainViewModel.addSupplier(name, phone)
+                                    },
+                                    onUpdateSupplier = { supplier -> mainViewModel.updateSupplier(supplier) },
+                                    onGetSupplierBalance = { supplierId -> mainViewModel.getSupplierBalance(supplierId) }
                                 )
                             }
 
