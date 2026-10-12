@@ -504,7 +504,8 @@ fun SmallStoreApp(
                                             if (result.isSuccess) mainViewModel.navigateTo(NavDestination.ACCOUNTS)
                                         }
                                     },
-                                    onGetSupplierBalance = { supplierId -> mainViewModel.getSupplierBalance(supplierId) }
+                                    onGetSupplierBalance = { supplierId -> mainViewModel.getSupplierBalance(supplierId) },
+                                    onSupplierSelected = { supplier -> supplier?.let { mainViewModel.selectSupplierDetails(it) } }
                                 )
                             }
 

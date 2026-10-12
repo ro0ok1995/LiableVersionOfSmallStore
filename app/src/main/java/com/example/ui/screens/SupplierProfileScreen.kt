@@ -1,25 +1,36 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Payments
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.accounting.SupplierBalanceSummary
@@ -30,6 +41,10 @@ import com.example.data.db.Supplier
 import com.example.data.db.SupplierPayment
 import com.example.model.AppCurrency
 import com.example.model.LanguageMode
+import com.example.ui.theme.statusGreen
+import com.example.ui.theme.statusGreenContainer
+import com.example.ui.theme.statusRed
+import com.example.ui.theme.statusRedContainer
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -49,38 +64,45 @@ fun SupplierProfileScreen(
     onStatementAction: (Supplier) -> Unit,
     onArchive: (Supplier) -> Unit,
     onGetSupplierBalance: suspend (String) -> SupplierBalanceSummary,
+    onSupplierSelected: (Supplier?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val ar = languageMode == LanguageMode.ARABIC
-    val current = supplier ?: suppliers.firstOrNull()
+    val current = supplier?.let { selected -> suppliers.firstOrNull { it.id == selected.id } ?: selected }
+    var selectorExpanded by remember { mutableStateOf(false) }
+    var showEditDialog by remember { mutableStateOf(false) }
+    var showArchiveConfirmDialog by remember { mutableStateOf(false) }
     var invoiceFilter by remember { mutableIntStateOf(0) }
     var invoiceSearch by remember { mutableStateOf("") }
-    var showEditDialog by remember { mutableStateOf(false) }
     var editName by remember(current?.id) { mutableStateOf(current?.name.orEmpty()) }
     var editPhone by remember(current?.id) { mutableStateOf(current?.phone.orEmpty()) }
     var editAddress by remember(current?.id) { mutableStateOf(current?.address.orEmpty()) }
     var editNotes by remember(current?.id) { mutableStateOf(current?.notes.orEmpty()) }
-    if (current == null) {
-        Column(modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(if (ar) "المورد غير موجود" else "Supplier not found", style = MaterialTheme.typography.titleLarge)
-            Button(onClick = onBack) { Text(if (ar) "رجوع" else "Back") }
+
+    BackHandler { onBack() }
+
+    val initialBalance = remember(current?.id, purchases, payments, returns) {
+        current?.let {
+            SupplierLedgerCalculator.calculateSupplierBalance(
+                supplierId = it.id,
+                purchases = purchases,
+                payments = payments,
+                returns = returns
+            )
         }
-        return
     }
-    val initialBalance = remember(current.id, purchases, payments, returns) {
-        SupplierLedgerCalculator.calculateSupplierBalance(
-            supplierId = current.id,
-            purchases = purchases,
-            payments = payments,
-            returns = returns
-        )
+    var balance by remember(current?.id, initialBalance) { mutableStateOf(initialBalance) }
+    LaunchedEffect(current?.id, purchases, payments, returns) {
+        val selected = current
+        if (selected != null) {
+            balance = runCatching { onGetSupplierBalance(selected.id) }.getOrDefault(
+                SupplierLedgerCalculator.calculateSupplierBalance(selected.id, purchases, payments, returns)
+            )
+        } else balance = null
     }
-    var balance by remember(current.id, initialBalance) { mutableStateOf(initialBalance) }
-    LaunchedEffect(current.id, purchases, payments, returns) {
-        balance = runCatching { onGetSupplierBalance(current.id) }.getOrDefault(initialBalance)
-    }
-    val invoices = remember(current.id, purchases, returns, invoiceFilter, invoiceSearch) {
-        purchases.filter { it.supplierId == current.id }
+    val invoices = remember(current?.id, purchases, returns, invoiceFilter, invoiceSearch) {
+        val selectedId = current?.id
+        if (selectedId == null) emptyList() else purchases.filter { it.supplierId == selectedId }
             .filter { invoiceSearch.isBlank() || it.invoiceNumber.contains(invoiceSearch.trim(), ignoreCase = true) }
             .filter { invoice ->
                 val linkedReturns = returns.filter { it.purchaseId == invoice.id && it.status != "REVERSED" }.sumOf { it.amount }
@@ -89,98 +111,203 @@ fun SupplierProfileScreen(
             }
             .sortedWith(compareByDescending<Purchase> { it.purchaseDate }.thenByDescending { it.createdAt })
     }
+
     Scaffold(
-        modifier = modifier.testTag("supplier_profile_screen"),
-        topBar = { TopAppBar(title = { Text(current.name, fontWeight = FontWeight.Bold) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null) } }, actions = { IconButton(onClick = { editName = current.name; editPhone = current.phone; editAddress = current.address.orEmpty(); editNotes = current.notes.orEmpty(); showEditDialog = true }) { Icon(Icons.Default.Edit, contentDescription = if (ar) "تعديل المورد" else "Edit supplier") } }) }
-    ) { padding ->
-        LazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            item {
-                Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Text(current.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                        if (!current.phone.isNullOrBlank()) Text(current.phone, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        current.address?.takeIf { it.isNotBlank() }?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        current.notes?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                        Spacer(Modifier.height(6.dp))
-                        Text(if (ar) "المبلغ المستحق للمورد" else "Amount currently owed", style = MaterialTheme.typography.labelLarge)
-                        Text(money(balance.balance), style = MaterialTheme.typography.headlineMedium, color = if (balance.balance > 0.0001) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                        if (balance.balance < -0.0001) Text(if (ar) "لديك رصيد مقدم لدى المورد" else "Supplier advance / credit", color = MaterialTheme.colorScheme.primary)
+        modifier = modifier.fillMaxSize().testTag("supplier_profile_screen"),
+        topBar = {
+            Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 1.dp) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onBack, modifier = Modifier.testTag("supplier_profile_back_button")) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = if (ar) "رجوع" else "Back", tint = MaterialTheme.colorScheme.onSurface)
                     }
-                }
-            }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    SummaryTile(if (ar) "إجمالي المشتريات" else "Total purchases", money(balance.totalPurchases), Modifier.weight(1f))
-                    SummaryTile(if (ar) "المدفوعات" else "Payments", money(balance.totalPayments), Modifier.weight(1f))
-                }
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    SummaryTile(if (ar) "المرتجعات" else "Returns", money(balance.totalReturns), Modifier.weight(1f))
-                    SummaryTile(if (ar) "الرصيد الحالي" else "Current balance", money(balance.balance), Modifier.weight(1f))
-                }
-            }
-            item {
-                Text(if (ar) "إجراءات المورد" else "Supplier actions", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    Button(onClick = { onPurchaseAction(current) }, modifier = Modifier.weight(1f).testTag("supplier_profile_add_purchase")) { Icon(Icons.Default.ShoppingCart, null); Spacer(Modifier.width(4.dp)); Text(if (ar) "فاتورة شراء" else "Add Purchase", fontSize = 12.sp) }
-                    Button(onClick = { onPaymentAction(current) }, modifier = Modifier.weight(1f).testTag("supplier_profile_payment")) { Icon(Icons.Default.Payments, null); Spacer(Modifier.width(4.dp)); Text(if (ar) "تسجيل دفعة" else "Payment", fontSize = 12.sp) }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    OutlinedButton(onClick = { onReturnAction(current) }, modifier = Modifier.weight(1f)) { Icon(Icons.Default.Undo, null); Spacer(Modifier.width(4.dp)); Text(if (ar) "مرتجع شراء" else "Purchase Return", fontSize = 12.sp) }
-                    OutlinedButton(onClick = { onStatementAction(current) }, modifier = Modifier.weight(1f).testTag("supplier_profile_statement")) { Icon(Icons.Default.ReceiptLong, null); Spacer(Modifier.width(4.dp)); Text(if (ar) "كشف الحساب" else "Statement", fontSize = 12.sp) }
-                }
-                OutlinedButton(onClick = { onArchive(current) }, modifier = Modifier.fillMaxWidth().testTag("supplier_profile_archive")) { Icon(Icons.Default.Archive, null); Spacer(Modifier.width(6.dp)); Text(if (ar) "أرشفة المورد" else "Archive supplier") }
-            }
-            item {
-                Text(if (ar) "فواتير المشتريات" else "Purchase invoices", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                OutlinedTextField(value = invoiceSearch, onValueChange = { invoiceSearch = it }, modifier = Modifier.fillMaxWidth().testTag("supplier_invoice_search"), label = { Text(if (ar) "بحث برقم الفاتورة" else "Search invoice number") }, singleLine = true)
-                Text(if (ar) "المتبقي هنا هو رصيد الفاتورة بعد المرتجعات المرتبطة بها؛ المدفوعات اللاحقة تُسجّل على حساب المورد ولا يربطها النموذج الحالي بفاتورة بعينها." else "Invoice remaining reflects the original credit less returns linked to that invoice. The current data model records later supplier payments at account level, not against a specific invoice.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(if (ar) "الكل" else "All", if (ar) "غير المسددة" else "Unpaid / partial", if (ar) "المسددة" else "Paid").forEachIndexed { index, label ->
-                        FilterChip(selected = invoiceFilter == index, onClick = { invoiceFilter = index }, label = { Text(label, fontSize = 12.sp) })
+                    Spacer(Modifier.width(4.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(if (ar) "ملف المورد" else "Supplier Profile", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, fontSize = 19.sp), color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.testTag("supplier_profile_title"))
+                        if (current != null) Text(current.name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                }
-            }
-            if (invoices.isEmpty()) item { Text(if (ar) "لا توجد فواتير مطابقة" else "No matching purchase invoices", modifier = Modifier.fillMaxWidth().padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            items(invoices, key = { it.id }) { invoice ->
-                val linkedReturns = returns.filter { it.purchaseId == invoice.id && it.status != "REVERSED" }.sumOf { it.amount }
-                val remaining = (invoice.creditAmount - linkedReturns).coerceAtLeast(0.0)
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), modifier = Modifier.fillMaxWidth().testTag("supplier_invoice_${invoice.id}")) {
-                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(invoice.invoiceNumber, fontWeight = FontWeight.Bold)
-                            Text(if (remaining <= 0.0001) { if (ar) "مسددة" else "Paid" } else if (invoice.paidAmount > 0.0001) { if (ar) "مسددة جزئياً" else "Partially paid" } else { if (ar) "غير مسددة" else "Unpaid" }, color = if (remaining <= 0.0001) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+                    IconButton(onClick = {
+                        current?.let {
+                            editName = it.name; editPhone = it.phone; editAddress = it.address.orEmpty(); editNotes = it.notes.orEmpty(); showEditDialog = true
                         }
-                        Text(invoice.purchaseDate, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("${if (ar) "الإجمالي" else "Total"}: ${money(invoice.totalAmount)}"); Text("${if (ar) "المدفوع" else "Paid"}: ${money(invoice.paidAmount)}") }
-                        Text("${if (ar) "المتبقي" else "Remaining"}: ${money(remaining)}", fontWeight = FontWeight.SemiBold)
+                    }, enabled = current != null, modifier = Modifier.testTag("supplier_profile_edit_button")) {
+                        Icon(Icons.Default.Edit, contentDescription = if (ar) "تعديل المورد" else "Edit supplier", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(innerPadding).background(MaterialTheme.colorScheme.background)
+                .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Supplier selector follows the customer profile's placement and hierarchy.
+            Column {
+                Text(if (ar) "اختر المورد" else "Select Supplier", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 6.dp))
+                ExposedDropdownMenuBox(expanded = selectorExpanded, onExpandedChange = { selectorExpanded = it }, modifier = Modifier.fillMaxWidth().testTag("supplier_profile_selector")) {
+                    OutlinedTextField(
+                        value = current?.let { name -> if (name.phone.isNullOrBlank()) name.name else "${name.name} • ${name.phone}" }.orEmpty(),
+                        onValueChange = {}, readOnly = true, singleLine = true,
+                        placeholder = { Text(if (ar) "اختر مورداً لعرض الملف..." else "Select supplier to view profile...") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = selectorExpanded) },
+                        modifier = Modifier.fillMaxWidth().menuAnchor().testTag("supplier_profile_selector_field"),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    ExposedDropdownMenu(expanded = selectorExpanded, onDismissRequest = { selectorExpanded = false }) {
+                        suppliers.filter { !it.isArchived }.forEach { option ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(option.name, fontWeight = FontWeight.SemiBold)
+                                        option.phone?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                    }
+                                },
+                                onClick = { selectorExpanded = false; if (option.id != current?.id) onSupplierSelected(option) },
+                                leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (current == null) {
+                Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp), modifier = Modifier.fillMaxWidth().padding(top = 16.dp).testTag("supplier_profile_empty_state")) {
+                    Column(Modifier.fillMaxWidth().padding(vertical = 36.dp, horizontal = 20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                        Surface(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), shape = CircleShape, modifier = Modifier.size(64.dp)) {
+                            Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp)) }
+                        }
+                        Spacer(Modifier.height(16.dp))
+                        Text(if (ar) "يرجى اختيار مورد" else "Please select a supplier", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp), color = MaterialTheme.colorScheme.onSurface)
+                        Spacer(Modifier.height(6.dp))
+                        Text(if (ar) "اختر مورداً مسجلاً من القائمة أعلاه لعرض بياناته ورصيده وفواتير مشترياته." else "Choose a registered supplier above to view their details, balance and purchase invoices.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            } else {
+                val liveBalance = balance?.balance ?: 0.0
+                val hasPayable = liveBalance > 0.0001
+                val hasAdvance = liveBalance < -0.0001
+                Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), elevation = CardDefaults.cardElevation(defaultElevation = 1.dp), modifier = Modifier.fillMaxWidth().testTag("supplier_info_card")) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Surface(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), shape = CircleShape, modifier = Modifier.size(52.dp)) {
+                                Box(contentAlignment = Alignment.Center) { Text(current.name.take(1), fontWeight = FontWeight.Bold, fontSize = 22.sp, color = MaterialTheme.colorScheme.primary) }
+                            }
+                            Spacer(Modifier.width(14.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(current.name, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 17.sp), color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("supplier_profile_name"))
+                                if (!current.phone.isNullOrBlank()) {
+                                    Spacer(Modifier.height(3.dp)); Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Phone, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(4.dp)); Text(current.phone, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("supplier_profile_phone"))
+                                    }
+                                }
+                                current.address?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                            }
+                            Surface(color = when { hasPayable -> MaterialTheme.colorScheme.statusRedContainer; hasAdvance -> MaterialTheme.colorScheme.statusGreenContainer; else -> MaterialTheme.colorScheme.surfaceVariant }, shape = RoundedCornerShape(8.dp), modifier = Modifier.testTag("supplier_profile_status_badge")) {
+                                Text(when { hasPayable -> if (ar) "مستحق للمورد" else "Payable"; hasAdvance -> if (ar) "رصيد مقدم" else "Advance"; else -> if (ar) "لا توجد مستحقات" else "Settled" }, style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = when { hasPayable -> MaterialTheme.colorScheme.statusRed; hasAdvance -> MaterialTheme.colorScheme.statusGreen; else -> MaterialTheme.colorScheme.onSurfaceVariant }, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                            }
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f), modifier = Modifier.padding(vertical = 14.dp))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column(Modifier.weight(1f)) {
+                                Text(if (ar) "الرصيد الحالي" else "Current balance", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.height(2.dp))
+                                Text(money(liveBalance), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 17.sp), color = when { hasPayable -> MaterialTheme.colorScheme.statusRed; hasAdvance -> MaterialTheme.colorScheme.statusGreen; else -> MaterialTheme.colorScheme.onSurface }, modifier = Modifier.testTag("supplier_profile_balance"))
+                                Spacer(Modifier.height(3.dp))
+                                Text(when { hasPayable -> if (ar) "مستحق للمورد على المحل" else "The store owes the supplier"; hasAdvance -> if (ar) "للمحل رصيد مقدم لدى المورد" else "The store has an advance with supplier"; else -> if (ar) "الحساب متوازن" else "Account settled" }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(if (ar) "إجمالي المشتريات" else "Total purchases", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.height(2.dp))
+                                Text(money(balance?.totalPurchases ?: 0.0), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 17.sp), color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.testTag("supplier_profile_total_purchases"))
+                            }
+                        }
+                    }
+                }
+
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(if (ar) "العمليات الأساسية" else "Basic Actions", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp), color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(vertical = 4.dp).testTag("supplier_basic_actions_title"))
+                    SupplierProfileActionButton(Icons.Default.ShoppingBag, MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primary.copy(alpha = .12f), if (ar) "تسجيل فاتورة شراء" else "Record Purchase Invoice", if (ar) "تسجيل مشتريات جديدة من هذا المورد" else "Record a new purchase from this supplier", "supplier_profile_add_purchase") { onPurchaseAction(current) }
+                    SupplierProfileActionButton(Icons.Default.ReceiptLong, MaterialTheme.colorScheme.secondary, MaterialTheme.colorScheme.secondary.copy(alpha = .12f), if (ar) "عرض كشف الحساب" else "View Account Statement", if (ar) "عرض الحركات والرصيد والدفعات والمرتجعات" else "Review account activity, balance, payments and returns", "supplier_profile_statement") { onStatementAction(current) }
+                    SupplierProfileActionButton(Icons.Default.Payments, MaterialTheme.colorScheme.statusGreen, MaterialTheme.colorScheme.statusGreenContainer, if (ar) "تسجيل دفعة للمورد" else "Record Supplier Payment", if (ar) "تسجيل دفعة لتسوية المستحقات" else "Record a payment toward supplier payables", "supplier_profile_payment") { onPaymentAction(current) }
+                    SupplierProfileActionButton(Icons.Default.Undo, MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiary.copy(alpha = .12f), if (ar) "تسجيل مرتجع شراء" else "Record Purchase Return", if (ar) "تسجيل البضائع المرتجعة لهذا المورد" else "Record goods returned to this supplier", "supplier_profile_return") { onReturnAction(current) }
+                    if (!current.isArchived) SupplierProfileActionButton(Icons.Default.Archive, MaterialTheme.colorScheme.onSurfaceVariant, MaterialTheme.colorScheme.surfaceVariant, if (ar) "أرشفة المورد" else "Archive Supplier", if (ar) "إخفاء المورد من القوائم النشطة" else "Move supplier out of active lists", "supplier_profile_archive") { showArchiveConfirmDialog = true }
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(if (ar) "فواتير المشتريات" else "Purchase Invoices", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp), color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.testTag("supplier_purchase_invoices_title"))
+                    OutlinedTextField(value = invoiceSearch, onValueChange = { invoiceSearch = it }, modifier = Modifier.fillMaxWidth().testTag("supplier_invoice_search"), label = { Text(if (ar) "بحث برقم الفاتورة" else "Search invoice number") }, singleLine = true, shape = RoundedCornerShape(12.dp))
+                    Text(if (ar) "المتبقي هنا هو قيمة الفاتورة بعد المرتجعات المرتبطة بها؛ تُسجّل دفعات المورد على مستوى الحساب ولا يربطها النموذج الحالي بفاتورة بعينها." else "Invoice remaining reflects the invoice value after linked returns. Supplier payments are recorded at account level and are not linked to a specific invoice in the current model.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(if (ar) "الكل" else "All", if (ar) "غير المسددة" else "Unpaid / partial", if (ar) "المسددة" else "Paid").forEachIndexed { index, label ->
+                            FilterChip(selected = invoiceFilter == index, onClick = { invoiceFilter = index }, label = { Text(label, fontSize = 12.sp) })
+                        }
+                    }
+                    if (invoices.isEmpty()) Text(if (ar) "لا توجد فواتير مطابقة" else "No matching purchase invoices", modifier = Modifier.fillMaxWidth().padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    invoices.forEach { invoice ->
+                        val linkedReturns = returns.filter { it.purchaseId == invoice.id && it.status != "REVERSED" }.sumOf { it.amount }
+                        val remaining = (invoice.creditAmount - linkedReturns).coerceAtLeast(0.0)
+                        Card(shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), modifier = Modifier.fillMaxWidth().testTag("supplier_invoice_${invoice.id}")) {
+                            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Text(invoice.invoiceNumber, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                    Text(if (remaining <= 0.0001) { if (ar) "مسددة" else "Paid" } else if (invoice.paidAmount > 0.0001) { if (ar) "مسددة جزئياً" else "Partially paid" } else { if (ar) "غير مسددة" else "Unpaid" }, color = if (remaining <= 0.0001) MaterialTheme.colorScheme.statusGreen else MaterialTheme.colorScheme.statusRed, style = MaterialTheme.typography.labelMedium)
+                                }
+                                Text(invoice.purchaseDate, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("${if (ar) "الإجمالي" else "Total"}: ${money(invoice.totalAmount)}", style = MaterialTheme.typography.bodySmall); Text("${if (ar) "المدفوع" else "Paid"}: ${money(invoice.paidAmount)}", style = MaterialTheme.typography.bodySmall) }
+                                Text("${if (ar) "المتبقي بعد المرتجعات" else "Remaining after returns"}: ${money(remaining)}", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
                     }
                 }
             }
         }
     }
-    if (showEditDialog) {
-        AlertDialog(
-            onDismissRequest = { showEditDialog = false },
-            title = { Text(if (ar) "تعديل بيانات المورد" else "Edit supplier") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = editName, onValueChange = { editName = it }, label = { Text(if (ar) "اسم المورد" else "Supplier name") }, singleLine = true)
-                    OutlinedTextField(value = editPhone, onValueChange = { editPhone = it }, label = { Text(if (ar) "الهاتف" else "Phone") }, singleLine = true)
-                    OutlinedTextField(value = editAddress, onValueChange = { editAddress = it }, label = { Text(if (ar) "العنوان" else "Address") })
-                    OutlinedTextField(value = editNotes, onValueChange = { editNotes = it }, label = { Text(if (ar) "ملاحظات" else "Notes") })
-                }
-            },
-            confirmButton = { Button(onClick = { if (editName.isNotBlank()) { onEdit(current.copy(name = editName.trim(), phone = editPhone.trim(), address = editAddress.trim().ifBlank { null }, notes = editNotes.trim().ifBlank { null })); showEditDialog = false } }, enabled = editName.isNotBlank()) { Text(if (ar) "حفظ" else "Save") } },
-            dismissButton = { TextButton(onClick = { showEditDialog = false }) { Text(if (ar) "إلغاء" else "Cancel") } }
-        )
-    }
+
+    if (showEditDialog && current != null) AlertDialog(
+        onDismissRequest = { showEditDialog = false },
+        title = { Text(if (ar) "تعديل بيانات المورد" else "Edit supplier", fontWeight = FontWeight.Bold) },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(editName, { editName = it }, label = { Text(if (ar) "اسم المورد" else "Supplier name") }, singleLine = true)
+            OutlinedTextField(editPhone, { editPhone = it }, label = { Text(if (ar) "الهاتف" else "Phone") }, singleLine = true)
+            OutlinedTextField(editAddress, { editAddress = it }, label = { Text(if (ar) "العنوان" else "Address") })
+            OutlinedTextField(editNotes, { editNotes = it }, label = { Text(if (ar) "ملاحظات" else "Notes") })
+        } },
+        confirmButton = { Button(onClick = { if (editName.isNotBlank()) { onEdit(current.copy(name = editName.trim(), phone = editPhone.trim(), address = editAddress.trim().ifBlank { null }, notes = editNotes.trim().ifBlank { null })); showEditDialog = false } }, enabled = editName.isNotBlank()) { Text(if (ar) "حفظ" else "Save") } },
+        dismissButton = { TextButton(onClick = { showEditDialog = false }) { Text(if (ar) "إلغاء" else "Cancel") } }
+    )
+
+    if (showArchiveConfirmDialog && current != null) AlertDialog(
+        onDismissRequest = { showArchiveConfirmDialog = false },
+        title = { Text(if (ar) "تأكيد أرشفة المورد" else "Confirm supplier archive", fontWeight = FontWeight.Bold) },
+        text = { Text(if (ar) "هل تريد أرشفة المورد ${current.name}؟ لن يُحذف سجل مشترياته أو حركات حسابه." else "Archive ${current.name}? Their purchase history and account transactions will be retained.") },
+        confirmButton = { Button(onClick = { showArchiveConfirmDialog = false; onArchive(current) }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error), modifier = Modifier.testTag("confirm_archive_supplier_button")) { Text(if (ar) "أرشفة المورد" else "Archive supplier") } },
+        dismissButton = { TextButton(onClick = { showArchiveConfirmDialog = false }, modifier = Modifier.testTag("cancel_archive_supplier_button")) { Text(if (ar) "إلغاء" else "Cancel") } }
+    )
 }
 
 @Composable
-private fun SummaryTile(label: String, value: String, modifier: Modifier = Modifier) {
-    Card(modifier, shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .45f))) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(value, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium) }
+private fun SupplierProfileActionButton(
+    icon: ImageVector,
+    iconTint: Color,
+    iconContainerColor: Color,
+    title: String,
+    subtitle: String,
+    testTag: String,
+    onClick: () -> Unit
+) {
+    Card(shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp), modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick).testTag(testTag)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(color = iconContainerColor, shape = RoundedCornerShape(10.dp), modifier = Modifier.size(42.dp)) {
+                Box(contentAlignment = Alignment.Center) { Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(22.dp)) }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold, fontSize = 15.sp), color = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.height(2.dp))
+                Text(subtitle, style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), modifier = Modifier.size(20.dp))
+        }
     }
 }
 
