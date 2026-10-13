@@ -206,7 +206,11 @@ fun PurchasesScreen(
                         }
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = if (isArabic) StoreStrings.PURCHASES_AR else StoreStrings.PURCHASES_EN,
+                            text = when {
+                                activeSectionTab == 1 -> if (isArabic) "عمليات المورد" else "Supplier Operations"
+                                isArabic -> StoreStrings.PURCHASES_AR
+                                else -> StoreStrings.PURCHASES_EN
+                            },
                             style = MaterialTheme.typography.titleLarge.copy(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 20.sp
@@ -216,30 +220,26 @@ fun PurchasesScreen(
                         )
                     }
 
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        FilterChip(
-                            selected = activeSectionTab == 0,
-                            onClick = { activeSectionTab = 0 },
-                            label = { Text(if (isArabic) "نقطة البيع (السلة)" else "POS Cart") },
-                            modifier = Modifier.testTag("tab_purchases_pos")
-                        )
-                        FilterChip(
-                            selected = activeSectionTab == 1,
-                            onClick = { activeSectionTab = 1 },
-                            label = { Text(if (isArabic) "مشتريات الموردين" else "Suppliers & Purchases") },
-                            modifier = Modifier.testTag("tab_purchases_suppliers")
-                        )
-                        FilterChip(
-                            selected = activeSectionTab == 2,
-                            onClick = { activeSectionTab = 2 },
-                            label = { Text(if (isArabic) "المصروفات" else "Expenses") },
-                            modifier = Modifier.testTag("tab_purchases_expenses")
-                        )
+                    if (activeSectionTab != 1) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            FilterChip(
+                                selected = activeSectionTab == 0,
+                                onClick = { activeSectionTab = 0 },
+                                label = { Text(if (isArabic) "نقطة البيع (السلة)" else "POS Cart") },
+                                modifier = Modifier.testTag("tab_purchases_pos")
+                            )
+                            FilterChip(
+                                selected = activeSectionTab == 2,
+                                onClick = { activeSectionTab = 2 },
+                                label = { Text(if (isArabic) "المصروفات" else "Expenses") },
+                                modifier = Modifier.testTag("tab_purchases_expenses")
+                            )
+                        }
                     }
                 }
             }

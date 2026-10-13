@@ -230,7 +230,26 @@ fun SupplierProfileScreen(
                     SupplierProfileActionButton(Icons.Default.ReceiptLong, MaterialTheme.colorScheme.secondary, MaterialTheme.colorScheme.secondary.copy(alpha = .12f), if (ar) "عرض كشف الحساب" else "View Account Statement", if (ar) "عرض الحركات والرصيد والدفعات والمرتجعات" else "Review account activity, balance, payments and returns", "supplier_profile_statement") { onStatementAction(current) }
                     SupplierProfileActionButton(Icons.Default.Payments, MaterialTheme.colorScheme.statusGreen, MaterialTheme.colorScheme.statusGreenContainer, if (ar) "تسجيل دفعة للمورد" else "Record Supplier Payment", if (ar) "تسجيل دفعة لتسوية المستحقات" else "Record a payment toward supplier payables", "supplier_profile_payment") { onPaymentAction(current) }
                     SupplierProfileActionButton(Icons.Default.Undo, MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiary.copy(alpha = .12f), if (ar) "تسجيل مرتجع شراء" else "Record Purchase Return", if (ar) "تسجيل البضائع المرتجعة لهذا المورد" else "Record goods returned to this supplier", "supplier_profile_return") { onReturnAction(current) }
-                    if (!current.isArchived) SupplierProfileActionButton(Icons.Default.Archive, MaterialTheme.colorScheme.onSurfaceVariant, MaterialTheme.colorScheme.surfaceVariant, if (ar) "أرشفة المورد" else "Archive Supplier", if (ar) "إخفاء المورد من القوائم النشطة" else "Move supplier out of active lists", "supplier_profile_archive") { showArchiveConfirmDialog = true }
+                }
+
+                // Archiving is a separate management card, intentionally placed below the four primary actions.
+                if (!current.isArchived) {
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            if (ar) "إدارة المورد" else "Supplier Management",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(vertical = 4.dp).testTag("supplier_management_actions_title")
+                        )
+                        SupplierProfileActionButton(
+                            Icons.Default.Archive,
+                            MaterialTheme.colorScheme.error,
+                            MaterialTheme.colorScheme.errorContainer,
+                            if (ar) "أرشفة المورد" else "Archive Supplier",
+                            if (ar) "إخفاء المورد من القوائم النشطة مع الاحتفاظ بالفواتير والحساب" else "Remove from active lists while preserving invoices and account history",
+                            "supplier_profile_archive"
+                        ) { showArchiveConfirmDialog = true }
+                    }
                 }
 
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
