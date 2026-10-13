@@ -19,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCard
 import androidx.compose.material.icons.filled.Payment
+import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -63,7 +64,8 @@ fun PlusActionSheet(
     languageMode: LanguageMode,
     onDismiss: () -> Unit,
     onRecordTransactionClick: () -> Unit,
-    onQuickPaymentClick: () -> Unit
+    onQuickPaymentClick: () -> Unit,
+    onSupplierOperationsClick: () -> Unit
 ) {
     if (!isOpen) return
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -118,6 +120,20 @@ fun PlusActionSheet(
                 icon = Icons.Default.Payment,
                 testTag = "action_sheet_quick_payment",
                 onClick = onQuickPaymentClick
+            )
+            
+            HorizontalDivider(
+                modifier = Modifier.padding(vertical = 12.dp),
+                color = MaterialTheme.colorScheme.outlineVariant
+            )
+
+            // Choice 3: Supplier Operations
+            ActionSheetOptionItem(
+                title = if (isArabic) "عمليات الموردين" else "Supplier Operations",
+                description = if (isArabic) "توريد أصناف ومنتجات، سداد ومرتجعات الموردين" else "Supply items, supplier payments & returns",
+                icon = Icons.Default.LocalShipping,
+                testTag = "action_sheet_supplier_operations",
+                onClick = onSupplierOperationsClick
             )
         }
     }
@@ -201,7 +217,6 @@ fun RecordTransactionSheet(
         Column(
             modifier = Modifier.fillMaxWidth()
         ) {
-            // Header
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -229,7 +244,6 @@ fun RecordTransactionSheet(
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-            // Scrollable Form Body
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -237,7 +251,6 @@ fun RecordTransactionSheet(
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp, vertical = 16.dp)
             ) {
-                // Customer Name Field
                 FormFieldLabel(text = if (isArabic) "اسم العميل / الحساب" else "Customer / Account Name")
                 OutlinedTextField(
                     value = customerName,
@@ -255,7 +268,6 @@ fun RecordTransactionSheet(
                     )
                 )
 
-                // Amount Field
                 FormFieldLabel(text = if (isArabic) "المبلغ (${AppCurrency.SYMBOL})" else "Amount (${AppCurrency.SYMBOL})")
                 OutlinedTextField(
                     value = amountText,
@@ -274,7 +286,6 @@ fun RecordTransactionSheet(
                     )
                 )
 
-                // Notes Field (Optional)
                 val optionalSuffix = if (isArabic) StoreStrings.OPTIONAL_AR else StoreStrings.OPTIONAL_EN
                 FormFieldLabel(text = "${if (isArabic) "ملاحظات المعاملة" else "Transaction Notes"} $optionalSuffix")
                 OutlinedTextField(
@@ -303,7 +314,6 @@ fun RecordTransactionSheet(
                 }
             }
 
-            // Sticky Footer Action Button (Only ONE primary filled button)
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 2.dp,
@@ -372,7 +382,6 @@ fun QuickPaymentSheet(
         Column(
             modifier = Modifier.fillMaxWidth()
         ) {
-            // Header
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -400,7 +409,6 @@ fun QuickPaymentSheet(
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-            // Scrollable Form Body
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -408,7 +416,6 @@ fun QuickPaymentSheet(
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp, vertical = 16.dp)
             ) {
-                // Customer / Account
                 FormFieldLabel(text = if (isArabic) "العميل / الحساب" else "Customer / Account")
                 OutlinedTextField(
                     value = customerName,
@@ -426,7 +433,6 @@ fun QuickPaymentSheet(
                     )
                 )
 
-                // Payment Amount
                 FormFieldLabel(text = if (isArabic) "مبلغ الدفعة (${AppCurrency.SYMBOL})" else "Payment Amount (${AppCurrency.SYMBOL})")
                 OutlinedTextField(
                     value = amountText,
@@ -445,7 +451,6 @@ fun QuickPaymentSheet(
                     )
                 )
 
-                // Reference / Receipt (Optional)
                 val optionalSuffix = if (isArabic) StoreStrings.OPTIONAL_AR else StoreStrings.OPTIONAL_EN
                 FormFieldLabel(text = "${if (isArabic) "رقم السند / المرجع" else "Receipt / Reference No."} $optionalSuffix")
                 OutlinedTextField(
@@ -474,7 +479,6 @@ fun QuickPaymentSheet(
                 }
             }
 
-            // Sticky Footer Action Button (Only ONE primary filled button)
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 2.dp,

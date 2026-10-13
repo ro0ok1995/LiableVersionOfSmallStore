@@ -60,9 +60,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.Tab
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -121,30 +124,29 @@ fun ProductManagementScreen(
     var searchQuery by remember { mutableStateOf("") }
     var selectedTab by remember { mutableStateOf(ProductTabFilter.ALL) }
     var selectedCategoryFilter by remember { mutableStateOf<String?>(null) }
+    var selectedCatalogTab by remember { mutableIntStateOf(0) }
 
-    // Dialog states
     var showAddDialog by remember { mutableStateOf(false) }
     var productToEdit by remember { mutableStateOf<ProductItem?>(null) }
     var productToArchive by remember { mutableStateOf<ProductItem?>(null) }
     var productToAdjust by remember { mutableStateOf<ProductItem?>(null) }
 
-    val activeProducts = remember(products, archivedProductIds) {
-        products.filter { it.id !in archivedProductIds }
+    val catalogFiltered = remember(products, selectedCatalogTab) {
+        if (selectedCatalogTab == 0) products.filter { !it.isCatalogItem }
+        else products.filter { it.isCatalogItem }
     }
-    val archivedProducts = remember(products, archivedProductIds) {
-        products.filter { it.id in archivedProductIds }
-    }
-
-    // Dynamic categories extracted from all products
-    val allCategories = remember(products) {
-        products.map { it.category.trim() }.filter { it.isNotEmpty() }.distinct().sorted()
-    }
-
-    // Current list by tab and search
+    
+    val activeProducts = remember(catalogFiltered, archivedProductIds) { catalogFiltered.filter { it.id !in archivedProductIds } }
+    val archivedProducts = remember(catalogFiltered, archivedProductIds) { catalogFiltered.filter { it.id in archivedProductIds } }
+    
     val baseList = when (selectedTab) {
-        ProductTabFilter.ALL -> products
+        ProductTabFilter.ALL -> catalogFiltered
         ProductTabFilter.ACTIVE -> activeProducts
         ProductTabFilter.ARCHIVED -> archivedProducts
+    }
+
+    val allCategories = remember(catalogFiltered) {
+        catalogFiltered.map { it.category.trim() }.filter { it.isNotEmpty() }.distinct().sorted()
     }
 
     val filteredProducts = remember(baseList, searchQuery, selectedCategoryFilter) {
@@ -164,7 +166,6 @@ fun ProductManagementScreen(
             .background(MaterialTheme.colorScheme.background)
             .testTag("product_management_screen")
     ) {
-        // Top App Bar
         TopAppBar(
             title = {
                 Text(
@@ -215,7 +216,22 @@ fun ProductManagementScreen(
             )
         )
 
-        // Summary Card
+        TabRow(
+            selectedTabIndex = selectedCatalogTab,
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            Tab(
+                selected = selectedCatalogTab == 0,
+                onClick = { selectedCatalogTab = 0 },
+                text = { Text(if (isArabic) "المنتجات" else "Products", fontWeight = FontWeight.Bold) }
+            )
+            Tab(
+                selected = selectedCatalogTab == 1,
+                onClick = { selectedCatalogTab = 1 },
+                text = { Text(if (isArabic) "الأصناف والمواد" else "Items & Materials", fontWeight = FontWeight.Bold) }
+            )
+        }
+
         Card(
             shape = RoundedCornerShape(14.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -233,7 +249,7 @@ fun ProductManagementScreen(
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = "${products.size}",
+                        text = "${catalogFiltered.size}",
                         fontWeight = FontWeight.Bold,
                         fontSize = 18.sp,
                         color = GeoPrimary
@@ -244,12 +260,7 @@ fun ProductManagementScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .height(28.dp)
-                        .background(GeoOutlineVariant)
-                )
+                Box(modifier = Modifier.width(1.dp).height(28.dp).background(GeoOutlineVariant))
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = "${activeProducts.size}",
@@ -258,17 +269,12 @@ fun ProductManagementScreen(
                         color = StatusGreen
                     )
                     Text(
-                        text = if (isArabic) "المنتجات النشطة" else "Active",
+                        text = if (isArabic) "نشطة" else "Active",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .height(28.dp)
-                        .background(GeoOutlineVariant)
-                )
+                Box(modifier = Modifier.width(1.dp).height(28.dp).background(GeoOutlineVariant))
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = "${archivedProducts.size}",
@@ -277,7 +283,7 @@ fun ProductManagementScreen(
                         color = if (archivedProducts.isNotEmpty()) StatusAmber else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = if (isArabic) "المؤرشفة" else "Archived",
+                        text = if (isArabic) "مؤرشفة" else "Archived",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -285,7 +291,6 @@ fun ProductManagementScreen(
             }
         }
 
-        // Search Bar (unified design matching Home and Accounts)
         ProductSearchField(
             products = baseList,
             searchQuery = searchQuery,
@@ -304,14 +309,12 @@ fun ProductManagementScreen(
             modifier = Modifier.padding(horizontal = 16.dp)
         )
 
-        // Filter Area: Exactly Two Rows (Status row + Product Types/Categories row)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // ROW 1 — STATUS: All | Active | Archived
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -322,7 +325,7 @@ fun ProductManagementScreen(
                     onClick = { selectedTab = ProductTabFilter.ALL },
                     label = {
                         Text(
-                            text = if (isArabic) "الكل (${products.size})" else "All (${products.size})",
+                            text = if (isArabic) "الكل (${catalogFiltered.size})" else "All (${catalogFiltered.size})",
                             fontSize = 12.sp,
                             fontWeight = if (selectedTab == ProductTabFilter.ALL) FontWeight.Bold else FontWeight.Normal
                         )
@@ -372,7 +375,6 @@ fun ProductManagementScreen(
                 )
             }
 
-            // ROW 2 — EXISTING PRODUCT TYPES / CATEGORIES
             if (allCategories.isNotEmpty()) {
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
@@ -403,7 +405,6 @@ fun ProductManagementScreen(
             }
         }
 
-        // Product Cards List
         if (filteredProducts.isEmpty()) {
             Box(
                 modifier = Modifier
@@ -481,7 +482,6 @@ fun ProductManagementScreen(
         }
     }
 
-    // Add Product Dialog
     if (showAddDialog) {
         AddEditProductDialog(
             product = null,
@@ -494,7 +494,6 @@ fun ProductManagementScreen(
         )
     }
 
-    // Edit Product Dialog
     productToEdit?.let { product ->
         AddEditProductDialog(
             product = product,
@@ -516,7 +515,6 @@ fun ProductManagementScreen(
         )
     }
 
-    // Archive Confirmation Dialog
     productToArchive?.let { product ->
         AlertDialog(
             onDismissRequest = { productToArchive = null },
@@ -538,9 +536,9 @@ fun ProductManagementScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         text = if (isArabic) {
-                            "هل تريد بالتأكيد نقل المنتج \"${product.name}\" إلى الأرشيف؟"
+                            "هل تريد بالتأكيد نقل المنتج "${product.name}" إلى الأرشيف؟"
                         } else {
-                            "Are you sure you want to archive \"${product.name}\"?"
+                            "Are you sure you want to archive "${product.name}"?"
                         },
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium
@@ -584,7 +582,6 @@ fun ProductManagementScreen(
         )
     }
 
-    // Physical Inventory Adjustment Dialog
     if (productToAdjust != null) {
         val currentStock = productStockMap[productToAdjust!!.id]?.quantityOnHand ?: 0
         var deltaText by remember { mutableStateOf("") }
