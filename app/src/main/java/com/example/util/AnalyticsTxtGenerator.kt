@@ -104,6 +104,9 @@ object AnalyticsTxtGenerator {
         sb.appendLine("$payLabel: ${AppCurrency.formatAmountWithDecimals(data.metrics.totalPaymentsReceived, isArabic)}")
         sb.appendLine("${if (isArabic) "إجمالي الربح" else "Gross Profit"}: ${AppCurrency.formatAmountWithDecimals(data.metrics.grossProfit, isArabic)}")
         sb.appendLine("${if (isArabic) "صافي الربح" else "Net Profit"}: ${AppCurrency.formatAmountWithDecimals(data.metrics.netProfit, isArabic)}")
+        if (!data.metrics.costDataComplete) {
+            sb.appendLine(if (isArabic) "تنبيه محاسبي: تكلفة بعض المبيعات غير متوفرة؛ الربح غير مكتمل." else "Accounting warning: cost is missing for some sales; profit is incomplete.")
+        }
 
         if (data.scope == AnalyticsReportScope.ONE_SELECTED_CUSTOMER) {
             val periodNetLabel = if (isArabic) "صافي رصيد الفترة" else "Net Balance"

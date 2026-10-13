@@ -257,6 +257,18 @@ internal fun StatisticsTabContent(
             )
         }
 
+        if (!statisticsBreakdown.costDataComplete) {
+            Text(
+                text = if (isArabic)
+                    "تنبيه محاسبي: تكلفة بعض المبيعات غير متوفرة؛ الربح المعروض غير مكتمل ولا يُعتمد كربح نهائي."
+                else
+                    "Accounting warning: cost is missing for some sales; profit is incomplete and must not be treated as final.",
+                color = StatusRed,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
+            )
+        }
+
         // Net Balance Card
         Card(
             shape = RoundedCornerShape(14.dp),

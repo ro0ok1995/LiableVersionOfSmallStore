@@ -68,8 +68,10 @@ class PurchaseReturnRepository(
         purchaseId: String,
         returnLines: List<PurchaseReturnLineRequest>,
         reason: String,
-        returnDate: String? = null
-    ): PurchaseReturn {
+        returnDate: String? = null,
+        settlementMode: String = "PAYABLE",
+        financialAccountId: String? = null
+    ): PurchaseReturn = database.withTransaction {
         require(purchaseId.isNotBlank()) { "Purchase ID cannot be blank" }
         require(returnLines.isNotEmpty()) { "Purchase return must contain at least one line" }
         require(reason.isNotBlank()) { "Return reason cannot be blank" }
@@ -115,31 +117,48 @@ class PurchaseReturnRepository(
                 productNameSnapshot = original.productNameSnapshot,
                 quantity = request.quantity,
                 unitCost = original.unitCost,
-                subtotal = request.quantity * original.unitCost
+                subtotal = com.example.accounting.AccountingDecimal.multiplyToMoney(original.unitCost, request.quantity.toDouble())
             )
         }
 
-        val totalAmount = constructedLines.sumOf { it.subtotal }
+        val totalAmount = com.example.accounting.AccountingDecimal.money(constructedLines.sumOf { it.subtotal })
         require(totalAmount > 0.0) { "Purchase return amount must be greater than zero" }
         require(totalAmount <= purchase.totalAmount + 0.001) { "Purchase return exceeds original purchase amount" }
 
         val dateToUse = returnDate?.takeIf { it.isNotBlank() }
             ?: SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        require(settlementMode in setOf("PAYABLE", "CASH_REFUND")) { "Invalid supplier return settlement mode" }
+        var payableReduction = totalAmount
+        var cashRefund = 0.0
+        var refundAccountId: String? = null
+        if (settlementMode == "CASH_REFUND") {
+            require(!financialAccountId.isNullOrBlank()) { "Select the account receiving the supplier cash refund" }
+            val account = database.financialAccountDao().getAccountById(financialAccountId)
+                ?: throw IllegalArgumentException("Financial account not found: $financialAccountId")
+            require(account.isActive) { "Financial account is inactive" }
+            val existingPurchases = purchaseDao.getPurchasesBySupplierIdSync(purchase.supplierId)
+            val existingPayments = database.supplierPaymentDao().getPaymentsBySupplierIdSync(purchase.supplierId)
+            val existingReturns = purchaseReturnDao.getReturnsBySupplierIdSync(purchase.supplierId)
+            val existingAdjustments = database.adjustmentDao().getAdjustmentsByEntitySync("SUPPLIER", purchase.supplierId)
+            val existingOpening = database.openingBalanceDao().getOpeningBalancesByEntitySync("SUPPLIER", purchase.supplierId)
+            val currentPayable = com.example.accounting.SupplierLedgerCalculator.calculateSupplierBalance(
+                purchase.supplierId, existingPurchases, existingPayments, existingReturns, existingAdjustments, existingOpening
+            ).balance.coerceAtLeast(0.0)
+            payableReduction = minOf(totalAmount, currentPayable)
+            cashRefund = com.example.accounting.AccountingDecimal.money(totalAmount - payableReduction)
+            refundAccountId = financialAccountId
+        }
         val retId = "pur_ret_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}"
         val supplier = supplierDao.getSupplierById(purchase.supplierId)
             ?: throw IllegalArgumentException("Supplier ${purchase.supplierId} not found")
         val pr = PurchaseReturn(
-            id = retId,
-            purchaseId = purchaseId,
-            supplierId = purchase.supplierId,
-            returnDate = dateToUse,
-            amount = totalAmount,
-            reason = reason.trim(),
-            status = "ACTIVE"
+            id = retId, purchaseId = purchaseId, supplierId = purchase.supplierId,
+            returnDate = dateToUse, amount = totalAmount, reason = reason.trim(), status = "ACTIVE",
+            payableReductionAmount = com.example.accounting.AccountingDecimal.money(payableReduction),
+            cashRefundAmount = cashRefund, financialAccountId = refundAccountId
         )
         val persistedLines = constructedLines.map { it.copy(purchaseReturnId = retId) }
 
-        database.withTransaction {
             purchaseReturnDao.insertReturn(pr)
             purchaseReturnLineDao.insertLines(persistedLines)
 
@@ -171,8 +190,7 @@ class PurchaseReturnRepository(
                 customerName = supplier.name
             ).toEntity()
             transactionDao.insertTransaction(txEntity)
-        }
-        return pr
+        pr
     }
 
     /** Compatibility overload retained only for exact, whole-unit amounts. */

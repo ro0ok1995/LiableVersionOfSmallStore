@@ -587,8 +587,23 @@ class MainViewModel @JvmOverloads constructor(
         customerViewModel.addCustomer(name, phone, initialDebt)
     }
 
+    fun addCustomerWithOpeningBalance(name: String, phone: String, amount: Double?, direction: String) {
+        customerViewModel.addCustomerWithOpeningBalance(name, phone, amount, direction)
+    }
+
     fun updateCustomer(customer: CustomerAccount) {
         customerViewModel.updateCustomer(customer)
+    }
+
+    suspend fun getCustomerBalance(customerId: String): com.example.accounting.CustomerBalanceSummary =
+        repository.getCustomerBalance(customerId)
+
+    fun recordOpeningBalance(entityType: String, entityId: String, amount: Double, direction: String, onComplete: (Result<Unit>) -> Unit = {}) {
+        viewModelScope.launch {
+            runCatching {
+                repository.recordOpeningBalance(entityType, entityId, amount, direction, getCurrentDateString(), "رصيد افتتاحي مضاف لحساب قائم")
+            }.onSuccess { onComplete(Result.success(Unit)) }.onFailure { onComplete(Result.failure(it)) }
+        }
     }
 
     fun recordCustomerAdjustment(
@@ -695,6 +710,10 @@ class MainViewModel @JvmOverloads constructor(
         supplierPurchaseViewModel.addSupplier(name, phone, address, notes, onComplete)
     }
 
+    fun addSupplierWithOpeningBalance(name: String, phone: String, amount: Double?, direction: String, onComplete: (Result<Supplier>) -> Unit = {}) {
+        supplierPurchaseViewModel.addSupplierWithOpeningBalance(name, phone, amount, direction, onComplete)
+    }
+
     fun recordPurchase(
         supplierId: String,
         lines: List<PurchaseLineRequest>,
@@ -738,14 +757,13 @@ class MainViewModel @JvmOverloads constructor(
         returnLines: List<PurchaseReturnLineRequest>,
         reason: String,
         returnDate: String = getCurrentDateString(),
+        settlementMode: String = "PAYABLE",
+        financialAccountId: String? = null,
         onComplete: (Result<PurchaseReturn>) -> Unit = {}
     ) {
         supplierPurchaseViewModel.recordPurchaseReturn(
-            purchaseId = purchaseId,
-            returnLines = returnLines,
-            reason = reason,
-            returnDate = returnDate,
-            onComplete = onComplete
+            purchaseId = purchaseId, returnLines = returnLines, reason = reason, returnDate = returnDate,
+            settlementMode = settlementMode, financialAccountId = financialAccountId, onComplete = onComplete
         )
     }
 

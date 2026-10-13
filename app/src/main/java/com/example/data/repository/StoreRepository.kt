@@ -362,6 +362,25 @@ class StoreRepository private constructor(
         customerRepository.addCustomer(customer)
     }
 
+    /** Creates the customer and optional opening balance atomically. */
+    suspend fun addCustomerWithOpeningBalance(customer: CustomerAccount, amount: Double?, direction: String) = database.withTransaction {
+        require(customer.customerName.isNotBlank()) { "Customer name is required" }
+        if (amount != null) {
+            require(amount.isFinite() && amount > 0.0) { "Opening balance must be a finite positive amount" }
+            require(direction in setOf("DEBIT", "CREDIT")) { "Invalid opening-balance direction" }
+        }
+        customerRepository.addCustomer(customer)
+        if (amount != null) {
+            openingBalanceDao.insertOpeningBalance(OpeningBalance(
+                id = "ob_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}",
+                entityType = "CUSTOMER", entityId = customer.id,
+                amount = com.example.accounting.AccountingDecimal.money(amount), direction = direction,
+                date = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()),
+                reason = "رصيد افتتاحي عند إنشاء العميل"
+            ))
+        }
+    }
+
     suspend fun updateCustomer(customer: CustomerAccount) {
         customerRepository.updateCustomer(customer)
     }
@@ -956,6 +975,26 @@ class StoreRepository private constructor(
         return supplierRepository.insertSupplier(supplier)
     }
 
+    /** Creates the supplier and optional opening balance atomically. */
+    suspend fun insertSupplierWithOpeningBalance(supplier: Supplier, amount: Double?, direction: String): Supplier = database.withTransaction {
+        require(supplier.name.isNotBlank()) { "Supplier name is required" }
+        if (amount != null) {
+            require(amount.isFinite() && amount > 0.0) { "Opening balance must be a finite positive amount" }
+            require(direction in setOf("DEBIT", "CREDIT")) { "Invalid opening-balance direction" }
+        }
+        val inserted = supplierRepository.insertSupplier(supplier)
+        if (amount != null) {
+            openingBalanceDao.insertOpeningBalance(OpeningBalance(
+                id = "ob_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}",
+                entityType = "SUPPLIER", entityId = supplier.id,
+                amount = com.example.accounting.AccountingDecimal.money(amount), direction = direction,
+                date = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()),
+                reason = "رصيد افتتاحي عند إنشاء المورد"
+            ))
+        }
+        inserted
+    }
+
     suspend fun updateSupplier(supplier: Supplier) {
         supplierRepository.updateSupplier(supplier)
     }
@@ -1016,12 +1055,12 @@ class StoreRepository private constructor(
         purchaseId: String,
         returnLines: List<PurchaseReturnLineRequest>,
         reason: String,
-        returnDate: String? = null
+        returnDate: String? = null,
+        settlementMode: String = "PAYABLE",
+        financialAccountId: String? = null
     ): PurchaseReturn = purchaseReturnRepository.recordPurchaseReturn(
-        purchaseId = purchaseId,
-        returnLines = returnLines,
-        reason = reason,
-        returnDate = returnDate
+        purchaseId = purchaseId, returnLines = returnLines, reason = reason, returnDate = returnDate,
+        settlementMode = settlementMode, financialAccountId = financialAccountId
     )
 
     @Deprecated("Use line-level purchase returns")
@@ -1135,6 +1174,7 @@ class StoreRepository private constructor(
         val purchases = purchaseDao.getAllPurchasesSync()
         val supplierPayments = supplierPaymentDao.getAllPaymentsSync()
         val expenses = expenseDao.getExpensesByAccountIdSync(accountId)
+        val purchaseReturns = purchaseReturnDao.getAllReturnsSync()
 
         return CentralAccountingEngine.calculateFinancialAccountBalance(
             accountId = accountId,
@@ -1145,7 +1185,8 @@ class StoreRepository private constructor(
             refunds = refunds,
             purchases = purchases,
             supplierPayments = supplierPayments,
-            expenses = expenses
+            expenses = expenses,
+            purchaseReturns = purchaseReturns
         )
     }
 
@@ -1165,6 +1206,7 @@ class StoreRepository private constructor(
         val purchases = purchaseDao.getAllPurchasesSync()
         val supplierPayments = supplierPaymentDao.getAllPaymentsSync()
         val expenses = expenseDao.getExpensesByAccountIdSync(accountId)
+        val purchaseReturns = purchaseReturnDao.getAllReturnsSync()
 
         return CentralAccountingEngine.buildFinancialAccountStatement(
             accountId = accountId,
@@ -1177,7 +1219,8 @@ class StoreRepository private constructor(
             refunds = refunds,
             purchases = purchases,
             supplierPayments = supplierPayments,
-            expenses = expenses
+            expenses = expenses,
+            purchaseReturns = purchaseReturns
         )
     }
 

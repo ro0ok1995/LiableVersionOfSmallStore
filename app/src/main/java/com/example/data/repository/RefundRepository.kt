@@ -2,6 +2,9 @@ package com.example.data.repository
 
 import androidx.room.withTransaction
 import com.example.data.db.CustomerDao
+import com.example.data.db.CustomerPaymentDao
+import com.example.data.db.OpeningBalanceDao
+import com.example.data.db.AdjustmentDao
 import com.example.data.db.Refund
 import com.example.data.db.RefundDao
 import com.example.data.db.SaleDao
@@ -26,7 +29,10 @@ class RefundRepository(
     private val customerDao: CustomerDao = database.customerDao(),
     private val transactionDao: TransactionDao = database.transactionDao(),
     private val financialAccountDao: FinancialAccountDao = database.financialAccountDao(),
-    private val paymentMethodDao: PaymentMethodDao = database.paymentMethodDao()
+    private val paymentMethodDao: PaymentMethodDao = database.paymentMethodDao(),
+    private val customerPaymentDao: CustomerPaymentDao = database.customerPaymentDao(),
+    private val openingBalanceDao: OpeningBalanceDao = database.openingBalanceDao(),
+    private val adjustmentDao: AdjustmentDao = database.adjustmentDao()
 ) {
     val allRefunds: Flow<List<Refund>> = refundDao.getAllRefunds()
 
@@ -37,6 +43,19 @@ class RefundRepository(
     suspend fun getRefundsForSale(saleId: String): List<Refund> = refundDao.getRefundsBySaleId(saleId)
 
     suspend fun getRefundsForReturn(returnId: String): List<Refund> = refundDao.getRefundsByReturnId(returnId)
+
+    private suspend fun currentCustomerBalance(customerId: String?): Double {
+        if (customerId.isNullOrBlank()) return 0.0
+        val sales = saleDao.getSalesByCustomerIdSync(customerId)
+        val payments = customerPaymentDao.getPaymentsByCustomerIdSync(customerId)
+        val opening = openingBalanceDao.getOpeningBalancesByEntitySync("CUSTOMER", customerId)
+        val adjustments = adjustmentDao.getAdjustmentsByEntitySync("CUSTOMER", customerId)
+        val returns = saleReturnDao.getReturnsByCustomerIdSync(customerId)
+        val refunds = refundDao.getRefundsByCustomerIdSync(customerId)
+        return com.example.accounting.CentralAccountingEngine.calculateCustomerBalance(
+            customerId, sales, payments, opening, adjustments, returns, refunds
+        ).balance
+    }
 
     fun getRefundsByCustomerId(customerId: String): Flow<List<Refund>> = refundDao.getRefundsByCustomerId(customerId)
 
@@ -52,7 +71,7 @@ class RefundRepository(
         paymentMethodId: String? = null,
         reason: String,
         refundDate: String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-    ): Refund {
+    ): Refund = database.withTransaction {
         require(saleReturnId.isNotBlank()) { "Sale return ID cannot be blank" }
         require(amount.isFinite() && amount > 0.0) { "Refund amount must be finite and greater than zero" }
         require(reason.isNotBlank()) { "Refund reason cannot be blank" }
@@ -82,9 +101,14 @@ class RefundRepository(
 
         val existingRefunds = refundDao.getRefundsBySaleId(sale.id).filter { it.status != "REVERSED" }
         val totalAlreadyRefunded = existingRefunds.sumOf { it.amount }
-        val maxRefundEligible = (sale.paidAmount - totalAlreadyRefunded).coerceAtLeast(0.0)
+        val paidAmountRemaining = (sale.paidAmount - totalAlreadyRefunded).coerceAtLeast(0.0)
+        // A return has already reduced receivables. A cash refund may not turn the customer
+        // account into an unsupported advance beyond the negative balance created by that return.
+        val postReturnBalance = currentCustomerBalance(sale.customerId)
+        val debtFirstCashCap = (-postReturnBalance).coerceAtLeast(0.0)
+        val maxRefundEligible = minOf(paidAmountRemaining, saleReturn.amount, debtFirstCashCap)
 
-        require(amount <= maxRefundEligible + 0.001) {
+        require(amount <= maxRefundEligible + 0.005) {
             "Refund amount ($amount) exceeds amount eligible for cash/bank refund ($maxRefundEligible)"
         }
 
@@ -102,8 +126,7 @@ class RefundRepository(
             status = "ACTIVE"
         )
 
-        database.withTransaction {
-            refundDao.insertRefund(refund)
+        refundDao.insertRefund(refund)
 
             val resolvedCustomerName = if (!sale.customerId.isNullOrBlank()) {
                 customerDao.getCustomerById(sale.customerId)?.customerName ?: ""
@@ -123,8 +146,6 @@ class RefundRepository(
                     )
                 }
             }
-        }
-
-        return refund
+        refund
     }
 }

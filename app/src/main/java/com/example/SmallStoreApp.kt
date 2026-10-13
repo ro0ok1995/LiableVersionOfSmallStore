@@ -629,8 +629,8 @@ fun SmallStoreApp(
                                         mainViewModel.recordSupplierPayment(supplierId, amount, date, acc, notes, onComplete)
                                     },
                                     onGetPurchaseLines = { purchaseId -> mainViewModel.getPurchaseLines(purchaseId) },
-                                    onRecordPurchaseReturn = { purchaseId, returnLines, reason, date, onComplete ->
-                                        mainViewModel.recordPurchaseReturn(purchaseId, returnLines, reason, date, onComplete)
+                                    onRecordPurchaseReturn = { purchaseId, returnLines, reason, date, settlementMode, accountId, onComplete ->
+                                        mainViewModel.recordPurchaseReturn(purchaseId, returnLines, reason, date, settlementMode, accountId, onComplete)
                                     },
                                     onRecordExpense = { catId, amt, accId, pmId, dt, desc, onComp ->
                                         mainViewModel.recordExpense(catId, amt, accId, pmId, dt, desc, onComp)
@@ -794,8 +794,12 @@ fun SmallStoreApp(
                                         focusManager.clearFocus()
                                         mainViewModel.navigateBack()
                                     },
-                                    onAddCustomer = { name, phone ->
-                                        mainViewModel.addCustomer(name, phone)
+                                    onAddCustomer = { name, phone, amount, direction ->
+                                        mainViewModel.addCustomerWithOpeningBalance(name, phone, amount, direction)
+                                    },
+                                    onGetCustomerBalance = { customerId -> mainViewModel.getCustomerBalance(customerId) },
+                                    onRecordOpeningBalance = { customerId, amount, direction, onComplete ->
+                                        mainViewModel.recordOpeningBalance("CUSTOMER", customerId, amount, direction, onComplete)
                                     },
                                     onUpdateCustomer = { updated ->
                                         mainViewModel.updateCustomer(updated)
@@ -817,8 +821,12 @@ fun SmallStoreApp(
                                         focusManager.clearFocus()
                                         mainViewModel.navigateBack()
                                     },
-                                    onAddSupplier = { name, phone ->
-                                        mainViewModel.addSupplier(name, phone)
+                                    onAddSupplier = { name, phone -> mainViewModel.addSupplier(name, phone) },
+                                    onAddSupplierWithOpeningBalance = { name, phone, amount, direction ->
+                                        mainViewModel.addSupplierWithOpeningBalance(name, phone, amount, direction)
+                                    },
+                                    onRecordOpeningBalance = { supplierId, amount, direction, onComplete ->
+                                        mainViewModel.recordOpeningBalance("SUPPLIER", supplierId, amount, direction, onComplete)
                                     },
                                     onUpdateSupplier = { supplier -> mainViewModel.updateSupplier(supplier) },
                                     onGetSupplierBalance = { supplierId -> mainViewModel.getSupplierBalance(supplierId) }

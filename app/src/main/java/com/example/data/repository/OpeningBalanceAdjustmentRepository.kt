@@ -28,7 +28,8 @@ class OpeningBalanceAdjustmentRepository(
         return openingBalanceDao.getOpeningBalancesByEntitySync(entityType, entityId)
     }
 
-    suspend fun insertOpeningBalance(openingBalance: OpeningBalance) {
+    /** Raw insert is private to keep duplicate/validation checks in the transaction below. */
+    private suspend fun insertOpeningBalance(openingBalance: OpeningBalance) {
         openingBalanceDao.insertOpeningBalance(openingBalance)
     }
 
@@ -49,6 +50,10 @@ class OpeningBalanceAdjustmentRepository(
         reason: String? = null,
         reference: String? = null
     ): OpeningBalance = database.withTransaction {
+        require(amount.isFinite() && amount > 0.0) { "Opening balance amount must be finite and greater than zero" }
+        require(direction in setOf("DEBIT", "CREDIT")) { "Invalid opening balance direction: $direction" }
+        require(isValidDate(date)) { "Opening balance date must be a valid yyyy-MM-dd date" }
+        require(entityId.isNotBlank()) { "Opening balance entity ID cannot be blank" }
         when (entityType) {
             "CUSTOMER" -> {
                 customerDao.getCustomerById(entityId)
@@ -84,8 +89,13 @@ class OpeningBalanceAdjustmentRepository(
             createdAt = System.currentTimeMillis()
         )
 
-        openingBalanceDao.insertOpeningBalance(openingBalance)
+        insertOpeningBalance(openingBalance)
 
         openingBalance
     }
+
+    private fun isValidDate(value: String): Boolean = try {
+        val format = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).apply { isLenient = false }
+        format.parse(value) != null
+    } catch (_: Exception) { false }
 }

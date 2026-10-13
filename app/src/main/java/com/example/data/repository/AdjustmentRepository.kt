@@ -40,6 +40,11 @@ class AdjustmentRepository(
         reason: String,
         reference: String? = null
     ): Adjustment = database.withTransaction {
+        require(amount.isFinite() && amount > 0.0) { "Adjustment amount must be finite and greater than zero" }
+        require(direction in setOf("DEBIT", "CREDIT")) { "Invalid adjustment direction: $direction" }
+        require(dateIsValid(date)) { "Adjustment date must be a valid yyyy-MM-dd date" }
+        require(reason.isNotBlank()) { "Adjustment reason cannot be blank" }
+        require(entityId.isNotBlank()) { "Adjustment entity ID cannot be blank" }
         val customer = when (entityType) {
             "CUSTOMER" -> {
                 customerDao.getCustomerById(entityId)
@@ -104,4 +109,10 @@ class AdjustmentRepository(
 
         adjustment
     }
+
+    private fun dateIsValid(value: String): Boolean = try {
+        val format = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).apply { isLenient = false }
+        format.parse(value) != null
+    } catch (_: Exception) { false }
+
 }

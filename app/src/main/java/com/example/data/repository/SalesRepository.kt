@@ -65,20 +65,20 @@ class SalesRepository(
         require(Math.abs(sale.totalAmount - (sale.paidAmount + sale.creditAmount)) < 0.001) {
             "Accounting invariant violated: totalAmount (${sale.totalAmount}) must equal paidAmount (${sale.paidAmount}) + creditAmount (${sale.creditAmount})"
         }
-        require(sale.totalAmount > 0.0) { "Sale total must be greater than zero" }
-        require(sale.paidAmount >= 0.0 && sale.creditAmount >= 0.0) { "Sale payment amounts cannot be negative" }
+        require(sale.totalAmount.isFinite() && sale.totalAmount > 0.0) { "Sale total must be greater than zero" }
+        require(sale.paidAmount.isFinite() && sale.creditAmount.isFinite() && sale.paidAmount >= 0.0 && sale.creditAmount >= 0.0) { "Sale payment amounts cannot be negative" }
         require(sale.customerId != null || sale.creditAmount <= 0.001) {
             "A credit or mixed sale requires a customer; anonymous sales must be fully cash"
         }
         require(lines.map { it.id }.distinct().size == lines.size) { "Duplicate sale line IDs are not allowed" }
         require(lines.all { it.saleId == sale.id }) { "Every sale line must belong to the sale" }
-        val calculatedTotal = lines.sumOf { it.subtotal }
+        val calculatedTotal = com.example.accounting.AccountingDecimal.money(lines.sumOf { it.subtotal })
         require(Math.abs(calculatedTotal - sale.totalAmount) < 0.001) {
             "Sale total (${sale.totalAmount}) must equal the sum of sale line subtotals ($calculatedTotal)"
         }
         lines.forEach { line ->
             require(line.quantity > 0) { "Sale quantity must be greater than zero" }
-            require(line.unitPrice >= 0.0 && line.costPriceAtSale >= 0.0) { "Sale prices cannot be negative" }
+            require(line.unitPrice.isFinite() && line.costPriceAtSale.isFinite() && line.subtotal.isFinite() && line.unitPrice >= 0.0 && line.costPriceAtSale >= 0.0 && line.subtotal >= 0.0) { "Sale prices and subtotals must be finite and non-negative" }
             require(line.productNameSnapshot.isNotBlank()) { "Sale product snapshot cannot be blank" }
         }
         if (sale.paidAmount > 0.001) {

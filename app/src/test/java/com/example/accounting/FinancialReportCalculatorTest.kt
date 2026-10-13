@@ -1403,4 +1403,48 @@ class FinancialReportCalculatorTest {
         assertEquals(30.0, totals.netProfit, 0.0001)
     }
 
+    @Test
+    fun missingSaleLineCostMustNotBeReportedAsConfirmedProfit() {
+        val sale = Sale(
+            id = "sale_missing_cost",
+            invoiceNumber = "INV-MISSING-COST",
+            customerId = customerId,
+            saleType = "CASH",
+            totalAmount = 1000.0,
+            paidAmount = 1000.0,
+            creditAmount = 0.0,
+            paymentStatus = "PAID",
+            transactionDate = "2026-10-13",
+            status = "ACTIVE"
+        )
+
+        val totals = FinancialReportCalculator.calculateFromSales(sales = listOf(sale))
+
+        assertFalse("Profit must be marked incomplete when historical cost is missing", totals.costDataComplete)
+        assertEquals("Unknown cost must not be treated as zero COGS and full sales as profit", 0.0, totals.grossProfit, 0.0001)
+        assertEquals("Net profit must not be reported as confirmed", 0.0, totals.netProfit, 0.0001)
+    }
+
+    @Test
+    fun legacySalesWithoutTransactionCostLinesMustBeMarkedIncomplete() {
+        val saleTx = TransactionItem(
+            id = "legacy_sale_missing_cost",
+            amount = 250.0,
+            isCredit = false,
+            date = "2026-10-13",
+            relativeTime = "today",
+            activityType = "Sale",
+            customerId = customerId,
+            transactionType = TransactionType.SALE,
+            saleType = SaleType.CASH,
+            paidAmount = 250.0,
+            creditAmount = 0.0,
+            operationStatus = OperationStatus.ACTIVE
+        )
+        val totals = FinancialReportCalculator.calculate(listOf(saleTx))
+        assertFalse(totals.costDataComplete)
+        assertEquals(0.0, totals.grossProfit, 0.0001)
+        assertEquals(0.0, totals.netProfit, 0.0001)
+    }
+
 }

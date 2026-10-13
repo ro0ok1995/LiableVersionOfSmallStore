@@ -1,9 +1,17 @@
 package com.example.data.repository
 
 import androidx.room.withTransaction
+import com.example.accounting.CentralAccountingEngine
 import com.example.data.db.CustomerDao
 import com.example.data.db.CustomerPayment
 import com.example.data.db.CustomerPaymentDao
+import com.example.data.db.SaleDao
+import com.example.data.db.OpeningBalanceDao
+import com.example.data.db.AdjustmentDao
+import com.example.data.db.SaleReturnDao
+import com.example.data.db.RefundDao
+import com.example.data.db.TransactionDao
+import com.example.data.db.toModel
 import com.example.data.db.FinancialAccountDao
 import com.example.data.db.PaymentMethodDao
 import com.example.data.db.SmallStoreDatabase
@@ -18,7 +26,13 @@ class CustomerPaymentRepository(
     private val customerPaymentDao: CustomerPaymentDao = database.customerPaymentDao(),
     private val customerDao: CustomerDao = database.customerDao(),
     private val paymentMethodDao: PaymentMethodDao = database.paymentMethodDao(),
-    private val financialAccountDao: FinancialAccountDao = database.financialAccountDao()
+    private val financialAccountDao: FinancialAccountDao = database.financialAccountDao(),
+    private val saleDao: SaleDao = database.saleDao(),
+    private val openingBalanceDao: OpeningBalanceDao = database.openingBalanceDao(),
+    private val adjustmentDao: AdjustmentDao = database.adjustmentDao(),
+    private val saleReturnDao: SaleReturnDao = database.saleReturnDao(),
+    private val refundDao: RefundDao = database.refundDao(),
+    private val transactionDao: TransactionDao = database.transactionDao()
 ) {
     val allCustomerPayments: Flow<List<CustomerPayment>> = customerPaymentDao.getAllPayments()
 
@@ -38,8 +52,31 @@ class CustomerPaymentRepository(
         return customerPaymentDao.getPaymentById(id)
     }
 
-    suspend fun insertCustomerPayment(payment: CustomerPayment) {
-        customerPaymentDao.insertPayment(if (payment.financialAccountId == payment.financialAccountId) payment else payment.copy(financialAccountId = payment.financialAccountId))
+    /** Raw insertion is intentionally private so callers cannot bypass ledger validation. */
+    private suspend fun insertCustomerPayment(payment: CustomerPayment) {
+        customerPaymentDao.insertPayment(payment)
+    }
+
+    private suspend fun currentOutstandingBalance(customerId: String): Double {
+        val sales = saleDao.getSalesByCustomerIdSync(customerId)
+        val payments = customerPaymentDao.getPaymentsByCustomerIdSync(customerId)
+        val opening = openingBalanceDao.getOpeningBalancesByEntitySync("CUSTOMER", customerId)
+        val adjustments = adjustmentDao.getAdjustmentsByEntitySync("CUSTOMER", customerId)
+        val returns = saleReturnDao.getReturnsByCustomerIdSync(customerId)
+        val refunds = refundDao.getRefundsByCustomerIdSync(customerId)
+        if (sales.isNotEmpty() || payments.isNotEmpty() || opening.isNotEmpty() || adjustments.isNotEmpty() || returns.isNotEmpty() || refunds.isNotEmpty()) {
+            return CentralAccountingEngine.calculateCustomerBalance(customerId, sales, payments, opening, adjustments, returns, refunds).balance
+        }
+        return CentralAccountingEngine.calculateCustomerBalance(
+            customerId, transactionDao.getTransactionsByCustomerIdSync(customerId).map { it.toModel() }
+        ).balance
+    }
+
+    private fun requireWithinOutstanding(amount: Double, balance: Double, customerId: String) {
+        require(balance.isFinite() && balance >= -0.005) { "Customer balance is invalid; resolve the ledger before accepting payment" }
+        require(amount <= balance + 0.005) {
+            "Payment ($amount) exceeds customer outstanding balance (${balance.coerceAtLeast(0.0)}) for $customerId"
+        }
     }
 
     suspend fun recordCustomerPayment(
@@ -68,6 +105,10 @@ class CustomerPaymentRepository(
         val todayDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
         val paymentId = "pay_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}"
 
+        require(customer.isArchived.not()) { "Cannot accept payment from an archived customer" }
+        require(dateIsValid(todayDate)) { "Invalid payment date" }
+        requireWithinOutstanding(amount, currentOutstandingBalance(customerId), customerId)
+
         val payment = CustomerPayment(
             id = paymentId,
             customerId = customerId,
@@ -81,7 +122,7 @@ class CustomerPaymentRepository(
             status = "ACTIVE"
         )
 
-        customerPaymentDao.insertPayment(if (payment.financialAccountId == accountId) payment else payment.copy(financialAccountId = accountId))
+        insertCustomerPayment(payment)
 
         customerDao.updateCustomer(
             customer.copy(
@@ -93,11 +134,20 @@ class CustomerPaymentRepository(
         payment
     }
 
+    private fun dateIsValid(value: String): Boolean = try {
+        val format = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false }
+        format.parse(value) != null
+    } catch (_: Exception) { false }
+
     suspend fun recordCustomerPayment(payment: CustomerPayment): CustomerPayment = database.withTransaction {
-        require(payment.amount > 0.0) { "Customer payment amount must be strictly positive, was: ${payment.amount}" }
+        require(payment.amount.isFinite() && payment.amount > 0.0) { "Customer payment amount must be finite and strictly positive, was: ${payment.amount}" }
+        require(payment.transactionDate.isNotBlank() && dateIsValid(payment.transactionDate)) { "Invalid payment date: ${payment.transactionDate}" }
 
         val customer = customerDao.getCustomerById(payment.customerId)
             ?: throw IllegalArgumentException("Customer not found: ${payment.customerId}")
+
+        require(!customer.isArchived) { "Cannot accept payment from an archived customer" }
+        requireWithinOutstanding(payment.amount, currentOutstandingBalance(payment.customerId), payment.customerId)
 
         val paymentMethod = paymentMethodDao.getPaymentMethodById(payment.paymentMethodId)
             ?: throw IllegalArgumentException("Payment method not found: ${payment.paymentMethodId}")
@@ -108,7 +158,8 @@ class CustomerPaymentRepository(
             ?: throw IllegalArgumentException("Financial account not found: $accountId")
         require(account.isActive) { "Financial account is inactive: $accountId" }
 
-        customerPaymentDao.insertPayment(if (payment.financialAccountId == accountId) payment else payment.copy(financialAccountId = accountId))
+        val normalizedPayment = payment.copy(financialAccountId = accountId)
+        insertCustomerPayment(normalizedPayment)
 
         customerDao.updateCustomer(
             customer.copy(
@@ -117,6 +168,6 @@ class CustomerPaymentRepository(
             )
         )
 
-        payment
+        normalizedPayment
     }
 }

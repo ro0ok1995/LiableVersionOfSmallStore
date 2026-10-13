@@ -52,6 +52,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -65,6 +66,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.AppCurrency
+import com.example.accounting.CustomerBalanceSummary
 import com.example.model.CustomerAccount
 import com.example.model.LanguageMode
 import com.example.model.StoreStrings
@@ -86,16 +88,25 @@ fun CustomerManagementScreen(
     archivedCustomerIds: Set<String>,
     languageMode: LanguageMode,
     onBackClick: () -> Unit,
-    onAddCustomer: (name: String, phone: String) -> Unit,
+    onAddCustomer: (name: String, phone: String, openingAmount: Double?, openingDirection: String) -> Unit,
+    onGetCustomerBalance: suspend (String) -> CustomerBalanceSummary,
+    onRecordOpeningBalance: (String, Double, String, (Result<Unit>) -> Unit) -> Unit,
     onUpdateCustomer: (CustomerAccount) -> Unit,
     onArchiveCustomer: (String) -> Unit,
     onUnarchiveCustomer: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
+    var authoritativeBalances by remember { mutableStateOf<Map<String, Double>>(emptyMap()) }
+    LaunchedEffect(customers) {
+        authoritativeBalances = customers.associate { customer ->
+            customer.id to runCatching { onGetCustomerBalance(customer.id).balance }.getOrDefault(customer.balance)
+        }
+    }
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf(CustomerFilterTab.ACTIVE) }
+    var openingBalanceCustomer by remember { mutableStateOf<CustomerAccount?>(null) }
 
     // Dialog states
     var showAddDialog by remember { mutableStateOf(false) }
@@ -112,14 +123,14 @@ fun CustomerManagementScreen(
     }
 
     // Filtered list based on search and selected tab
-    val displayedList = remember(activeCustomers, archivedCustomers, selectedFilter, searchQuery) {
+    val displayedList = remember(activeCustomers, archivedCustomers, selectedFilter, searchQuery, authoritativeBalances) {
         val basePool = if (selectedFilter == CustomerFilterTab.ARCHIVED) {
             archivedCustomers
         } else {
             when (selectedFilter) {
                 CustomerFilterTab.ACTIVE -> activeCustomers
-                CustomerFilterTab.HAS_DEBT -> activeCustomers.filter { it.balance > 0.001 }
-                CustomerFilterTab.SETTLED -> activeCustomers.filter { it.balance <= 0.001 }
+                CustomerFilterTab.HAS_DEBT -> activeCustomers.filter { (authoritativeBalances[it.id] ?: it.balance) > 0.001 }
+                CustomerFilterTab.SETTLED -> activeCustomers.filter { kotlin.math.abs(authoritativeBalances[it.id] ?: it.balance) <= 0.001 }
                 CustomerFilterTab.ARCHIVED -> archivedCustomers
             }
         }
@@ -384,9 +395,11 @@ fun CustomerManagementScreen(
                     val isArchived = customer.id in archivedCustomerIds
                     CustomerManagementCard(
                         customer = customer,
+                        balance = authoritativeBalances[customer.id] ?: customer.balance,
                         isArchived = isArchived,
                         isArabic = isArabic,
                         onEditClick = { customerToEdit = customer },
+                        onOpeningBalanceClick = { openingBalanceCustomer = customer },
                         onArchiveClick = { customerToArchive = customer },
                         onRestoreClick = { customerToRestore = customer }
                     )
@@ -402,8 +415,8 @@ fun CustomerManagementScreen(
         AddCustomerDialog(
             isArabic = isArabic,
             onDismiss = { showAddDialog = false },
-            onConfirm = { name, phone ->
-                onAddCustomer(name, phone)
+            onConfirm = { name, phone, amount, direction ->
+                onAddCustomer(name, phone, amount, direction)
                 showAddDialog = false
             }
         )
@@ -412,6 +425,18 @@ fun CustomerManagementScreen(
     // ==========================================
     // DIALOG: EDIT CUSTOMER
     // ==========================================
+    openingBalanceCustomer?.let { customer ->
+        ExistingOpeningBalanceDialog(
+            isArabic = isArabic, title = if (isArabic) "إضافة رصيد افتتاحي للعميل" else "Add customer opening balance",
+            customerMode = true, onDismiss = { openingBalanceCustomer = null },
+            onConfirm = { amount, direction ->
+                onRecordOpeningBalance(customer.id, amount, direction) { result ->
+                    if (result.isSuccess) openingBalanceCustomer = null
+                }
+            }
+        )
+    }
+
     customerToEdit?.let { customer ->
         EditCustomerDialog(
             customer = customer,
@@ -557,9 +582,11 @@ fun CustomerManagementScreen(
 @Composable
 private fun CustomerManagementCard(
     customer: CustomerAccount,
+    balance: Double,
     isArchived: Boolean,
     isArabic: Boolean,
     onEditClick: () -> Unit,
+    onOpeningBalanceClick: () -> Unit,
     onArchiveClick: () -> Unit,
     onRestoreClick: () -> Unit
 ) {
@@ -652,15 +679,15 @@ private fun CustomerManagementCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = AppCurrency.formatAmountWithDecimals(customer.balance, isArabic),
+                    text = AppCurrency.formatAmountWithDecimals(balance, isArabic),
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
                     ),
                     color = when {
-                        customer.balance > 0.001 -> Color(0xFFDC2626) // Red debt
-                        customer.balance < -0.001 -> Color(0xFF2563EB) // Blue credit
-                        else -> Color(0xFF16A34A) // Green settled
+                        balance > 0.001 -> Color(0xFF218B50) // Customer owes store: positive for the store
+                        balance < -0.001 -> Color(0xFFC0392B) // Store owes customer
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant // Zero is neutral
                     }
                 )
             }
@@ -700,6 +727,10 @@ private fun CustomerManagementCard(
                         )
                     }
                 } else {
+                    OutlinedButton(onClick = onOpeningBalanceClick, shape = RoundedCornerShape(8.dp), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp), modifier = Modifier.height(34.dp)) {
+                        Text(if (isArabic) "رصيد افتتاحي" else "Opening balance", fontSize = 11.sp)
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
                     // 5. Edit Action
                     OutlinedButton(
                         onClick = onEditClick,
@@ -888,7 +919,7 @@ private fun EditCustomerDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
-                            text = AppCurrency.formatAmountWithDecimals(customer.balance, isArabic),
+                            text = AppCurrency.formatAmountWithDecimals(balance, isArabic),
                             style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
                         )
                     }
@@ -930,70 +961,57 @@ private fun EditCustomerDialog(
 private fun AddCustomerDialog(
     isArabic: Boolean,
     onDismiss: () -> Unit,
-    onConfirm: (name: String, phone: String) -> Unit
+    onConfirm: (name: String, phone: String, amount: Double?, direction: String) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
+    var openingAmount by remember { mutableStateOf("") }
+    var direction by remember { mutableStateOf("DEBIT") }
     var nameError by remember { mutableStateOf(false) }
+    var amountError by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = if (isArabic) "إضافة عميل جديد" else "Add New Customer",
-                fontWeight = FontWeight.Bold,
-                fontSize = 17.sp
-            )
-        },
+        title = { Text(if (isArabic) "إضافة عميل جديد" else "Add New Customer", fontWeight = FontWeight.Bold, fontSize = 17.sp) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = {
-                        name = it
-                        if (it.isNotBlank()) nameError = false
-                    },
-                    label = { Text(if (isArabic) "اسم العميل *" else "Customer Name *") },
-                    isError = nameError,
-                    singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("add_customer_name_input")
-                )
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(value = name, onValueChange = { name = it; if (it.isNotBlank()) nameError = false }, label = { Text(if (isArabic) "اسم العميل *" else "Customer Name *") }, isError = nameError, singleLine = true, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().testTag("add_customer_name_input"))
+                OutlinedTextField(value = phone, onValueChange = { phone = it }, label = { Text(if (isArabic) "رقم الهاتف" else "Phone Number") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), singleLine = true, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().testTag("add_customer_phone_input"))
+                Text(if (isArabic) "الرصيد الافتتاحي (اختياري) — ₪" else "Opening balance (optional) — ₪", style = MaterialTheme.typography.labelLarge)
+                OutlinedTextField(value = openingAmount, onValueChange = { openingAmount = it; amountError = false }, label = { Text(if (isArabic) "المبلغ" else "Amount") }, isError = amountError, supportingText = { if (amountError) Text(if (isArabic) "أدخل مبلغًا موجبًا وصحيحًا مثل 150.25" else "Enter a valid positive amount, e.g. 150.25") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth().testTag("customer_opening_balance_amount"))
+                Text(if (isArabic) "اتجاه الرصيد" else "Balance direction", style = MaterialTheme.typography.labelLarge)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = direction == "DEBIT", onClick = { direction = "DEBIT" }, label = { Text(if (isArabic) "على العميل للمحل" else "Customer owes store") })
+                    FilterChip(selected = direction == "CREDIT", onClick = { direction = "CREDIT" }, label = { Text(if (isArabic) "المحل مدين للعميل" else "Store owes customer") })
+                }
+            }
+        },
+        confirmButton = { Button(onClick = {
+            if (name.trim().isBlank()) { nameError = true; return@Button }
+            val amount = if (openingAmount.isBlank()) null else openingAmount.trim().replace(',', '.').toDoubleOrNull()
+            if (openingAmount.isNotBlank() && (amount == null || !amount.isFinite() || amount <= 0.0)) { amountError = true; return@Button }
+            onConfirm(name.trim(), phone.trim(), amount, direction)
+        }, colors = ButtonDefaults.buttonColors(containerColor = GeoPrimary), modifier = Modifier.testTag("save_add_customer_button")) { Text(if (isArabic) "إضافة" else "Add") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(if (isArabic) "إلغاء" else "Cancel") } }
+    )
+}
 
-                OutlinedTextField(
-                    value = phone,
-                    onValueChange = { phone = it },
-                    label = { Text(if (isArabic) "رقم الهاتف" else "Phone Number") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                    singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("add_customer_phone_input")
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (name.trim().isBlank()) {
-                        nameError = true
-                    } else {
-                        onConfirm(name.trim(), phone.trim())
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = GeoPrimary),
-                modifier = Modifier.testTag("save_add_customer_button")
-            ) {
-                Text(if (isArabic) "إضافة" else "Add")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(if (isArabic) "إلغاء" else "Cancel")
+
+@Composable
+private fun ExistingOpeningBalanceDialog(
+    isArabic: Boolean, title: String, customerMode: Boolean, onDismiss: () -> Unit,
+    onConfirm: (Double, String) -> Unit
+) {
+    var amountText by remember { mutableStateOf("") }
+    var direction by remember { mutableStateOf(if (customerMode) "DEBIT" else "CREDIT") }
+    var error by remember { mutableStateOf<String?>(null) }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedTextField(value = amountText, onValueChange = { amountText = it; error = null }, label = { Text(if (isArabic) "المبلغ بالشيكل ₪" else "Amount in ILS ₪") }, isError = error != null, supportingText = { if (error != null) Text(error!!) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth())
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = direction == "DEBIT", onClick = { direction = "DEBIT" }, label = { Text(if (customerMode) { if (isArabic) "على العميل" else "Customer owes" } else { if (isArabic) "المورد مدين للمحل" else "Supplier owes store" }) })
+                FilterChip(selected = direction == "CREDIT", onClick = { direction = "CREDIT" }, label = { Text(if (customerMode) { if (isArabic) "المحل مدين" else "Store owes" } else { if (isArabic) "المحل مدين للمورد" else "Store owes supplier" }) })
             }
         }
-    )
+    }, confirmButton = { Button(onClick = { val amount = amountText.trim().replace(',', '.').toDoubleOrNull(); if (amount == null || !amount.isFinite() || amount <= 0.0) error = if (isArabic) "أدخل مبلغًا موجبًا صحيحًا" else "Enter a valid positive amount" else onConfirm(amount, direction) }) { Text(if (isArabic) "حفظ الرصيد" else "Save balance") } }, dismissButton = { TextButton(onClick = onDismiss) { Text(if (isArabic) "إلغاء" else "Cancel") } })
 }

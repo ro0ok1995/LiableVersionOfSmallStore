@@ -61,7 +61,7 @@ class ExpenseRepository(
         description: String,
         id: String? = null
     ): Expense = database.withTransaction {
-        require(amount > 0.0) { "Expense amount ($amount) must be strictly greater than zero" }
+        require(amount.isFinite() && amount > 0.0) { "Expense amount ($amount) must be strictly greater than zero" }
         require(description.isNotBlank()) { "Expense description cannot be blank" }
 
         val category = expenseCategoryDao.getCategoryById(categoryId)
@@ -70,13 +70,16 @@ class ExpenseRepository(
         val financialAccount = financialAccountDao.getAccountById(financialAccountId)
             ?: throw IllegalArgumentException("Financial account not found: $financialAccountId")
 
+        require(financialAccount.isActive) { "Financial account is inactive: $financialAccountId" }
         if (!paymentMethodId.isNullOrBlank()) {
-            paymentMethodDao.getPaymentMethodById(paymentMethodId)
+            val method = paymentMethodDao.getPaymentMethodById(paymentMethodId)
                 ?: throw IllegalArgumentException("Payment method not found: $paymentMethodId")
+            require(method.isActive) { "Payment method is inactive: $paymentMethodId" }
         }
 
         val dateToUse = date?.takeIf { it.isNotBlank() }
             ?: SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        require(isValidDate(dateToUse)) { "Expense date must be a valid yyyy-MM-dd date" }
 
         val expenseId = id?.takeIf { it.isNotBlank() }
             ?: "exp_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}"
@@ -101,8 +104,13 @@ class ExpenseRepository(
         expense
     }
 
+    private fun isValidDate(value: String): Boolean = try {
+        val format = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false }
+        format.parse(value) != null
+    } catch (_: Exception) { false }
+
     suspend fun recordExpense(expense: Expense): Expense = database.withTransaction {
-        require(expense.amount > 0.0) { "Expense amount (${expense.amount}) must be strictly greater than zero" }
+        require(expense.amount.isFinite() && expense.amount > 0.0) { "Expense amount (${expense.amount}) must be strictly greater than zero" }
         require(expense.description.isNotBlank()) { "Expense description cannot be blank" }
 
         val category = expenseCategoryDao.getCategoryById(expense.categoryId)
@@ -111,10 +119,13 @@ class ExpenseRepository(
         val financialAccount = financialAccountDao.getAccountById(expense.financialAccountId)
             ?: throw IllegalArgumentException("Financial account not found: ${expense.financialAccountId}")
 
+        require(financialAccount.isActive) { "Financial account is inactive: ${expense.financialAccountId}" }
         if (!expense.paymentMethodId.isNullOrBlank()) {
-            paymentMethodDao.getPaymentMethodById(expense.paymentMethodId)
+            val method = paymentMethodDao.getPaymentMethodById(expense.paymentMethodId)
                 ?: throw IllegalArgumentException("Payment method not found: ${expense.paymentMethodId}")
+            require(method.isActive) { "Payment method is inactive: ${expense.paymentMethodId}" }
         }
+        require(isValidDate(expense.date)) { "Expense date must be a valid yyyy-MM-dd date" }
 
         expenseDao.insertExpense(expense)
 

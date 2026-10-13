@@ -148,7 +148,7 @@ fun PurchasesScreen(
     onAddSupplier: (name: String, phone: String, address: String?, notes: String?, onComplete: (Result<Supplier>) -> Unit) -> Unit = { _, _, _, _, _ -> },
     onRecordPurchase: (supplierId: String, lines: List<PurchaseLineRequest>, paidAmount: Double, financialAccountId: String?, notes: String?, date: String, onComplete: (Result<PurchaseResult>) -> Unit) -> Unit = { _, _, _, _, _, _, _ -> },
     onRecordSupplierPayment: (supplierId: String, amount: Double, date: String, financialAccountId: String?, notes: String?, onComplete: (Result<SupplierPayment>) -> Unit) -> Unit = { _, _, _, _, _, _ -> },
-    onRecordPurchaseReturn: ((purchaseId: String, returnLines: List<com.example.model.PurchaseReturnLineRequest>, reason: String, date: String, onComplete: (Result<PurchaseReturn>) -> Unit) -> Unit)? = null,
+    onRecordPurchaseReturn: ((purchaseId: String, returnLines: List<com.example.model.PurchaseReturnLineRequest>, reason: String, date: String, settlementMode: String, financialAccountId: String?, onComplete: (Result<PurchaseReturn>) -> Unit) -> Unit)? = null,
     onRecordExpense: (categoryId: String, amount: Double, financialAccountId: String, paymentMethodId: String?, date: String?, description: String, onComplete: (Result<Expense>) -> Unit) -> Unit = { _, _, _, _, _, _, _ -> },
     onAddExpenseCategory: (name: String, description: String?, onComplete: (Result<ExpenseCategory>) -> Unit) -> Unit = { _, _, _ -> },
     onGetSupplierBalance: (suspend (supplierId: String) -> SupplierBalanceSummary)? = null,
@@ -487,6 +487,7 @@ fun PurchasesScreen(
                 onGetSupplierStatement = onGetSupplierStatement ?: { emptyList() },
                 onGetPurchaseLines = onGetPurchaseLines,
                 onRecordPurchaseReturn = onRecordPurchaseReturn,
+                financialAccounts = financialAccounts,
                 initialSupplierId = initialSupplierId,
                 initialAction = initialSupplierAction,
                 modifier = Modifier

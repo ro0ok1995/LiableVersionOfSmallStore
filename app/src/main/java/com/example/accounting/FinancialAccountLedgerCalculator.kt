@@ -5,6 +5,7 @@ import com.example.data.db.CustomerPayment
 import com.example.data.db.Expense
 import com.example.data.db.OpeningBalance
 import com.example.data.db.Purchase
+import com.example.data.db.PurchaseReturn
 import com.example.data.db.Refund
 import com.example.data.db.Sale
 import com.example.data.db.SupplierPayment
@@ -21,7 +22,8 @@ enum class FinancialAccountEntryType {
     PURCHASE_CASH_OUTFLOW,
     EXPENSE,
     REFUND,
-    ADJUSTMENT
+    ADJUSTMENT,
+    SUPPLIER_RETURN_REFUND
 }
 
 /**
@@ -79,7 +81,8 @@ object FinancialAccountLedgerCalculator {
         refunds: List<Refund> = emptyList(),
         purchases: List<Purchase> = emptyList(),
         supplierPayments: List<SupplierPayment> = emptyList(),
-        expenses: List<Expense> = emptyList()
+        expenses: List<Expense> = emptyList(),
+        purchaseReturns: List<PurchaseReturn> = emptyList()
     ): Double = buildFinancialAccountStatement(
         accountId = accountId,
         startDate = null,
@@ -91,7 +94,8 @@ object FinancialAccountLedgerCalculator {
         refunds = refunds,
         purchases = purchases,
         supplierPayments = supplierPayments,
-        expenses = expenses
+        expenses = expenses,
+        purchaseReturns = purchaseReturns
     ).closingBalance
 
     private data class RawFinancialItem(
@@ -117,7 +121,8 @@ object FinancialAccountLedgerCalculator {
         refunds: List<Refund> = emptyList(),
         purchases: List<Purchase> = emptyList(),
         supplierPayments: List<SupplierPayment> = emptyList(),
-        expenses: List<Expense> = emptyList()
+        expenses: List<Expense> = emptyList(),
+        purchaseReturns: List<PurchaseReturn> = emptyList()
     ): FinancialAccountStatement {
         val rawItems = mutableListOf<RawFinancialItem>()
 
@@ -203,6 +208,18 @@ object FinancialAccountLedgerCalculator {
                     status = status
                 )
             )
+        }
+
+        // Supplier cash refunds are actual inflows only when recorded as such.
+        for (pr in purchaseReturns) {
+            if (pr.financialAccountId != accountId || pr.cashRefundAmount <= 0.0) continue
+            val status = if (pr.status == "REVERSED") OperationStatus.REVERSED else OperationStatus.ACTIVE
+            rawItems.add(RawFinancialItem(
+                id = "supplier_return_refund_${pr.id}", date = pr.returnDate, createdAt = pr.createdAt,
+                type = FinancialAccountEntryType.SUPPLIER_RETURN_REFUND,
+                inflow = if (status == OperationStatus.ACTIVE) pr.cashRefundAmount else 0.0,
+                outflow = 0.0, referenceId = pr.id, description = "استرداد نقدي من مورد لمرتجع مشتريات", status = status
+            ))
         }
 
         // 5. Expenses (outflow)
@@ -350,7 +367,8 @@ object FinancialAccountLedgerCalculator {
         refunds: List<Refund> = emptyList(),
         purchases: List<Purchase> = emptyList(),
         supplierPayments: List<SupplierPayment> = emptyList(),
-        expenses: List<Expense> = emptyList()
+        expenses: List<Expense> = emptyList(),
+        purchaseReturns: List<PurchaseReturn> = emptyList()
     ): List<FinancialAccountLedgerEntry> {
         return buildFinancialAccountStatement(
             accountId = accountId,
@@ -363,7 +381,8 @@ object FinancialAccountLedgerCalculator {
             refunds = refunds,
             purchases = purchases,
             supplierPayments = supplierPayments,
-            expenses = expenses
+            expenses = expenses,
+            purchaseReturns = purchaseReturns
         ).entries
     }
 }

@@ -86,7 +86,8 @@ data class AnalyticsSummaryMetrics(
     val customerCount: Int? = null, // non-null for ALL_CUSTOMERS, null for ONE_SELECTED_CUSTOMER
     val cogs: Double = 0.0,
     val grossProfit: Double = 0.0,
-    val netProfit: Double = 0.0
+    val netProfit: Double = 0.0,
+    val costDataComplete: Boolean = true
 )
 
 /**
@@ -292,6 +293,7 @@ object AnalyticsExportDataPreparer {
             cogs = breakdown.cogs,
             grossProfit = breakdown.grossProfit,
             netProfit = breakdown.netProfit,
+            costDataComplete = breakdown.costDataComplete,
             transactionCount = filteredTransactions.size,
             customerCount = if (selectedCustomer == null) allCustomers.size else null
         )

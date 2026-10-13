@@ -74,6 +74,7 @@ import com.example.accounting.SupplierBalanceSummary
 import com.example.accounting.SupplierLedgerEntry
 import com.example.accounting.SupplierLedgerEntryType
 import com.example.data.db.Purchase
+import com.example.data.db.FinancialAccount
 import com.example.data.db.PurchaseReturn
 import com.example.data.db.PurchaseLine
 import com.example.data.db.Supplier
@@ -111,7 +112,8 @@ fun SupplierPurchasesSection(
     onGetSupplierBalance: suspend (supplierId: String) -> SupplierBalanceSummary,
     onGetSupplierStatement: suspend (supplierId: String) -> List<SupplierLedgerEntry>,
     onGetPurchaseLines: suspend (purchaseId: String) -> List<PurchaseLine>,
-    onRecordPurchaseReturn: ((purchaseId: String, returnLines: List<PurchaseReturnLineRequest>, reason: String, date: String, onComplete: (Result<PurchaseReturn>) -> Unit) -> Unit)? = null,
+    onRecordPurchaseReturn: ((purchaseId: String, returnLines: List<PurchaseReturnLineRequest>, reason: String, date: String, settlementMode: String, financialAccountId: String?, onComplete: (Result<PurchaseReturn>) -> Unit) -> Unit)? = null,
+    financialAccounts: List<FinancialAccount> = emptyList(),
     initialSupplierId: String? = null,
     initialAction: SupplierInitialAction = SupplierInitialAction.NONE,
     modifier: Modifier = Modifier
@@ -971,6 +973,8 @@ fun SupplierPurchasesSection(
         val pur = purchaseToReturn!!
         var returnReason by remember { mutableStateOf("") }
         var returnError by remember { mutableStateOf<String?>(null) }
+        var settlementMode by remember { mutableStateOf("PAYABLE") }
+        var refundAccountId by remember { mutableStateOf(financialAccounts.firstOrNull { it.isActive }?.id) }
         val totalSelected = purchaseReturnLines.sumOf { line ->
             (returnQuantities[line.id] ?: 0) * line.unitCost
         }
@@ -1027,6 +1031,18 @@ fun SupplierPurchasesSection(
                             fontWeight = FontWeight.Bold
                         )
                     }
+                    Text(if (isArabic) "تسوية المرتجع" else "Return settlement", fontWeight = FontWeight.SemiBold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(selected = settlementMode == "PAYABLE", onClick = { settlementMode = "PAYABLE" }, label = { Text(if (isArabic) "خصم من مستحقات المورد" else "Reduce supplier payable") })
+                        FilterChip(selected = settlementMode == "CASH_REFUND", onClick = { settlementMode = "CASH_REFUND" }, label = { Text(if (isArabic) "استرداد نقدي" else "Cash refund") })
+                    }
+                    if (settlementMode == "CASH_REFUND") {
+                        Text(if (isArabic) "الحساب الذي استلم المبلغ" else "Account receiving refund", style = MaterialTheme.typography.labelMedium)
+                        financialAccounts.filter { it.isActive }.forEach { account ->
+                            FilterChip(selected = refundAccountId == account.id, onClick = { refundAccountId = account.id }, label = { Text(account.name) })
+                        }
+                        if (financialAccounts.none { it.isActive }) Text(if (isArabic) "لا يوجد حساب مالي نشط" else "No active financial account", color = StatusRed)
+                    }
                     OutlinedTextField(
                         value = returnReason,
                         onValueChange = { returnReason = it; returnError = null },
@@ -1049,7 +1065,11 @@ fun SupplierPurchasesSection(
                             return@Button
                         }
                         val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-                        onRecordPurchaseReturn?.invoke(pur.id, selectedLines, returnReason.trim(), today) { result ->
+                        if (settlementMode == "CASH_REFUND" && (refundAccountId.isNullOrBlank() || financialAccounts.none { it.id == refundAccountId && it.isActive })) {
+                            returnError = if (isArabic) "اختر حسابًا ماليًا نشطًا لاستلام المبلغ" else "Select an active account for the refund"
+                            return@Button
+                        }
+                        onRecordPurchaseReturn?.invoke(pur.id, selectedLines, returnReason.trim(), today, settlementMode, if (settlementMode == "CASH_REFUND") refundAccountId else null) { result ->
                             if (result.isSuccess) {
                                 refreshBalance()
                                 showRecordReturnDialog = false

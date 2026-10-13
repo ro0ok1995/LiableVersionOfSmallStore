@@ -80,13 +80,14 @@ class PurchasesRepository(
             }
         }
 
-        val totalAmount = lines.sumOf { it.quantity * it.unitCost }
-        require(paidAmount >= 0.0) { "Paid amount ($paidAmount) cannot be negative" }
-        require(paidAmount <= totalAmount + 0.001) {
+        val totalAmount = com.example.accounting.AccountingDecimal.money(lines.sumOf { com.example.accounting.AccountingDecimal.multiplyToMoney(it.unitCost, it.quantity.toDouble()) })
+        require(paidAmount.isFinite() && paidAmount >= 0.0) { "Paid amount ($paidAmount) must be finite and non-negative" }
+        val postedPaidAmount = com.example.accounting.AccountingDecimal.money(paidAmount)
+        require(postedPaidAmount <= totalAmount + 0.001) {
             "Paid amount ($paidAmount) cannot exceed total purchase amount ($totalAmount)"
         }
 
-        val creditAmount = (totalAmount - paidAmount).coerceAtLeast(0.0)
+        val creditAmount = com.example.accounting.AccountingDecimal.money((totalAmount - postedPaidAmount).coerceAtLeast(0.0))
         val paymentStatus = when {
             creditAmount <= 0.0001 -> "PAID"
             paidAmount <= 0.0001 -> "UNPAID"
@@ -121,7 +122,7 @@ class PurchasesRepository(
             supplierId = supplierId,
             purchaseDate = dateToUse,
             totalAmount = totalAmount,
-            paidAmount = paidAmount,
+            paidAmount = postedPaidAmount,
             creditAmount = creditAmount,
             paymentStatus = paymentStatus,
             paymentMethodId = effectivePaymentMethodId,
@@ -138,7 +139,7 @@ class PurchasesRepository(
                 productNameSnapshot = req.productNameSnapshot,
                 quantity = req.quantity,
                 unitCost = req.unitCost,
-                subtotal = req.quantity * req.unitCost
+                subtotal = com.example.accounting.AccountingDecimal.multiplyToMoney(req.unitCost, req.quantity.toDouble())
             )
         }
 

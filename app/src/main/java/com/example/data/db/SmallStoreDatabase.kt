@@ -37,7 +37,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         Expense::class,
         StockMovementEntity::class
     ],
-    version = 20,
+    version = 21,
     exportSchema = false
 )
 abstract class SmallStoreDatabase : RoomDatabase() {
@@ -109,6 +109,16 @@ abstract class SmallStoreDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE purchase_returns ADD COLUMN payableReductionAmount REAL NOT NULL DEFAULT 0.0")
+                db.execSQL("ALTER TABLE purchase_returns ADD COLUMN cashRefundAmount REAL NOT NULL DEFAULT 0.0")
+                db.execSQL("ALTER TABLE purchase_returns ADD COLUMN financialAccountId TEXT DEFAULT NULL")
+                // Existing returns historically reduced the supplier payable by the full amount.
+                db.execSQL("UPDATE purchase_returns SET payableReductionAmount = amount, cashRefundAmount = 0.0, financialAccountId = NULL")
+            }
+        }
+
         @Volatile
         private var DEMO_INSTANCE: SmallStoreDatabase? = null
 
@@ -151,7 +161,8 @@ abstract class SmallStoreDatabase : RoomDatabase() {
                     MIGRATION_16_17,
                     MIGRATION_17_18,
                     MIGRATION_18_19,
-                    MIGRATION_19_20
+                    MIGRATION_19_20,
+                    MIGRATION_20_21
                 )
                 .build()
         }

@@ -4,6 +4,9 @@ import androidx.room.withTransaction
 import com.example.accounting.FinancialReportCalculator
 import com.example.accounting.InventoryMovementType
 import com.example.data.db.CustomerDao
+import com.example.data.db.CustomerPaymentDao
+import com.example.data.db.OpeningBalanceDao
+import com.example.data.db.AdjustmentDao
 import com.example.data.db.Refund
 import com.example.data.db.RefundDao
 import com.example.data.db.SaleDao
@@ -37,10 +40,26 @@ class SaleReturnRepository(
     private val customerDao: CustomerDao = database.customerDao(),
     private val transactionDao: TransactionDao = database.transactionDao(),
     private val transactionItemLineDao: TransactionItemLineDao = database.transactionItemLineDao(),
-    private val stockMovementDao: StockMovementDao = database.stockMovementDao()
+    private val stockMovementDao: StockMovementDao = database.stockMovementDao(),
+    private val customerPaymentDao: CustomerPaymentDao = database.customerPaymentDao(),
+    private val openingBalanceDao: OpeningBalanceDao = database.openingBalanceDao(),
+    private val adjustmentDao: AdjustmentDao = database.adjustmentDao()
 ) {
     val allSaleReturns: Flow<List<SaleReturn>> = saleReturnDao.getAllReturns()
     val allRefunds: Flow<List<Refund>> = refundDao.getAllRefunds()
+
+    private suspend fun currentCustomerBalance(customerId: String?): Double {
+        if (customerId.isNullOrBlank()) return 0.0
+        val sales = saleDao.getSalesByCustomerIdSync(customerId)
+        val payments = customerPaymentDao.getPaymentsByCustomerIdSync(customerId)
+        val opening = openingBalanceDao.getOpeningBalancesByEntitySync("CUSTOMER", customerId)
+        val adjustments = adjustmentDao.getAdjustmentsByEntitySync("CUSTOMER", customerId)
+        val returns = saleReturnDao.getReturnsByCustomerIdSync(customerId)
+        val refunds = refundDao.getRefundsByCustomerIdSync(customerId)
+        return com.example.accounting.CentralAccountingEngine.calculateCustomerBalance(
+            customerId, sales, payments, opening, adjustments, returns, refunds
+        ).balance
+    }
 
     suspend fun getSaleReturnById(id: String): SaleReturn? = saleReturnDao.getReturnById(id)
 
@@ -71,7 +90,7 @@ class SaleReturnRepository(
         reasonLabelSnapshot: String = reason,
         returnDate: String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()),
         refundRequest: RefundRequest? = null
-    ): SaleReturnResult {
+    ): SaleReturnResult = database.withTransaction {
         require(saleId.isNotBlank()) { "Sale ID cannot be blank" }
         require(reason.isNotBlank()) { "Return reason cannot be blank" }
         require(returnDate.isNotBlank()) { "Return date cannot be blank" }
@@ -116,7 +135,7 @@ class SaleReturnRepository(
                 "Cannot return ${req.quantity} of '${originalLine.productNameSnapshot}'; only $remainingReturnable remaining returnable (sold: ${originalLine.quantity}, already returned: $alreadyReturned)"
             }
 
-            val lineSubtotal = req.quantity * originalLine.unitPrice
+            val lineSubtotal = com.example.accounting.AccountingDecimal.multiplyToMoney(originalLine.unitPrice, req.quantity.toDouble())
             constructedLines.add(
                 SaleReturnLine(
                     id = UUID.randomUUID().toString(),
@@ -132,22 +151,27 @@ class SaleReturnRepository(
             )
         }
 
-        val totalReturnAmount = constructedLines.sumOf { it.subtotal }
+        val totalReturnAmount = com.example.accounting.AccountingDecimal.money(constructedLines.sumOf { it.subtotal })
         require(totalReturnAmount > 0.0) { "Total return amount ($totalReturnAmount) must be greater than zero" }
 
         // Validate refund request if provided
         var constructedRefund: Refund? = null
         if (refundRequest != null) {
-            require(refundRequest.amount > 0.0) { "Refund amount (${refundRequest.amount}) must be greater than zero" }
+            require(refundRequest.amount.isFinite() && refundRequest.amount > 0.0) { "Refund amount (${refundRequest.amount}) must be finite and greater than zero" }
             require(refundRequest.amount <= totalReturnAmount + 0.001) {
                 "Refund amount (${refundRequest.amount}) cannot exceed return amount ($totalReturnAmount)"
             }
 
             val existingRefunds = refundDao.getRefundsBySaleId(saleId).filter { it.status != "REVERSED" }
             val totalAlreadyRefunded = existingRefunds.sumOf { it.amount }
-            val maxRefundEligible = (sale.paidAmount - totalAlreadyRefunded).coerceAtLeast(0.0)
+            val paidAmountRemaining = (sale.paidAmount - totalAlreadyRefunded).coerceAtLeast(0.0)
+            // Apply the return to the customer's receivable first. Only the value left after
+            // clearing the current debt can be refunded in cash for this return.
+            val outstandingBeforeReturn = currentCustomerBalance(sale.customerId).coerceAtLeast(0.0)
+            val debtFirstCashCap = (totalReturnAmount - minOf(totalReturnAmount, outstandingBeforeReturn)).coerceAtLeast(0.0)
+            val maxRefundEligible = minOf(paidAmountRemaining, debtFirstCashCap)
 
-            require(refundRequest.amount <= maxRefundEligible + 0.001) {
+            require(refundRequest.amount <= maxRefundEligible + 0.005) {
                 "Refund amount (${refundRequest.amount}) exceeds amount eligible for cash/bank refund ($maxRefundEligible)"
             }
 
@@ -189,7 +213,6 @@ class SaleReturnRepository(
         val cogsReversed = constructedLines.sumOf { it.cogsReversed }
         val grossProfitCorrection = FinancialReportCalculator.calculateGrossProfit(totalReturnAmount, cogsReversed)
 
-        database.withTransaction {
             saleReturnDao.insertReturn(saleReturn)
             saleReturnLineDao.insertReturnLines(constructedLines)
 
@@ -256,9 +279,8 @@ class SaleReturnRepository(
                     )
                 }
             }
-        }
 
-        return SaleReturnResult(
+        SaleReturnResult(
             saleReturn = saleReturn,
             lines = constructedLines,
             refund = constructedRefund,

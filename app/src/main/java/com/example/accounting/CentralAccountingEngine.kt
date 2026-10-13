@@ -406,7 +406,8 @@ object CentralAccountingEngine {
         refunds: List<Refund> = emptyList(),
         purchases: List<Purchase> = emptyList(),
         supplierPayments: List<SupplierPayment> = emptyList(),
-        expenses: List<Expense> = emptyList()
+        expenses: List<Expense> = emptyList(),
+        purchaseReturns: List<PurchaseReturn> = emptyList()
     ): Double {
         return FinancialAccountLedgerCalculator.calculateAccountBalance(
             accountId = accountId,
@@ -417,7 +418,8 @@ object CentralAccountingEngine {
             refunds = refunds,
             purchases = purchases,
             supplierPayments = supplierPayments,
-            expenses = expenses
+            expenses = expenses,
+            purchaseReturns = purchaseReturns
         )
     }
 
@@ -435,7 +437,8 @@ object CentralAccountingEngine {
         refunds: List<Refund> = emptyList(),
         purchases: List<Purchase> = emptyList(),
         supplierPayments: List<SupplierPayment> = emptyList(),
-        expenses: List<Expense> = emptyList()
+        expenses: List<Expense> = emptyList(),
+        purchaseReturns: List<PurchaseReturn> = emptyList()
     ): FinancialAccountStatement {
         return FinancialAccountLedgerCalculator.buildFinancialAccountStatement(
             accountId = accountId,
@@ -448,7 +451,8 @@ object CentralAccountingEngine {
             refunds = refunds,
             purchases = purchases,
             supplierPayments = supplierPayments,
-            expenses = expenses
+            expenses = expenses,
+            purchaseReturns = purchaseReturns
         )
     }
 
@@ -466,7 +470,8 @@ object CentralAccountingEngine {
         refunds: List<Refund> = emptyList(),
         purchases: List<Purchase> = emptyList(),
         supplierPayments: List<SupplierPayment> = emptyList(),
-        expenses: List<Expense> = emptyList()
+        expenses: List<Expense> = emptyList(),
+        purchaseReturns: List<PurchaseReturn> = emptyList()
     ): List<FinancialAccountLedgerEntry> {
         return FinancialAccountLedgerCalculator.buildFinancialAccountLedger(
             accountId = accountId,
@@ -479,7 +484,8 @@ object CentralAccountingEngine {
             refunds = refunds,
             purchases = purchases,
             supplierPayments = supplierPayments,
-            expenses = expenses
+            expenses = expenses,
+            purchaseReturns = purchaseReturns
         )
     }
 }

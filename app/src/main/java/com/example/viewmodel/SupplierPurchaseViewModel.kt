@@ -98,6 +98,20 @@ class SupplierPurchaseViewModel @JvmOverloads constructor(
         }
     }
 
+    fun addSupplierWithOpeningBalance(name: String, phone: String, amount: Double?, direction: String, onComplete: (Result<Supplier>) -> Unit = {}) {
+        viewModelScope.launch {
+            try {
+                require(name.isNotBlank()) { "Supplier name is required" }
+                val supplier = Supplier(
+                    id = "sup_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}",
+                    name = name.trim(), phone = phone.trim(), isArchived = false
+                )
+                val inserted = repository.insertSupplierWithOpeningBalance(supplier, amount, direction)
+                onComplete(Result.success(inserted))
+            } catch (e: Exception) { onComplete(Result.failure(e)) }
+        }
+    }
+
     fun recordPurchase(
         supplierId: String,
         lines: List<PurchaseLineRequest>,
@@ -153,15 +167,15 @@ class SupplierPurchaseViewModel @JvmOverloads constructor(
         returnLines: List<PurchaseReturnLineRequest>,
         reason: String,
         returnDate: String = getCurrentDateString(),
+        settlementMode: String = "PAYABLE",
+        financialAccountId: String? = null,
         onComplete: (Result<PurchaseReturn>) -> Unit = {}
     ) {
         viewModelScope.launch {
             try {
                 val result = repository.recordPurchaseReturn(
-                    purchaseId = purchaseId,
-                    returnLines = returnLines,
-                    reason = reason,
-                    returnDate = returnDate
+                    purchaseId = purchaseId, returnLines = returnLines, reason = reason, returnDate = returnDate,
+                    settlementMode = settlementMode, financialAccountId = financialAccountId
                 )
                 onComplete(Result.success(result))
             } catch (e: Exception) {

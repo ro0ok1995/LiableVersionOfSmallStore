@@ -101,7 +101,9 @@ data class FinancialReportTotals(
     val grossProfit: Double = 0.0,
     val grossMargin: Double = 0.0,
     val expenses: Double = 0.0,
-    val netProfit: Double = 0.0
+    val netProfit: Double = 0.0,
+    /** False means at least some active sale revenue lacks trustworthy historical cost; profit is not confirmed. */
+    val costDataComplete: Boolean = true
 ) {
     val netSales: Double
         get() = totalSales - saleReturns
@@ -573,11 +575,12 @@ object FinancialReportCalculator {
         val decompositions = transactions.map { decomposeTransaction(it) }
         val baseTotals = calculateTotalsFromDecompositions(decompositions)
         if (transactionLines.isEmpty()) {
-            val netProfit = calculateNetProfit(baseTotals.netSales, baseTotals.expenses)
+            // Missing cost is unknown, not zero. Do not publish net sales as profit.
             return baseTotals.copy(
-                grossProfit = baseTotals.netSales,
-                grossMargin = calculateGrossMargin(baseTotals.netSales, baseTotals.netSales),
-                netProfit = netProfit
+                grossProfit = 0.0,
+                grossMargin = 0.0,
+                netProfit = 0.0,
+                costDataComplete = baseTotals.netSales <= 0.0
             )
         }
 
@@ -590,7 +593,10 @@ object FinancialReportCalculator {
             cogs = cogs,
             grossProfit = grossProfit,
             grossMargin = grossMargin,
-            netProfit = netProfit
+            netProfit = netProfit,
+            costDataComplete = transactions.filter {
+                !decomposeTransaction(it).isReversed && decomposeTransaction(it).transactionType == TransactionType.SALE && decomposeTransaction(it).totalAmount > 0.0
+            }.all { tx -> transactionLines.any { it.transactionId == tx.id } && transactionLines.filter { it.transactionId == tx.id }.all { it.costPrice.isFinite() && it.costPrice >= 0.0 } }
         )
     }
 
@@ -619,16 +625,15 @@ object FinancialReportCalculator {
             .sumOf { it.amount }
 
         if (saleLines.isEmpty()) {
-            val grossProfit = netSales
-            val grossMargin = calculateGrossMargin(grossProfit, netSales)
-            val netProfit = calculateNetProfit(grossProfit, totalExpenses)
+            // Cost information is absent; zero is not a valid substitute for COGS.
             return baseTotals.copy(
                 saleReturns = effectiveReturns,
                 customerRefunds = activeRefunds,
-                grossProfit = grossProfit,
-                grossMargin = grossMargin,
+                grossProfit = 0.0,
+                grossMargin = 0.0,
                 expenses = totalExpenses,
-                netProfit = netProfit
+                netProfit = 0.0,
+                costDataComplete = netSales <= 0.0
             )
         }
 
@@ -644,7 +649,9 @@ object FinancialReportCalculator {
             grossProfit = grossProfit,
             grossMargin = grossMargin,
             expenses = totalExpenses,
-            netProfit = netProfit
+            netProfit = netProfit,
+            costDataComplete = sales.filter { it.status != "REVERSED" && it.status != "CANCELLED" }
+                .all { sale -> saleLines.any { it.saleId == sale.id } && saleLines.filter { it.saleId == sale.id }.all { it.costPriceAtSale.isFinite() && it.costPriceAtSale >= 0.0 } }
         )
     }
 

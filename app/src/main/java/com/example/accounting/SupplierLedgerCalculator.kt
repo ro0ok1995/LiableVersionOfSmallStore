@@ -87,7 +87,7 @@ object SupplierLedgerCalculator {
             if (pr.status == "REVERSED") continue
 
             activeCount++
-            totalReturns += pr.amount
+            totalReturns += pr.payableReductionAmount
         }
 
         for (adj in adjustments) {
@@ -191,7 +191,7 @@ object SupplierLedgerCalculator {
         for (pr in returns) {
             if (pr.supplierId != supplierId) continue
             val status = if (pr.status == "REVERSED") OperationStatus.REVERSED else OperationStatus.ACTIVE
-            val debit = if (status == OperationStatus.ACTIVE) pr.amount else 0.0
+            val debit = if (status == OperationStatus.ACTIVE) pr.payableReductionAmount else 0.0
             rawEntries.add(
                 RawLedgerItem(
                     id = pr.id,

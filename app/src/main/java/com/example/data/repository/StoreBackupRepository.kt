@@ -43,31 +43,17 @@ class StoreBackupRepository(
     private val expenseDao = database.expenseDao()
     private val stockMovementDao = database.stockMovementDao()
 
-    suspend fun getAllDataForBackup(): BackupPayload {
+    suspend fun getAllDataForBackup(): BackupPayload = database.withTransaction {
         val currentStoreInfo = storeInfoDao.getStoreInfoSync()?.toModel() ?: StoreInfo()
-        val customersList = mutableListOf<CustomerAccount>()
-        val productsList = mutableListOf<ProductItem>()
-        val transactionsList = mutableListOf<TransactionItem>()
-        val linesList = mutableListOf<TransactionItemLineEntity>()
-        val notificationsList = mutableListOf<NotificationItem>()
-
-        database.withTransaction {
-            customersList.addAll(customerDao.getAllCustomersSync().map { it.toModel() })
-            productsList.addAll(productDao.getAllProductsSync().map { it.toModel() })
-            transactionsList.addAll(transactionDao.getAllTransactionsSync().map { it.toModel() })
-            linesList.addAll(transactionItemLineDao.getAllLinesSync())
-            notificationsList.addAll(notificationDao.getAllNotificationsSync().map { it.toModel() })
-        }
-
-        return BackupPayload(
+        BackupPayload(
             version = 2,
             backupTimestamp = System.currentTimeMillis(),
             storeInfoAtBackupTime = currentStoreInfo,
-            customers = customersList,
-            products = productsList,
-            transactions = transactionsList,
-            transactionItemLines = linesList,
-            notifications = notificationsList,
+            customers = customerDao.getAllCustomersSync().map { it.toModel() },
+            products = productDao.getAllProductsSync().map { it.toModel() },
+            transactions = transactionDao.getAllTransactionsSync().map { it.toModel() },
+            transactionItemLines = transactionItemLineDao.getAllLinesSync(),
+            notifications = notificationDao.getAllNotificationsSync().map { it.toModel() },
             customerEntities = customerDao.getAllCustomersSync(),
             customerIdentityConflicts = conflictDao.getAllConflictsSync(),
             sales = saleDao.getAllSalesSync(),

@@ -361,6 +361,9 @@ object AnalyticsPdfGenerator {
         kpiList.add((if (isArabic) "المتحصلات" else "Payments Received") to AppCurrency.formatAmountWithDecimals(data.metrics.totalPaymentsReceived, isArabic))
         kpiList.add((if (isArabic) "إجمالي الربح" else "Gross Profit") to AppCurrency.formatAmountWithDecimals(data.metrics.grossProfit, isArabic))
         kpiList.add((if (isArabic) "صافي الربح" else "Net Profit") to AppCurrency.formatAmountWithDecimals(data.metrics.netProfit, isArabic))
+        if (!data.metrics.costDataComplete) {
+            kpiList.add((if (isArabic) "تنبيه محاسبي" else "Accounting Warning") to (if (isArabic) "التكلفة غير مكتملة" else "Costs incomplete"))
+        }
         kpiList.add((if (isArabic) "تسديد كامل" else "Full Settlement") to AppCurrency.formatAmountWithDecimals(data.metrics.fullSettlementAmount, isArabic))
         kpiList.add((if (isArabic) "تسديد جزئي" else "Partial Settlement") to AppCurrency.formatAmountWithDecimals(data.metrics.partialSettlementAmount, isArabic))
         kpiList.add((if (isArabic) "الصافي المتبقي" else "Net Outstanding") to AppCurrency.formatAmountWithDecimals(data.metrics.netOutstandingBalance, isArabic))

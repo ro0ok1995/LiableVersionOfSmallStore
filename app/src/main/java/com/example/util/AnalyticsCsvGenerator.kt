@@ -131,6 +131,9 @@ object AnalyticsCsvGenerator {
         sb.append(csvRow(payLabel, AppCurrency.formatAmountWithDecimals(data.metrics.totalPaymentsReceived, isArabic), data.currency))
         sb.append(csvRow(if (isArabic) "إجمالي الربح" else "Gross Profit", AppCurrency.formatAmountWithDecimals(data.metrics.grossProfit, isArabic), data.currency))
         sb.append(csvRow(if (isArabic) "صافي الربح" else "Net Profit", AppCurrency.formatAmountWithDecimals(data.metrics.netProfit, isArabic), data.currency))
+        if (!data.metrics.costDataComplete) {
+            sb.append(csvRow(if (isArabic) "تنبيه محاسبي" else "Accounting Warning", if (isArabic) "تكلفة بعض المبيعات غير متوفرة؛ الربح غير مكتمل" else "Cost is missing for some sales; profit is incomplete", ""))
+        }
 
         if (data.scope == AnalyticsReportScope.ONE_SELECTED_CUSTOMER) {
             // Customer's current overall balance due
