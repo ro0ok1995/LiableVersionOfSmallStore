@@ -919,7 +919,7 @@ private fun EditCustomerDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
-                            text = AppCurrency.formatAmountWithDecimals(balance, isArabic),
+                            text = AppCurrency.formatAmountWithDecimals(customer.balance, isArabic),
                             style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
                         )
                     }
