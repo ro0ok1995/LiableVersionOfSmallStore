@@ -57,6 +57,7 @@ import com.example.ui.screens.BackupRestoreScreen
 import com.example.ui.screens.ContactSupportScreen
 import com.example.ui.screens.CustomerManagementScreen
 import com.example.ui.screens.SupplierManagementScreen
+import com.example.ui.screens.SupplierOperationsScreen
 import com.example.ui.screens.ProductManagementScreen
 import com.example.ui.screens.CustomerProfileScreen
 import com.example.ui.screens.SupplierProfileScreen
@@ -113,7 +114,7 @@ fun SmallStoreApp(
             if (uiState.currentDestination == NavDestination.STORE_INFORMATION && isStoreSaved != true) {
                 return@BackHandler
             }
-            if (uiState.currentDestination == NavDestination.PURCHASES) {
+            if (uiState.currentDestination == NavDestination.PURCHASES || uiState.currentDestination == NavDestination.SUPPLIER_OPERATIONS) {
                 purchasesInitialTab = 0
                 supplierInitialAction = SupplierInitialAction.NONE
             }
@@ -195,7 +196,7 @@ fun SmallStoreApp(
                     else -> false
                 }
                 val showGlobalTopBar = isTopLevelScreen || uiState.currentDestination in setOf(
-                    NavDestination.CUSTOMER_DETAILS, NavDestination.SUPPLIER_DETAILS, NavDestination.PURCHASES, NavDestination.QUICK_PAYMENT
+                    NavDestination.CUSTOMER_DETAILS, NavDestination.SUPPLIER_DETAILS, NavDestination.PURCHASES, NavDestination.QUICK_PAYMENT, NavDestination.SUPPLIER_OPERATIONS
                 )
 
                 val storeOwnerName = uiState.storeInfo.ownerName.ifBlank { uiState.storeInfo.storeName }
@@ -222,6 +223,7 @@ fun SmallStoreApp(
                     NavDestination.TERMS_OF_USE -> if (isArabic) StoreStrings.TERMS_OF_USE_AR else StoreStrings.TERMS_OF_USE_EN
                     NavDestination.CONTACT_SUPPORT -> if (isArabic) StoreStrings.CONTACT_SUPPORT_AR else StoreStrings.CONTACT_SUPPORT_EN
                     NavDestination.BACKUP_RESTORE -> if (isArabic) StoreStrings.SECTION_BACKUP_AR else StoreStrings.SECTION_BACKUP_EN
+                    NavDestination.SUPPLIER_OPERATIONS -> if (isArabic) "عمليات الموردين" else "Supplier Operations"
                 }
 
                 val unreadNotifs = uiState.notifications.count { !it.isRead }
@@ -833,6 +835,39 @@ fun SmallStoreApp(
                                 )
                             }
 
+                            NavDestination.SUPPLIER_OPERATIONS -> {
+                                SupplierOperationsScreen(
+                                    suppliers = uiState.suppliers,
+                                    products = uiState.products,
+                                    supplierCatalogItems = emptyList(),
+                                    supplierPurchases = uiState.purchases,
+                                    financialAccounts = uiState.financialAccounts,
+                                    languageMode = uiState.languageMode,
+                                    initialSupplierId = uiState.selectedSupplierDetails?.id,
+                                    initialAction = supplierInitialAction,
+                                    onGetSupplierBalance = { supplierId -> mainViewModel.getSupplierBalance(supplierId) },
+                                    onGetPurchaseLines = { purchaseId -> mainViewModel.getPurchaseLines(purchaseId) },
+                                    onLinkItemToSupplier = { _, _, _ -> },
+                                    onAddNewCatalogItemForSupplier = { _, _, _, _, _, _, _ -> },
+                                    onUpdateProductCost = { _, _ -> },
+                                    onRecordPurchase = { supplierId, lines, paid, acc, notes, date, onComplete ->
+                                        mainViewModel.recordPurchase(supplierId, lines, paid, acc, notes, date) { res ->
+                                            onComplete(res.map { })
+                                        }
+                                    },
+                                    onRecordSupplierPayment = { supplierId, amount, date, acc, notes, onComplete ->
+                                        mainViewModel.recordSupplierPayment(supplierId, amount, date, acc, notes) { res ->
+                                            onComplete(res.map { })
+                                        }
+                                    },
+                                    onRecordPurchaseReturn = { purchaseId, returnLines, reason, date, settlementMode, accountId, onComplete ->
+                                        mainViewModel.recordPurchaseReturn(purchaseId, returnLines, reason, date, settlementMode, accountId) { res ->
+                                            onComplete(res.map { })
+                                        }
+                                    }
+                                )
+                            }
+
                             NavDestination.PRODUCT_MANAGEMENT -> {
                                 val allProducts = remember(uiState.products, uiState.archivedProducts) {
                                     uiState.products + uiState.archivedProducts
@@ -981,6 +1016,11 @@ fun SmallStoreApp(
                         focusManager.clearFocus()
                         mainViewModel.closeActionSheet()
                         mainViewModel.openQuickPayment()
+                    },
+                    onSupplierOperationsClick = {
+                        focusManager.clearFocus()
+                        mainViewModel.closeActionSheet()
+                        mainViewModel.navigateTo(NavDestination.SUPPLIER_OPERATIONS)
                     }
                 )
 

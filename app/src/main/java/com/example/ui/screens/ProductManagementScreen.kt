@@ -536,9 +536,9 @@ fun ProductManagementScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         text = if (isArabic) {
-                            "هل تريد بالتأكيد نقل المنتج "${product.name}" إلى الأرشيف؟"
+                            "هل تريد بالتأكيد نقل المنتج \"${product.name}\" إلى الأرشيف؟"
                         } else {
-                            "Are you sure you want to archive "${product.name}"?"
+                            "Are you sure you want to archive \"${product.name}\"?"
                         },
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium

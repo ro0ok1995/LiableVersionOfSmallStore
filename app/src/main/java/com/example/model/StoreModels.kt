@@ -28,7 +28,7 @@ enum class NavDestination {
     PRIVACY_POLICY,
     TERMS_OF_USE,
     CONTACT_SUPPORT,
-    BACKUP_RESTORE
+    BACKUP_RESTORE,
     SUPPLIER_OPERATIONS,
 }
 

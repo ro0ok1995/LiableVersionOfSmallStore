@@ -713,7 +713,13 @@ class AnalysisCenterViewModel : ViewModel() {
                     type = ReportPresentationUtils.getTransactionTypeLabel(tx, isArabic, shortLabel = true),
                     isPayment = isPayment,
                     isCreditDebt = isDebtPurchase,
-                    amount = tx.amount,
+                    amount = if (ReportPresentationUtils.isSaleTransaction(tx) && tx.typedSaleType == SaleType.MIXED) {
+                        // In a mixed sale statement, show only the receivable portion.
+                        // Keep the full invoice amount for cash-only and credit-only sale rows.
+                        ReportPresentationUtils.creditSalesAmount(tx)
+                    } else {
+                        tx.amount
+                    },
                     runningBalance = running,
                     isArchived = tx.isArchived,
                     isReversed = (tx.typedOperationStatus == OperationStatus.REVERSED)
