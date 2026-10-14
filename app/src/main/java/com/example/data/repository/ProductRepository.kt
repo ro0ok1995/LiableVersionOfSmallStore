@@ -46,12 +46,14 @@ class ProductRepository(
     }
 
     suspend fun deleteProductPermanently(id: String) {
-        // Product history is retained by design. A hard delete can orphan purchase lines,
-        // stock movements and reports because those historical tables intentionally snapshot
-        // some fields and do not all have product foreign keys. Archive instead.
-        val product = productDao.getProductById(id)
+        // Preserve historical purchase/sale/stock references: archive instead of physical deletion.
+        val existing = productDao.getProductById(id)
             ?: throw IllegalArgumentException("Product with ID $id not found")
-        productDao.archiveProduct(id, java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date()))
+        if (!existing.isArchived) {
+            val date = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                .format(java.util.Date())
+            productDao.archiveProduct(id, date)
+        }
     }
 
     suspend fun getProductById(id: String): ProductItem? {

@@ -32,7 +32,8 @@ import com.example.model.TransactionType
     indices = [
         Index("supplierId"),
         Index("purchaseDate"),
-        Index("status")
+        Index("status"),
+        Index(value = ["invoiceNumber"], unique = true)
     ]
 )
 data class Purchase(

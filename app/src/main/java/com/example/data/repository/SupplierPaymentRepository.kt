@@ -92,14 +92,14 @@ class SupplierPaymentRepository(
             financialAccountDao.getAccountById(accId)
                 ?: throw IllegalArgumentException("Financial account not found: $accId")
 
-            // This app does not support supplier advances: validate against the authoritative
-            // ledger inside the same transaction so concurrent payments cannot overshoot it.
+            // Validate against the complete supplier ledger in this transaction.
+            // Supplier advances are not supported by the current app policy.
             val purchases = database.purchaseDao().getPurchasesBySupplierIdSync(supplierId)
             val payments = supplierPaymentDao.getPaymentsBySupplierIdSync(supplierId)
             val returns = database.purchaseReturnDao().getReturnsBySupplierIdSync(supplierId)
             val adjustments = database.adjustmentDao().getAdjustmentsByEntitySync("SUPPLIER", supplierId)
             val openingBalances = database.openingBalanceDao().getOpeningBalancesByEntitySync("SUPPLIER", supplierId)
-            val currentBalance = SupplierLedgerCalculator.calculateSupplierBalance(
+            val balance = SupplierLedgerCalculator.calculateSupplierBalance(
                 supplierId = supplierId,
                 purchases = purchases,
                 payments = payments,
@@ -107,11 +107,11 @@ class SupplierPaymentRepository(
                 adjustments = adjustments,
                 openingBalances = openingBalances
             ).balance
-            require(currentBalance > SupplierLedgerCalculator.EPSILON) {
+            require(balance > SupplierLedgerCalculator.EPSILON) {
                 "Supplier has no outstanding payable balance"
             }
-            require(amount <= currentBalance + SupplierLedgerCalculator.EPSILON) {
-                "Payment exceeds supplier outstanding balance"
+            require(amount <= balance + SupplierLedgerCalculator.EPSILON) {
+                "Payment exceeds supplier outstanding payable balance"
             }
 
             supplierPaymentDao.insertPayment(payment)
