@@ -424,6 +424,7 @@ private fun SupplierStatisticsContent(
     val totalPayables = summary?.balance?.coerceAtLeast(0.0) ?: authoritativeBalances.values.sumOf { it.balance.coerceAtLeast(0.0) }
     val periodPurchases = scopedPurchases.sumOf { it.totalAmount }
     val periodPayments = scopedPayments.sumOf { it.amount }
+    val periodReturns = scopedReturns.sumOf { it.amount }
     val periodCreditPurchases = scopedPurchases.sumOf { it.creditAmount }
     val periodCashPurchases = scopedPurchases.sumOf { it.paidAmount }
     // Payable changes only by the unpaid purchase portion, not the full invoice total.
@@ -466,7 +467,7 @@ private fun SupplierStatisticsContent(
                     Text(if (isArabic) "صافي تغير مستحقات الموردين خلال الفترة" else "Net Supplier Payable Change", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(if (isArabic) "(المشتريات الآجلة - المدفوعات - المرتجعات)" else "(Credit purchases - Payments - Returns)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .75f))
                 }
-                Text(String.format(Locale.US, "%,.2f %s", netPayableMovement, currency), style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold, fontSize = 18.sp), color = if (netPayableMovement > 0) StatusRed else StatusGreen)
+                Text(String.format(Locale.US, "%,.2f %s", netPayableMovement, currency), style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold, fontSize = 18.sp), color = if (netPayableMovement > 0.0) StatusRed else StatusGreen)
             }
         }
         Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, GeoOutlineVariant), modifier = Modifier.fillMaxWidth().testTag("supplier_statistics_chart_card")) {
