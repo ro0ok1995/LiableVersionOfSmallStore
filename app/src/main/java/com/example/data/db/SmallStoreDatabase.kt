@@ -38,7 +38,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         StockMovementEntity::class,
         SupplierCatalogItemEntity::class
     ],
-    version = 22,
+    version = 23,
     exportSchema = false
 )
 abstract class SmallStoreDatabase : RoomDatabase() {
@@ -122,6 +122,7 @@ abstract class SmallStoreDatabase : RoomDatabase() {
         }
 
         val MIGRATION_21_22 = com.example.data.db.MIGRATION_21_22
+        val MIGRATION_22_23 = com.example.data.db.MIGRATION_22_23
 
         @Volatile
         private var DEMO_INSTANCE: SmallStoreDatabase? = null
@@ -167,7 +168,8 @@ abstract class SmallStoreDatabase : RoomDatabase() {
                     MIGRATION_18_19,
                     MIGRATION_19_20,
                     MIGRATION_20_21,
-                    MIGRATION_21_22
+                    MIGRATION_21_22,
+                    MIGRATION_22_23
                 )
                 .build()
         }
