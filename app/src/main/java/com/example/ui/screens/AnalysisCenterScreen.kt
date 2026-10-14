@@ -425,14 +425,15 @@ private fun SupplierStatisticsContent(
     val periodPurchases = scopedPurchases.sumOf { it.totalAmount }
     val periodPayments = scopedPayments.sumOf { it.amount }
     val periodReturns = scopedReturns.sumOf { it.amount }
+    val periodPayableReductions = scopedReturns.sumOf { it.payableReductionAmount }
     val periodCreditPurchases = scopedPurchases.sumOf { it.creditAmount }
     val periodCashPurchases = scopedPurchases.sumOf { it.paidAmount }
     // Payable changes only by the unpaid purchase portion, not the full invoice total.
     // Cash purchases are already settled and must not inflate Accounts Payable.
-    val netPayableMovement = periodCreditPurchases - periodPayments - periodReturns
+    val netPayableMovement = periodCreditPurchases - periodPayments - periodPayableReductions
     val totalVolume = (periodCreditPurchases + periodCashPurchases + periodPayments + periodReturns).coerceAtLeast(0.0)
     fun percent(v: Double) = if (totalVolume > 0.0) ((v / totalVolume) * 100).toInt().coerceIn(0, 100) else 0
-    val chartItems = remember(periodCreditPurchases, periodCashPurchases, periodPayments, periodReturns, totalVolume, isArabic) {
+    val chartItems = remember(periodCreditPurchases, periodCashPurchases, periodPayments, periodReturns, periodPayableReductions, totalVolume, isArabic) {
         listOf(
             BreakdownChartItem(if (isArabic) "مشتريات آجلة" else "Credit Purchases", "Credit Purchases", periodCreditPurchases, percent(periodCreditPurchases), StatusRed),
             BreakdownChartItem(if (isArabic) "مشتريات نقدية" else "Cash Purchases", "Cash Purchases", periodCashPurchases, percent(periodCashPurchases), StatusBlue),

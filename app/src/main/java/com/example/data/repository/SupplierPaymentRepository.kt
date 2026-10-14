@@ -9,6 +9,7 @@ import com.example.data.db.SupplierPaymentDao
 import com.example.data.db.TransactionDao
 import com.example.data.db.toEntity
 import com.example.data.db.toTransactionItem
+import com.example.accounting.SupplierLedgerCalculator
 import kotlinx.coroutines.flow.Flow
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -90,6 +91,28 @@ class SupplierPaymentRepository(
         database.withTransaction {
             financialAccountDao.getAccountById(accId)
                 ?: throw IllegalArgumentException("Financial account not found: $accId")
+
+            // This app does not support supplier advances: validate against the authoritative
+            // ledger inside the same transaction so concurrent payments cannot overshoot it.
+            val purchases = database.purchaseDao().getPurchasesBySupplierIdSync(supplierId)
+            val payments = supplierPaymentDao.getPaymentsBySupplierIdSync(supplierId)
+            val returns = database.purchaseReturnDao().getReturnsBySupplierIdSync(supplierId)
+            val adjustments = database.adjustmentDao().getAdjustmentsByEntitySync("SUPPLIER", supplierId)
+            val openingBalances = database.openingBalanceDao().getOpeningBalancesByEntitySync("SUPPLIER", supplierId)
+            val currentBalance = SupplierLedgerCalculator.calculateSupplierBalance(
+                supplierId = supplierId,
+                purchases = purchases,
+                payments = payments,
+                returns = returns,
+                adjustments = adjustments,
+                openingBalances = openingBalances
+            ).balance
+            require(currentBalance > SupplierLedgerCalculator.EPSILON) {
+                "Supplier has no outstanding payable balance"
+            }
+            require(amount <= currentBalance + SupplierLedgerCalculator.EPSILON) {
+                "Payment exceeds supplier outstanding balance"
+            }
 
             supplierPaymentDao.insertPayment(payment)
 
