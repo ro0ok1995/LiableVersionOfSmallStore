@@ -63,7 +63,7 @@ fun SupplierOperationsScreen(
     onGetPurchaseLines: suspend (String) -> List<PurchaseLine>,
     onLinkItemToSupplier: (supplierId: String, productId: String, lastCost: Double) -> Unit,
     onAddNewCatalogItemForSupplier: (supplierId: String, name: String, unit: String, costPrice: Double, category: String, isRawMaterial: Boolean, imageUri: String?) -> Unit,
-    onUpdateProductCost: (ProductItem, Double) -> Unit,
+    onUpdateProductCost: (supplierId: String, productId: String, newCost: Double) -> Unit,
     onRecordPurchase: (
         supplierId: String,
         lines: List<PurchaseLineRequest>,
@@ -139,13 +139,10 @@ fun SupplierOperationsScreen(
             .associate { it.productId to it.lastUnitCost }
     }
 
-    val supplierItems = remember(products, supplierLinkedMap, itemSearchQuery) {
+    val supplierItems = remember(products, supplierLinkedMap, itemSearchQuery, selectedSupplier) {
+        if (selectedSupplier == null) return@remember emptyList<ProductItem>()
         val activeProducts = products.filter { !it.isArchived }
-        val baseList = if (supplierLinkedMap.isNotEmpty()) {
-            activeProducts.filter { it.id in supplierLinkedMap.keys }
-        } else {
-            activeProducts
-        }
+        val baseList = activeProducts.filter { it.id in supplierLinkedMap.keys }
         if (itemSearchQuery.isBlank()) {
             baseList
         } else {
@@ -378,8 +375,16 @@ fun SupplierOperationsScreen(
                             modifier = Modifier.size(48.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                         )
+                        val emptyMessage = when {
+                            selectedSupplier == null ->
+                                if (isArabic) "اختر مورداً لعرض أو إضافة أصناف الكتالوج" else "Select a supplier to view or add catalog items"
+                            itemSearchQuery.isNotBlank() ->
+                                if (isArabic) "لا توجد منتجات أو أصناف مطابقة لبحثك" else "No matching products or items found"
+                            else ->
+                                if (isArabic) "لا توجد أصناف مرتبطة بهذا المورد حتى الآن\nاضغط على زر الربط (+) لإضافة صنف" else "No items linked to this supplier yet\nTap the link button (+) to add items"
+                        }
                         Text(
-                            text = if (isArabic) "لا توجد منتجات أو أصناف مطابقة لبحثك" else "No matching products or items found",
+                            text = emptyMessage,
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center
@@ -445,9 +450,7 @@ fun SupplierOperationsScreen(
                 val supId = selectedSupplier?.id
                 if (supId != null) {
                     onLinkItemToSupplier(supId, item.id, confirmedCost)
-                    if (abs(item.costPrice - confirmedCost) > 0.001) {
-                        onUpdateProductCost(item, confirmedCost)
-                    }
+                    onUpdateProductCost(supId, item.id, confirmedCost)
                 }
                 val newCartItem = SupplierCartItem(
                     itemId = item.id,

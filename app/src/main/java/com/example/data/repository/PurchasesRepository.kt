@@ -13,6 +13,7 @@ import com.example.data.db.StockMovementDao
 import com.example.data.db.StockMovementEntity as PersistentStockMovement
 import com.example.data.db.SupplierDao
 import com.example.data.db.TransactionDao
+import com.example.data.db.SupplierCatalogItemEntity
 import com.example.data.db.toEntity
 import com.example.data.db.toTransactionItem
 import com.example.model.PurchaseLineRequest

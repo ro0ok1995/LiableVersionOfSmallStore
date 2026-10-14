@@ -25,6 +25,8 @@ import com.example.data.db.PurchaseLine
 import com.example.data.db.SupplierPayment
 import com.example.data.db.PurchaseReturn
 import com.example.data.db.PurchaseReturnLine
+import com.example.data.db.SupplierCatalogDao
+import com.example.data.db.SupplierCatalogItemEntity
 import com.example.data.db.ExpenseCategory
 import com.example.data.db.Expense
 import com.example.data.db.StockMovementEntity as PersistentStockMovement
@@ -128,6 +130,8 @@ class StoreRepository private constructor(
     val allExpenseCategories: Flow<List<ExpenseCategory>> = expenseRepository.allExpenseCategories
     val allExpenses: Flow<List<Expense>> = expenseRepository.allExpenses
     val allPersistentStockMovements: Flow<List<PersistentStockMovement>> = inventoryRepository.allPersistentStockMovements
+    private val supplierCatalogDao = database.supplierCatalogDao()
+    val allSupplierCatalogItems: Flow<List<SupplierCatalogItemEntity>> = supplierCatalogDao.getAllSupplierCatalogItems()
 
     val customerConflicts: Flow<List<CustomerConflictItem>> = customerConflictRepository.customerConflicts
     val unresolvedCustomerConflicts: Flow<List<CustomerConflictItem>> = customerConflictRepository.unresolvedCustomerConflicts
@@ -1001,6 +1005,85 @@ class StoreRepository private constructor(
 
     suspend fun getSupplierById(id: String): Supplier? = supplierRepository.getSupplierById(id)
     suspend fun getAllSuppliersSync(): List<Supplier> = supplierRepository.getAllSuppliersSync()
+
+    // --- Supplier Catalog Operations ---
+    fun getSupplierCatalog(supplierId: String): Flow<List<SupplierCatalogItemEntity>> =
+        supplierCatalogDao.getCatalogForSupplier(supplierId)
+
+    suspend fun getSupplierCatalogSync(supplierId: String): List<SupplierCatalogItemEntity> =
+        supplierCatalogDao.getCatalogForSupplierSync(supplierId)
+
+    suspend fun getSupplierCatalogItem(supplierId: String, productId: String): SupplierCatalogItemEntity? =
+        supplierCatalogDao.getSupplierCatalogItem(supplierId, productId)
+
+    suspend fun linkProductToSupplier(supplierId: String, productId: String, unitCost: Double) {
+        require(supplierId.isNotBlank()) { "Supplier ID cannot be blank" }
+        require(productId.isNotBlank()) { "Product ID cannot be blank" }
+        require(unitCost >= 0.0) { "Unit cost cannot be negative" }
+        supplierCatalogDao.upsertSupplierItem(
+            SupplierCatalogItemEntity(
+                supplierId = supplierId,
+                productId = productId,
+                lastUnitCost = unitCost,
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+    }
+
+    suspend fun updateSupplierCatalogCost(supplierId: String, productId: String, unitCost: Double) {
+        require(supplierId.isNotBlank()) { "Supplier ID cannot be blank" }
+        require(productId.isNotBlank()) { "Product ID cannot be blank" }
+        require(unitCost >= 0.0) { "Unit cost cannot be negative" }
+        supplierCatalogDao.upsertSupplierItem(
+            SupplierCatalogItemEntity(
+                supplierId = supplierId,
+                productId = productId,
+                lastUnitCost = unitCost,
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+    }
+
+    suspend fun unlinkProductFromSupplier(supplierId: String, productId: String) {
+        require(supplierId.isNotBlank()) { "Supplier ID cannot be blank" }
+        require(productId.isNotBlank()) { "Product ID cannot be blank" }
+        supplierCatalogDao.unlinkSupplierItem(supplierId, productId)
+    }
+
+    suspend fun addNewCatalogItemForSupplier(
+        supplierId: String,
+        name: String,
+        unit: String,
+        costPrice: Double,
+        category: String,
+        isRawMaterial: Boolean = false,
+        imageUri: String? = null
+    ): ProductItem = database.withTransaction {
+        require(supplierId.isNotBlank()) { "Supplier ID cannot be blank" }
+        require(name.isNotBlank()) { "Item name cannot be blank" }
+        require(costPrice >= 0.0) { "Cost price cannot be negative" }
+        val product = ProductItem(
+            id = UUID.randomUUID().toString(),
+            name = name,
+            price = costPrice,
+            costPrice = costPrice,
+            category = category.ifBlank { "عام" },
+            unit = unit.ifBlank { "قطعة" },
+            imageUri = imageUri,
+            isCatalogItem = true,
+            isRawMaterial = isRawMaterial
+        )
+        productDao.insertProduct(product.toEntity())
+        supplierCatalogDao.upsertSupplierItem(
+            SupplierCatalogItemEntity(
+                supplierId = supplierId,
+                productId = product.id,
+                lastUnitCost = costPrice,
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+        product
+    }
 
     suspend fun recordPurchase(
         supplierId: String,

@@ -38,7 +38,9 @@ data class ProductEntity(
     val unit: String,
     val imageUri: String? = null,
     val isArchived: Boolean = false,
-    val archivedDate: String? = null
+    val archivedDate: String? = null,
+    val isCatalogItem: Boolean = false,
+    val isRawMaterial: Boolean = false
 )
 
 @Entity(
@@ -238,7 +240,9 @@ fun ProductEntity.toModel(): ProductItem = ProductItem(
     costPrice = costPrice,
     imageUri = imageUri,
     isArchived = isArchived,
-    archivedDate = archivedDate
+    archivedDate = archivedDate,
+    isCatalogItem = isCatalogItem,
+    isRawMaterial = isRawMaterial
 )
 
 fun ProductItem.toEntity(): ProductEntity = ProductEntity(
@@ -250,7 +254,9 @@ fun ProductItem.toEntity(): ProductEntity = ProductEntity(
     costPrice = costPrice,
     imageUri = imageUri,
     isArchived = isArchived,
-    archivedDate = archivedDate
+    archivedDate = archivedDate,
+    isCatalogItem = isCatalogItem,
+    isRawMaterial = isRawMaterial
 )
 
 fun TransactionEntity.toModel(): TransactionItem {

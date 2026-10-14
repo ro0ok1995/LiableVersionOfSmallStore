@@ -271,6 +271,12 @@ object FinancialReportCalculator {
             TransactionType.EXPENSE -> {
                 expenses = tx.amount
             }
+            TransactionType.PURCHASE,
+            TransactionType.PURCHASE_RETURN,
+            TransactionType.SUPPLIER_PAYMENT -> {
+                // Supplier operations affect supplier payable and financial account ledgers,
+                // and MUST NOT contaminate customer receivables (receivableChange remains 0.0).
+            }
             else -> {
                 if (tx.isCredit) {
                     receivableChange = tx.amount

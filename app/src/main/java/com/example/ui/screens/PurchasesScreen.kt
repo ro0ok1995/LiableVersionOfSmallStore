@@ -87,27 +87,17 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.accounting.SupplierBalanceSummary
-import com.example.accounting.SupplierLedgerEntry
-import com.example.data.db.Purchase
-import com.example.data.db.PurchaseReturn
-import com.example.data.db.Supplier
-import com.example.data.db.SupplierPayment
 import com.example.model.AppCurrency
 import com.example.model.CartItem
 import com.example.model.CustomerAccount
 import com.example.model.LanguageMode
 import com.example.model.ProductItem
-import com.example.model.PurchaseLineRequest
-import com.example.model.PurchaseResult
 import com.example.model.StoreStrings
 import com.example.data.db.Expense
 import com.example.data.db.ExpenseCategory
 import com.example.data.db.FinancialAccount
 import com.example.data.db.PaymentMethod
 import com.example.ui.components.ExpensesSection
-import com.example.ui.components.SupplierPurchasesSection
-import com.example.ui.components.SupplierInitialAction
 import com.example.ui.theme.GeoOutline
 import com.example.ui.theme.GeoOutlineVariant
 import com.example.ui.theme.GeoPrimary
@@ -128,9 +118,6 @@ fun PurchasesScreen(
     searchQuery: String = "",
     isCartExpanded: Boolean = false,
     languageMode: LanguageMode = LanguageMode.ARABIC,
-    suppliers: List<Supplier> = emptyList(),
-    supplierPurchases: List<Purchase> = emptyList(),
-    supplierPayments: List<SupplierPayment> = emptyList(),
     expenses: List<Expense> = emptyList(),
     expenseCategories: List<ExpenseCategory> = emptyList(),
     financialAccounts: List<FinancialAccount> = emptyList(),
@@ -145,18 +132,9 @@ fun PurchasesScreen(
     onClearCustomer: () -> Unit = {},
     onCompleteTransaction: () -> Unit = {},
     onCompleteTransactionWithItems: ((List<CartItem>) -> Unit)? = null,
-    onAddSupplier: (name: String, phone: String, address: String?, notes: String?, onComplete: (Result<Supplier>) -> Unit) -> Unit = { _, _, _, _, _ -> },
-    onRecordPurchase: (supplierId: String, lines: List<PurchaseLineRequest>, paidAmount: Double, financialAccountId: String?, notes: String?, date: String, onComplete: (Result<PurchaseResult>) -> Unit) -> Unit = { _, _, _, _, _, _, _ -> },
-    onRecordSupplierPayment: (supplierId: String, amount: Double, date: String, financialAccountId: String?, notes: String?, onComplete: (Result<SupplierPayment>) -> Unit) -> Unit = { _, _, _, _, _, _ -> },
-    onRecordPurchaseReturn: ((purchaseId: String, returnLines: List<com.example.model.PurchaseReturnLineRequest>, reason: String, date: String, settlementMode: String, financialAccountId: String?, onComplete: (Result<PurchaseReturn>) -> Unit) -> Unit)? = null,
     onRecordExpense: (categoryId: String, amount: Double, financialAccountId: String, paymentMethodId: String?, date: String?, description: String, onComplete: (Result<Expense>) -> Unit) -> Unit = { _, _, _, _, _, _, _ -> },
     onAddExpenseCategory: (name: String, description: String?, onComplete: (Result<ExpenseCategory>) -> Unit) -> Unit = { _, _, _ -> },
-    onGetSupplierBalance: (suspend (supplierId: String) -> SupplierBalanceSummary)? = null,
-    onGetSupplierStatement: (suspend (supplierId: String) -> List<SupplierLedgerEntry>)? = null,
-    onGetPurchaseLines: suspend (purchaseId: String) -> List<com.example.data.db.PurchaseLine> = { emptyList() },
     initialTab: Int = 0,
-    initialSupplierId: String? = null,
-    initialSupplierAction: SupplierInitialAction = SupplierInitialAction.NONE,
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
@@ -206,11 +184,7 @@ fun PurchasesScreen(
                         }
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = when {
-                                activeSectionTab == 1 -> if (isArabic) "عمليات المورد" else "Supplier Operations"
-                                isArabic -> StoreStrings.PURCHASES_AR
-                                else -> StoreStrings.PURCHASES_EN
-                            },
+                            text = if (isArabic) StoreStrings.PURCHASES_AR else StoreStrings.PURCHASES_EN,
                             style = MaterialTheme.typography.titleLarge.copy(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 20.sp
@@ -220,26 +194,24 @@ fun PurchasesScreen(
                         )
                     }
 
-                    if (activeSectionTab != 1) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            FilterChip(
-                                selected = activeSectionTab == 0,
-                                onClick = { activeSectionTab = 0 },
-                                label = { Text(if (isArabic) "نقطة البيع (السلة)" else "POS Cart") },
-                                modifier = Modifier.testTag("tab_purchases_pos")
-                            )
-                            FilterChip(
-                                selected = activeSectionTab == 2,
-                                onClick = { activeSectionTab = 2 },
-                                label = { Text(if (isArabic) "المصروفات" else "Expenses") },
-                                modifier = Modifier.testTag("tab_purchases_expenses")
-                            )
-                        }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = activeSectionTab == 0,
+                            onClick = { activeSectionTab = 0 },
+                            label = { Text(if (isArabic) "نقطة البيع (السلة)" else "POS Cart") },
+                            modifier = Modifier.testTag("tab_purchases_pos")
+                        )
+                        FilterChip(
+                            selected = activeSectionTab == 1,
+                            onClick = { activeSectionTab = 1 },
+                            label = { Text(if (isArabic) "المصروفات" else "Expenses") },
+                            modifier = Modifier.testTag("tab_purchases_expenses")
+                        )
                     }
                 }
             }
@@ -474,27 +446,6 @@ fun PurchasesScreen(
         }
     ) { innerPadding ->
         if (activeSectionTab == 1) {
-            SupplierPurchasesSection(
-                suppliers = suppliers,
-                purchases = supplierPurchases,
-                supplierPayments = supplierPayments,
-                products = products,
-                languageMode = languageMode,
-                onAddSupplier = onAddSupplier,
-                onRecordPurchase = onRecordPurchase,
-                onRecordSupplierPayment = onRecordSupplierPayment,
-                onGetSupplierBalance = onGetSupplierBalance ?: { SupplierBalanceSummary(it) },
-                onGetSupplierStatement = onGetSupplierStatement ?: { emptyList() },
-                onGetPurchaseLines = onGetPurchaseLines,
-                onRecordPurchaseReturn = onRecordPurchaseReturn,
-                financialAccounts = financialAccounts,
-                initialSupplierId = initialSupplierId,
-                initialAction = initialSupplierAction,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-            )
-        } else if (activeSectionTab == 2) {
             ExpensesSection(
                 expenses = expenses,
                 expenseCategories = expenseCategories,
@@ -576,11 +527,14 @@ fun PurchasesScreen(
             Spacer(modifier = Modifier.height(12.dp))
 
             // 3. PRODUCT GRID
+            val retailProducts = remember(products) {
+                products.filter { !it.isCatalogItem && !it.isRawMaterial }
+            }
             val filteredProducts = if (searchQuery.isBlank()) {
-                products
+                retailProducts
             } else {
                 val q = searchQuery.trim().lowercase()
-                products.filter { it.name.lowercase().contains(q) || it.category.lowercase().contains(q) }
+                retailProducts.filter { it.name.lowercase().contains(q) || it.category.lowercase().contains(q) }
             }
 
             if (filteredProducts.isEmpty()) {
@@ -626,7 +580,11 @@ fun PurchasesScreen(
                             product = product,
                             quantityInCart = qtyInCart,
                             currency = currency,
-                            onCardClick = { onAddToCart(product) }
+                            onCardClick = {
+                                if (!product.isCatalogItem && !product.isRawMaterial) {
+                                    onAddToCart(product)
+                                }
+                            }
                         )
                     }
                 }

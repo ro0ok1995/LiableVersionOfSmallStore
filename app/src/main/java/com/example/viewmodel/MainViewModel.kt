@@ -17,6 +17,7 @@ import com.example.data.db.Purchase
 import com.example.data.db.PurchaseLine
 import com.example.data.db.SupplierPayment
 import com.example.data.db.PurchaseReturn
+import com.example.data.db.SupplierCatalogItemEntity
 import com.example.model.PurchaseReturnLineRequest
 import com.example.data.db.ExpenseCategory
 import com.example.data.db.Expense
@@ -102,6 +103,7 @@ data class MainUiState(
     val purchases: List<Purchase> = emptyList(),
     val supplierPayments: List<SupplierPayment> = emptyList(),
     val purchaseReturns: List<PurchaseReturn> = emptyList(),
+    val supplierCatalogItems: List<SupplierCatalogItemEntity> = emptyList(),
     val expenseCategories: List<ExpenseCategory> = emptyList(),
     val expenses: List<Expense> = emptyList(),
     val financialAccounts: List<FinancialAccount> = emptyList(),
@@ -323,6 +325,11 @@ class MainViewModel @JvmOverloads constructor(
         }
         viewModelScope.launch {
             supplierPurchaseViewModel.purchaseReturns.collect { list -> _uiState.update { it.copy(purchaseReturns = list) } }
+        }
+        viewModelScope.launch {
+            repository.allSupplierCatalogItems.collect { list ->
+                _uiState.update { it.copy(supplierCatalogItems = list) }
+            }
         }
 
         viewModelScope.launch {
@@ -791,6 +798,90 @@ class MainViewModel @JvmOverloads constructor(
         return supplierPurchaseViewModel.getPaymentsForSupplier(supplierId)
     }
 
+    // SUPPLIER CATALOG OPERATIONS
+    fun getSupplierCatalog(supplierId: String) = repository.getSupplierCatalog(supplierId)
+
+    suspend fun getSupplierCatalogSync(supplierId: String): List<SupplierCatalogItemEntity> =
+        repository.getSupplierCatalogSync(supplierId)
+
+    suspend fun getSupplierCatalogItem(supplierId: String, productId: String): SupplierCatalogItemEntity? =
+        repository.getSupplierCatalogItem(supplierId, productId)
+
+    fun linkProductToSupplier(
+        supplierId: String,
+        productId: String,
+        unitCost: Double,
+        onComplete: (Result<Unit>) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            runCatching {
+                repository.linkProductToSupplier(supplierId, productId, unitCost)
+            }.fold(
+                onSuccess = { onComplete(Result.success(Unit)) },
+                onFailure = { onComplete(Result.failure(it)) }
+            )
+        }
+    }
+
+    fun updateSupplierCatalogCost(
+        supplierId: String,
+        productId: String,
+        unitCost: Double,
+        onComplete: (Result<Unit>) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            runCatching {
+                repository.updateSupplierCatalogCost(supplierId, productId, unitCost)
+            }.fold(
+                onSuccess = { onComplete(Result.success(Unit)) },
+                onFailure = { onComplete(Result.failure(it)) }
+            )
+        }
+    }
+
+    fun unlinkProductFromSupplier(
+        supplierId: String,
+        productId: String,
+        onComplete: (Result<Unit>) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            runCatching {
+                repository.unlinkProductFromSupplier(supplierId, productId)
+            }.fold(
+                onSuccess = { onComplete(Result.success(Unit)) },
+                onFailure = { onComplete(Result.failure(it)) }
+            )
+        }
+    }
+
+    fun addNewCatalogItemForSupplier(
+        supplierId: String,
+        name: String,
+        unit: String,
+        costPrice: Double,
+        category: String,
+        isRawMaterial: Boolean = false,
+        imageUri: String? = null,
+        onComplete: (Result<ProductItem>) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            runCatching {
+                repository.addNewCatalogItemForSupplier(
+                    supplierId = supplierId,
+                    name = name,
+                    unit = unit,
+                    costPrice = costPrice,
+                    category = category,
+                    isRawMaterial = isRawMaterial,
+                    imageUri = imageUri
+                )
+            }.fold(
+                onSuccess = { onComplete(Result.success(it)) },
+                onFailure = { onComplete(Result.failure(it)) }
+            )
+        }
+    }
+
     // EXPENSES (Phase 10 Core)
     fun addExpenseCategory(
         name: String,
@@ -937,9 +1028,10 @@ class MainViewModel @JvmOverloads constructor(
         costPrice: Double = 0.0,
         category: String = "عام",
         unit: String = "حبة",
-        imageUri: String? = null
+        imageUri: String? = null,
+        isCatalogItem: Boolean = false
     ) {
-        inventoryViewModel.addProduct(name, price, costPrice, category, unit, imageUri)
+        inventoryViewModel.addProduct(name, price, costPrice, category, unit, imageUri, isCatalogItem)
     }
 
     fun updateProduct(product: ProductItem) {

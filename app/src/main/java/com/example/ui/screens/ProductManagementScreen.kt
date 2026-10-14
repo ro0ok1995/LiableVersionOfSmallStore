@@ -111,7 +111,7 @@ fun ProductManagementScreen(
     archivedProductIds: Set<String>,
     languageMode: LanguageMode,
     onBackClick: () -> Unit,
-    onAddProduct: (name: String, price: Double, costPrice: Double, category: String, unit: String, imageUri: String?) -> Unit,
+    onAddProduct: (name: String, price: Double, costPrice: Double, category: String, unit: String, imageUri: String?, isCatalogItem: Boolean) -> Unit,
     onUpdateProduct: (ProductItem) -> Unit,
     onArchiveProduct: (String) -> Unit,
     onUnarchiveProduct: (String) -> Unit,
@@ -205,7 +205,11 @@ fun ProductManagementScreen(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (isArabic) "إضافة منتج" else "Add Product",
+                        text = if (selectedCatalogTab == 1) {
+                            if (isArabic) "إضافة صنف/مادة" else "Add Item/Material"
+                        } else {
+                            if (isArabic) "إضافة منتج" else "Add Product"
+                        },
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -488,7 +492,7 @@ fun ProductManagementScreen(
             isArabic = isArabic,
             onDismiss = { showAddDialog = false },
             onSave = { name, price, costPrice, category, unit, imageUri ->
-                onAddProduct(name, price, costPrice, category, unit, imageUri)
+                onAddProduct(name, price, costPrice, category, unit, imageUri, selectedCatalogTab == 1)
                 showAddDialog = false
             }
         )

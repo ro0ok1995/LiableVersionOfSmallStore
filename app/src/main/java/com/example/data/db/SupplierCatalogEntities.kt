@@ -27,8 +27,17 @@ interface SupplierCatalogDao {
     @Query("SELECT * FROM supplier_catalog_items WHERE supplierId = :supplierId")
     fun getCatalogForSupplier(supplierId: String): Flow<List<SupplierCatalogItemEntity>>
 
+    @Query("SELECT * FROM supplier_catalog_items WHERE supplierId = :supplierId")
+    suspend fun getCatalogForSupplierSync(supplierId: String): List<SupplierCatalogItemEntity>
+
     @Query("SELECT * FROM supplier_catalog_items")
     fun getAllSupplierCatalogItems(): Flow<List<SupplierCatalogItemEntity>>
+
+    @Query("SELECT * FROM supplier_catalog_items")
+    suspend fun getAllSupplierCatalogItemsSync(): List<SupplierCatalogItemEntity>
+
+    @Query("SELECT * FROM supplier_catalog_items WHERE supplierId = :supplierId AND productId = :productId")
+    suspend fun getSupplierCatalogItem(supplierId: String, productId: String): SupplierCatalogItemEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertSupplierItem(item: SupplierCatalogItemEntity)

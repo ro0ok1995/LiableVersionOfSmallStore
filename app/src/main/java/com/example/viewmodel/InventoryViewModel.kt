@@ -132,7 +132,8 @@ class InventoryViewModel @JvmOverloads constructor(
         costPrice: Double = 0.0,
         category: String = "عام",
         unit: String = "حبة",
-        imageUri: String? = null
+        imageUri: String? = null,
+        isCatalogItem: Boolean = false
     ) {
         viewModelScope.launch {
             val newProduct = ProductItem(
@@ -142,7 +143,8 @@ class InventoryViewModel @JvmOverloads constructor(
                 costPrice = costPrice,
                 category = category,
                 unit = unit,
-                imageUri = imageUri
+                imageUri = imageUri,
+                isCatalogItem = isCatalogItem
             )
             repository.addProduct(newProduct)
         }

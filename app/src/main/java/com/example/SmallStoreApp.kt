@@ -91,7 +91,6 @@ fun SmallStoreApp(
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val coroutineScope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
-    var purchasesInitialTab by remember { mutableIntStateOf(0) }
     var supplierInitialAction by remember { mutableStateOf(SupplierInitialAction.NONE) }
     var accountsInitialTab by remember { mutableIntStateOf(0) }
 
@@ -115,7 +114,6 @@ fun SmallStoreApp(
                 return@BackHandler
             }
             if (uiState.currentDestination == NavDestination.PURCHASES || uiState.currentDestination == NavDestination.SUPPLIER_OPERATIONS) {
-                purchasesInitialTab = 0
                 supplierInitialAction = SupplierInitialAction.NONE
             }
             if (uiState.currentDestination == NavDestination.ACCOUNTS) {
@@ -257,7 +255,6 @@ fun SmallStoreApp(
                                         accountsInitialTab = 0
                                     }
                                     if (dest == NavDestination.PURCHASES) {
-                                        purchasesInitialTab = 0
                                         supplierInitialAction = SupplierInitialAction.NONE
                                     }
                                     mainViewModel.navigateToRoot(dest)
@@ -354,8 +351,7 @@ fun SmallStoreApp(
                                         mainViewModel.navigateTo(NavDestination.CUSTOMER_DETAILS)
                                     },
                                     onNavigateToSuppliers = {
-                                        purchasesInitialTab = 1
-                                        mainViewModel.navigateTo(NavDestination.PURCHASES)
+                                        mainViewModel.navigateTo(NavDestination.SUPPLIER_OPERATIONS)
                                     },
                                     onClearSelectedCustomer = { mainViewModel.clearHomeSelectedCustomer() },
                                     onSelectPeriod = { mainViewModel.setHomePeriod(it) },
@@ -462,8 +458,7 @@ fun SmallStoreApp(
                                     },
                                     onOpenAddSupplierDialog = {
                                         focusManager.clearFocus()
-                                        purchasesInitialTab = 1
-                                        mainViewModel.navigateTo(NavDestination.PURCHASES)
+                                        mainViewModel.navigateTo(NavDestination.SUPPLIER_OPERATIONS)
                                     },
                                     onGetSupplierBalance = { supplierId -> mainViewModel.getSupplierBalance(supplierId) },
                                     initialSelectedAccountTab = accountsInitialTab
@@ -482,21 +477,18 @@ fun SmallStoreApp(
                                     onEdit = { supplier -> mainViewModel.updateSupplier(supplier) },
                                     onPurchaseAction = { supplier ->
                                         mainViewModel.selectSupplierDetails(supplier)
-                                        purchasesInitialTab = 1
                                         supplierInitialAction = SupplierInitialAction.PURCHASE
-                                        mainViewModel.navigateTo(NavDestination.PURCHASES)
+                                        mainViewModel.navigateTo(NavDestination.SUPPLIER_OPERATIONS)
                                     },
                                     onPaymentAction = { supplier ->
                                         mainViewModel.selectSupplierDetails(supplier)
-                                        purchasesInitialTab = 1
                                         supplierInitialAction = SupplierInitialAction.PAYMENT
-                                        mainViewModel.navigateTo(NavDestination.PURCHASES)
+                                        mainViewModel.navigateTo(NavDestination.SUPPLIER_OPERATIONS)
                                     },
                                     onReturnAction = { supplier ->
                                         mainViewModel.selectSupplierDetails(supplier)
-                                        purchasesInitialTab = 1
                                         supplierInitialAction = SupplierInitialAction.RETURN
-                                        mainViewModel.navigateTo(NavDestination.PURCHASES)
+                                        mainViewModel.navigateTo(NavDestination.SUPPLIER_OPERATIONS)
                                     },
                                     onStatementAction = { supplier ->
                                         mainViewModel.selectSupplierDetails(supplier)
@@ -596,19 +588,12 @@ fun SmallStoreApp(
                                     searchQuery = uiState.purchasesSearchQuery,
                                     isCartExpanded = uiState.isCartExpanded,
                                     languageMode = uiState.languageMode,
-                                    suppliers = uiState.suppliers,
-                                    supplierPurchases = uiState.purchases,
-                                    supplierPayments = uiState.supplierPayments,
                                     expenses = uiState.expenses,
                                     expenseCategories = uiState.expenseCategories,
                                     financialAccounts = uiState.financialAccounts,
                                     paymentMethods = uiState.paymentMethods,
-                                    initialTab = purchasesInitialTab,
-                                    initialSupplierId = uiState.selectedSupplierDetails?.id,
-                                    initialSupplierAction = supplierInitialAction,
                                     onBackClick = {
                                         focusManager.clearFocus()
-                                        purchasesInitialTab = 0
                                         supplierInitialAction = SupplierInitialAction.NONE
                                         mainViewModel.navigateBack()
                                     },
@@ -621,30 +606,11 @@ fun SmallStoreApp(
                                     onClearCustomer = { mainViewModel.setPurchasesCustomer(null) },
                                     onCompleteTransaction = { mainViewModel.openPurchasesSettlement() },
                                     onCompleteTransactionWithItems = { items -> mainViewModel.openPurchasesSettlement(items) },
-                                    onAddSupplier = { name, phone, address, notes, onComplete ->
-                                        mainViewModel.addSupplier(name, phone, address, notes, onComplete)
-                                    },
-                                    onRecordPurchase = { supplierId, lines, paid, acc, notes, date, onComplete ->
-                                        mainViewModel.recordPurchase(supplierId, lines, paid, acc, notes, date, onComplete)
-                                    },
-                                    onRecordSupplierPayment = { supplierId, amount, date, acc, notes, onComplete ->
-                                        mainViewModel.recordSupplierPayment(supplierId, amount, date, acc, notes, onComplete)
-                                    },
-                                    onGetPurchaseLines = { purchaseId -> mainViewModel.getPurchaseLines(purchaseId) },
-                                    onRecordPurchaseReturn = { purchaseId, returnLines, reason, date, settlementMode, accountId, onComplete ->
-                                        mainViewModel.recordPurchaseReturn(purchaseId, returnLines, reason, date, settlementMode, accountId, onComplete)
-                                    },
                                     onRecordExpense = { catId, amt, accId, pmId, dt, desc, onComp ->
                                         mainViewModel.recordExpense(catId, amt, accId, pmId, dt, desc, onComp)
                                     },
                                     onAddExpenseCategory = { name, desc, onComp ->
                                         mainViewModel.addExpenseCategory(name, desc, onComp)
-                                    },
-                                    onGetSupplierBalance = { supplierId ->
-                                        mainViewModel.getSupplierBalance(supplierId)
-                                    },
-                                    onGetSupplierStatement = { supplierId ->
-                                        mainViewModel.getSupplierStatement(supplierId)
                                     }
                                 )
                             }
@@ -839,7 +805,7 @@ fun SmallStoreApp(
                                 SupplierOperationsScreen(
                                     suppliers = uiState.suppliers,
                                     products = uiState.products,
-                                    supplierCatalogItems = emptyList(),
+                                    supplierCatalogItems = uiState.supplierCatalogItems,
                                     supplierPurchases = uiState.purchases,
                                     financialAccounts = uiState.financialAccounts,
                                     languageMode = uiState.languageMode,
@@ -847,9 +813,23 @@ fun SmallStoreApp(
                                     initialAction = supplierInitialAction,
                                     onGetSupplierBalance = { supplierId -> mainViewModel.getSupplierBalance(supplierId) },
                                     onGetPurchaseLines = { purchaseId -> mainViewModel.getPurchaseLines(purchaseId) },
-                                    onLinkItemToSupplier = { _, _, _ -> },
-                                    onAddNewCatalogItemForSupplier = { _, _, _, _, _, _, _ -> },
-                                    onUpdateProductCost = { _, _ -> },
+                                    onLinkItemToSupplier = { supplierId, productId, lastCost ->
+                                        mainViewModel.linkProductToSupplier(supplierId, productId, lastCost)
+                                    },
+                                    onAddNewCatalogItemForSupplier = { supplierId, name, unit, costPrice, category, isRawMaterial, imageUri ->
+                                        mainViewModel.addNewCatalogItemForSupplier(
+                                            supplierId = supplierId,
+                                            name = name,
+                                            unit = unit,
+                                            costPrice = costPrice,
+                                            category = category,
+                                            isRawMaterial = isRawMaterial,
+                                            imageUri = imageUri
+                                        )
+                                    },
+                                    onUpdateProductCost = { supplierId, productId, newCost ->
+                                        mainViewModel.updateSupplierCatalogCost(supplierId, productId, newCost)
+                                    },
                                     onRecordPurchase = { supplierId, lines, paid, acc, notes, date, onComplete ->
                                         mainViewModel.recordPurchase(supplierId, lines, paid, acc, notes, date) { res ->
                                             onComplete(res.map { })
@@ -880,8 +860,8 @@ fun SmallStoreApp(
                                         focusManager.clearFocus()
                                         mainViewModel.navigateBack()
                                     },
-                                    onAddProduct = { name, price, costPrice, category, unit, imageUri ->
-                                        mainViewModel.addProduct(name, price, costPrice, category, unit, imageUri)
+                                    onAddProduct = { name, price, costPrice, category, unit, imageUri, isCatalogItem ->
+                                        mainViewModel.addProduct(name, price, costPrice, category, unit, imageUri, isCatalogItem)
                                     },
                                     onUpdateProduct = { updated ->
                                         mainViewModel.updateProduct(updated)
