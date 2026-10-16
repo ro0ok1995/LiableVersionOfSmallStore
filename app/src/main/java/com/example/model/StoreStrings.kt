@@ -469,7 +469,7 @@ object StoreStrings {
     const val EXPORT_STATEMENT_AR = "تصدير"
     const val SHARE_STATEMENT_EN = "Share"
     const val SHARE_STATEMENT_AR = "مشاركة"
-    const val CURRENCY_SYMBOL = AppCurrency.SYMBOL
+    val CURRENCY_SYMBOL: String get() = AppCurrency.SYMBOL
 
     const val EXPORT_CSV_SUCCESS_EN = "Statement exported as CSV successfully"
     const val EXPORT_CSV_SUCCESS_AR = "تم تصدير كشف الحساب بصيغة CSV بنجاح"

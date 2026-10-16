@@ -396,7 +396,7 @@ class SupplierPurchasesPhase9Test {
         // Return 140 (7 whole units × 20)
         repository.recordPurchaseReturn(
             purchaseId = res.purchase.id,
-            amount = 150.0,
+            amount = 140.0,
             reason = "مرتجع جزئي أول"
         )
 
