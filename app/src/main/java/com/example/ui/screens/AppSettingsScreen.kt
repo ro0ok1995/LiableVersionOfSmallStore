@@ -34,6 +34,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import com.example.model.AppCurrency
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -228,6 +233,46 @@ fun AppSettingsScreen(
                                 .weight(1f)
                                 .testTag("palette_gold_chip")
                         )
+                    }
+                }
+            }
+
+            // 3.5 Currency Selection
+            var currentSymbol by remember { mutableStateOf(AppCurrency.SYMBOL) }
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, GeoOutlineVariant, RoundedCornerShape(14.dp))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Palette, contentDescription = null, tint = GeoPrimary)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (isArabic) "عملة المتجر" else "Store Currency",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val currencies = listOf("₪", "$", "د.أ", "ر.س", "ج.م")
+                        currencies.forEach { sym ->
+                            FilterChip(
+                                selected = currentSymbol == sym,
+                                onClick = {
+                                    currentSymbol = sym
+                                    AppCurrency.setCurrency(sym)
+                                },
+                                label = { Text(sym) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
             }

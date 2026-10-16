@@ -92,27 +92,8 @@ class SupplierPaymentRepository(
             financialAccountDao.getAccountById(accId)
                 ?: throw IllegalArgumentException("Financial account not found: $accId")
 
-            // Validate against the complete supplier ledger in this transaction.
-            // Supplier advances are not supported by the current app policy.
-            val purchases = database.purchaseDao().getPurchasesBySupplierIdSync(supplierId)
-            val payments = supplierPaymentDao.getPaymentsBySupplierIdSync(supplierId)
-            val returns = database.purchaseReturnDao().getReturnsBySupplierIdSync(supplierId)
-            val adjustments = database.adjustmentDao().getAdjustmentsByEntitySync("SUPPLIER", supplierId)
-            val openingBalances = database.openingBalanceDao().getOpeningBalancesByEntitySync("SUPPLIER", supplierId)
-            val balance = SupplierLedgerCalculator.calculateSupplierBalance(
-                supplierId = supplierId,
-                purchases = purchases,
-                payments = payments,
-                returns = returns,
-                adjustments = adjustments,
-                openingBalances = openingBalances
-            ).balance
-            require(balance > SupplierLedgerCalculator.EPSILON) {
-                "Supplier has no outstanding payable balance"
-            }
-            require(amount <= balance + SupplierLedgerCalculator.EPSILON) {
-                "Payment exceeds supplier outstanding payable balance"
-            }
+            // Supplier advances and prepayments are fully supported.
+            // Any payment exceeding current payable establishes or increases a supplier advance credit.
 
             supplierPaymentDao.insertPayment(payment)
 

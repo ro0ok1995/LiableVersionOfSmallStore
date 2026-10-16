@@ -284,6 +284,13 @@ fun HomeScreen(
     }
     val totalPeriodSales = periodSalesTxs.sumOf { it.amount }
     val periodSalesCount = periodSalesTxs.size
+    val periodSaleReturns = remember(periodTransactions) {
+        periodTransactions.filter { 
+            it.typedOperationStatus != OperationStatus.REVERSED && 
+            it.typedTransactionType == TransactionType.SALE_RETURN 
+        }.sumOf { it.amount }
+    }
+    val totalPeriodNetSales = (totalPeriodSales - periodSaleReturns).coerceAtLeast(0.0)
 
     val totalPeriodCollections = remember(periodTransactions) {
         periodTransactions.filter { 
@@ -683,11 +690,13 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        // KPI 1: Sales
+                        // KPI 1: Sales (Net sales subtracting returns for accounting parity)
                         KpiCard(
-                            title = if (isArabic) "المبيعات" else "Sales",
-                            subtitle = if (periodSalesCount > 0) "$periodSalesCount ${if (isArabic) "عملية" else "txs"}" else null,
-                            amount = totalPeriodSales,
+                            title = if (isArabic) "صافي المبيعات" else "Net Sales",
+                            subtitle = if (periodSaleReturns > 0.001) {
+                                if (isArabic) "بعد مرتجعات: ${String.format(Locale.US, "%,.2f %s", periodSaleReturns, currency)}" else "After returns: ${String.format(Locale.US, "%,.2f %s", periodSaleReturns, currency)}"
+                            } else if (periodSalesCount > 0) "$periodSalesCount ${if (isArabic) "عملية" else "txs"}" else null,
+                            amount = totalPeriodNetSales,
                             currency = currency,
                             valueColor = MaterialTheme.colorScheme.primary,
                             containerColor = MaterialTheme.colorScheme.surface,

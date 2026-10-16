@@ -125,7 +125,13 @@ abstract class SmallStoreDatabase : RoomDatabase() {
         val MIGRATION_22_23 = com.example.data.db.MIGRATION_22_23
         val MIGRATION_23_24 = object : Migration(23, 24) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // Existing duplicate invoice numbers must be reconciled explicitly.
+                // Safely reconcile and deduplicate existing duplicate or empty invoice numbers before creating unique index
+                db.execSQL("""
+                    UPDATE purchases 
+                    SET invoiceNumber = 'PUR-FIX-' || id 
+                    WHERE invoiceNumber IS NULL OR TRIM(invoiceNumber) = '' 
+                       OR id NOT IN (SELECT MIN(id) FROM purchases GROUP BY invoiceNumber)
+                """)
                 db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_purchases_invoiceNumber ON purchases (invoiceNumber)")
             }
         }

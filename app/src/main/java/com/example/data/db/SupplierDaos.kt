@@ -63,6 +63,9 @@ interface PurchaseDao {
     @Query("SELECT COUNT(*) FROM purchases")
     suspend fun getPurchaseCount(): Int
 
+    @Query("SELECT invoiceNumber FROM purchases WHERE invoiceNumber LIKE 'PUR-%' ORDER BY invoiceNumber DESC LIMIT 1")
+    suspend fun getLastPurchaseInvoiceNumber(): String?
+
     @Query("DELETE FROM purchases")
     suspend fun deleteAllPurchases()
 }

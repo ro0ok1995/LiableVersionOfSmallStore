@@ -87,7 +87,6 @@ class PurchaseReturnRepository(
         }
 
         val remaining = getRemainingReturnableQuantities(purchaseId)
-        val currentMovements = stockMovementDao.getAllMovementsSync()
         val constructedLines = returnLines.map { request ->
             require(request.quantity > 0) { "Return quantity must be greater than zero" }
             val original = lineMap[request.purchaseLineId]
@@ -99,14 +98,9 @@ class PurchaseReturnRepository(
             if (!original.productId.isNullOrBlank()) {
                 val product = database.productDao().getProductById(original.productId)
                     ?: throw IllegalArgumentException("Product not found: ${original.productId}")
-                val stock = com.example.accounting.CentralAccountingEngine.calculateProductStockFromMovements(
-                    productId = original.productId,
-                    movements = currentMovements,
-                    fallbackUnitCost = product.costPrice,
-                    productName = product.name
-                )
-                require(request.quantity <= stock.quantityOnHand) {
-                    "Cannot return ${request.quantity} of '${original.productNameSnapshot}' to supplier; current stock is only ${stock.quantityOnHand}"
+                val availableStock = stockMovementDao.getAvailableStockForProduct(original.productId)
+                require(request.quantity <= availableStock) {
+                    "Cannot return ${request.quantity} of '${original.productNameSnapshot}' to supplier; current stock is only $availableStock"
                 }
             }
             PurchaseReturnLine(

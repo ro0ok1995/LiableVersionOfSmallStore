@@ -73,10 +73,8 @@ class CustomerPaymentRepository(
     }
 
     private fun requireWithinOutstanding(amount: Double, balance: Double, customerId: String) {
-        require(balance.isFinite() && balance >= -0.005) { "Customer balance is invalid; resolve the ledger before accepting payment" }
-        require(amount <= balance + 0.005) {
-            "Payment ($amount) exceeds customer outstanding balance (${balance.coerceAtLeast(0.0)}) for $customerId"
-        }
+        // Customer advances and credit balances are supported: amount can exceed balance to create a customer credit
+        require(amount.isFinite() && amount > 0.0) { "Customer payment amount must be finite and strictly positive" }
     }
 
     suspend fun recordCustomerPayment(

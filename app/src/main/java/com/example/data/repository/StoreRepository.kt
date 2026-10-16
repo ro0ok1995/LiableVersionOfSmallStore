@@ -833,6 +833,16 @@ class StoreRepository private constructor(
             if (purchase.status == "REVERSED") throw IllegalStateException("Purchase $originalTransactionId is already reversed")
             val activeReturns = purchaseReturnDao.getReturnsByPurchaseIdSync(purchase.id).filter { it.status == "ACTIVE" }
             require(activeReturns.isEmpty()) { "Cannot reverse purchase ${purchase.id} while it has active purchase returns" }
+            // Verify that items from this purchase have not already been consumed/sold, preventing negative inventory
+            val pLines = purchaseLineDao.getLinesByPurchaseId(purchase.id)
+            for (line in pLines) {
+                if (!line.productId.isNullOrBlank()) {
+                    val availableStock = stockMovementDao.getAvailableStockForProduct(line.productId)
+                    require(availableStock >= line.quantity) {
+                        "Cannot reverse purchase ${purchase.invoiceNumber}: Product '${line.productNameSnapshot}' has only $availableStock units in stock, but this purchase introduced ${line.quantity} units. Reversing would cause negative inventory."
+                    }
+                }
+            }
             purchaseDao.updatePurchase(purchase.copy(status = "REVERSED"))
             foundAnyEligible = true
         }

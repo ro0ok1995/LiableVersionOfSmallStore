@@ -37,8 +37,15 @@ class PurchasesRepository(
     val allPurchases: Flow<List<Purchase>> = purchaseDao.getAllPurchases()
 
     suspend fun generateNextPurchaseInvoiceNumber(): String {
-        val count = purchaseDao.getPurchaseCount()
-        return String.format(Locale.US, "PUR-%06d", count + 1)
+        val lastInvoice = purchaseDao.getLastPurchaseInvoiceNumber()
+        if (lastInvoice.isNullOrBlank()) return "PUR-000001"
+        val prefix = "PUR-"
+        val num = if (lastInvoice.startsWith(prefix)) {
+            lastInvoice.removePrefix(prefix).toIntOrNull() ?: 0
+        } else {
+            0
+        }
+        return String.format(Locale.US, "PUR-%06d", num + 1)
     }
 
     suspend fun getPurchaseById(id: String): Purchase? = purchaseDao.getPurchaseById(id)
@@ -155,13 +162,20 @@ class PurchasesRepository(
             purchaseDao.insertPurchase(purchase)
             purchaseLineDao.insertLines(purchaseLines)
 
-            // Update product cost price
+            // Update product cost price with Moving Weighted Average Cost (MWAC)
             for (line in purchaseLines) {
                 if (!line.productId.isNullOrBlank()) {
                     val p = productDao.getProductById(line.productId)
                     if (p != null) {
+                        val currentStock = stockMovementDao.getAvailableStockForProduct(line.productId).coerceAtLeast(0)
+                        val newTotalQty = currentStock + line.quantity
+                        val weightedCost = if (newTotalQty > 0) {
+                            ((currentStock * p.costPrice) + (line.quantity * line.unitCost)) / newTotalQty
+                        } else {
+                            line.unitCost
+                        }
                         productDao.updateProduct(
-                            p.copy(costPrice = line.unitCost)
+                            p.copy(costPrice = com.example.accounting.AccountingDecimal.money(weightedCost))
                         )
                     }
                 }

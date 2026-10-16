@@ -7,7 +7,13 @@ import java.util.Locale
  * The only currency is the Israeli New Shekel (₪).
  */
 object AppCurrency {
-    const val SYMBOL = "₪"
+    var SYMBOL: String = "₪"
+    var CODE: String = "ILS"
+
+    fun setCurrency(symbol: String, code: String = "") {
+        SYMBOL = symbol
+        if (code.isNotBlank()) CODE = code
+    }
 
     /**
      * Formats an amount with the currency symbol in the Arabic-preferred display (e.g., "100 ₪" or "100.00 ₪").

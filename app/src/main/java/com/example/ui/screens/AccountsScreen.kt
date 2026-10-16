@@ -166,33 +166,16 @@ fun AccountsScreen(
         }
     }
 
-    // Synchronous initial fallback calculation prevents zero/blank balances on initial frame
-    val initialSupplierBalances = remember(activeSuppliers, purchases, supplierPayments, purchaseReturns) {
-        activeSuppliers.associate { supplier ->
-            supplier.id to SupplierLedgerCalculator.calculateSupplierBalance(
-                supplierId = supplier.id,
-                purchases = purchases,
-                payments = supplierPayments,
-                returns = purchaseReturns
-            )
-        }
-    }
-
-    // Prefer repository-calculated balances, which include opening balances and adjustments.
-    var supplierBalances by remember(initialSupplierBalances) {
-        mutableStateOf<Map<String, SupplierBalanceSummary>>(initialSupplierBalances)
+    // Authoritative supplier balances including opening balances, adjustments, and returns
+    var supplierBalances by remember {
+        mutableStateOf<Map<String, SupplierBalanceSummary>>(emptyMap())
     }
     LaunchedEffect(activeSuppliers, purchases, supplierPayments, purchaseReturns, onGetSupplierBalance) {
         val updated = activeSuppliers.associate { supplier ->
             val authoritative = if (onGetSupplierBalance != null) {
                 runCatching { onGetSupplierBalance(supplier.id) }.getOrNull()
             } else null
-            supplier.id to (authoritative ?: SupplierLedgerCalculator.calculateSupplierBalance(
-                supplierId = supplier.id,
-                purchases = purchases,
-                payments = supplierPayments,
-                returns = purchaseReturns
-            ))
+            supplier.id to (authoritative ?: SupplierBalanceSummary(supplierId = supplier.id))
         }
         supplierBalances = updated
     }

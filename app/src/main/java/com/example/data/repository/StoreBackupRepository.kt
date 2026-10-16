@@ -186,31 +186,33 @@ class StoreBackupRepository(
             if (replaceStoreInfo) {
                 storeInfoDao.insertOrUpdate(payload.storeInfoAtBackupTime.toEntity(isSaved = true))
             }
-        }
 
-        expectedSnapshot?.let { expected ->
-            val actual = buildAccountingSnapshot(
-                customers = customerDao.getAllCustomersSync(),
-                suppliers = supplierDao.getAllSuppliersSync(),
-                accounts = accountDao.getAllAccountsSync(),
-                sales = saleDao.getAllSalesSync(),
-                saleLines = saleDao.getAllSaleLinesSync(),
-                customerPayments = customerPaymentDao.getAllPaymentsSync(),
-                openingBalances = openingBalanceDao.getAllOpeningBalancesSync(),
-                adjustments = adjustmentDao.getAllAdjustmentsSync(),
-                saleReturns = saleReturnDao.getAllReturnsSync(),
-                saleReturnLines = saleReturnLineDao.getAllLinesSync(),
-                refunds = refundDao.getAllRefundsSync(),
-                purchases = purchaseDao.getAllPurchasesSync(),
-                supplierPayments = supplierPaymentDao.getAllPaymentsSync(),
-                purchaseReturns = purchaseReturnDao.getAllReturnsSync(),
-            purchaseReturnLines = purchaseReturnLineDao.getAllLinesSync(),
-                expenses = expenseDao.getAllExpensesSync(),
-                stockMovements = stockMovementDao.getAllMovementsSync(),
-                products = productDao.getAllProductsSync()
-            )
-            require(expected.reconcilesWith(actual)) {
-                "Backup restore accounting reconciliation failed: restored authoritative results differ from source snapshot."
+            // Verify accounting snapshot INSIDE the atomic database transaction.
+            // If validation fails, withTransaction automatically aborts and rolls back all table wipes/inserts.
+            expectedSnapshot?.let { expected ->
+                val actual = buildAccountingSnapshot(
+                    customers = customerDao.getAllCustomersSync(),
+                    suppliers = supplierDao.getAllSuppliersSync(),
+                    accounts = accountDao.getAllAccountsSync(),
+                    sales = saleDao.getAllSalesSync(),
+                    saleLines = saleDao.getAllSaleLinesSync(),
+                    customerPayments = customerPaymentDao.getAllPaymentsSync(),
+                    openingBalances = openingBalanceDao.getAllOpeningBalancesSync(),
+                    adjustments = adjustmentDao.getAllAdjustmentsSync(),
+                    saleReturns = saleReturnDao.getAllReturnsSync(),
+                    saleReturnLines = saleReturnLineDao.getAllLinesSync(),
+                    refunds = refundDao.getAllRefundsSync(),
+                    purchases = purchaseDao.getAllPurchasesSync(),
+                    supplierPayments = supplierPaymentDao.getAllPaymentsSync(),
+                    purchaseReturns = purchaseReturnDao.getAllReturnsSync(),
+                    purchaseReturnLines = purchaseReturnLineDao.getAllLinesSync(),
+                    expenses = expenseDao.getAllExpensesSync(),
+                    stockMovements = stockMovementDao.getAllMovementsSync(),
+                    products = productDao.getAllProductsSync()
+                )
+                require(expected.reconcilesWith(actual)) {
+                    "Backup restore accounting reconciliation failed: restored authoritative results differ from source snapshot."
+                }
             }
         }
     }

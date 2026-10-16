@@ -81,23 +81,11 @@ fun SupplierProfileScreen(
 
     BackHandler { onBack() }
 
-    val initialBalance = remember(current?.id, purchases, payments, returns) {
-        current?.let {
-            SupplierLedgerCalculator.calculateSupplierBalance(
-                supplierId = it.id,
-                purchases = purchases,
-                payments = payments,
-                returns = returns
-            )
-        }
-    }
-    var balance by remember(current?.id, initialBalance) { mutableStateOf(initialBalance) }
+    var balance by remember(current?.id) { mutableStateOf<SupplierBalanceSummary?>(null) }
     LaunchedEffect(current?.id, purchases, payments, returns) {
         val selected = current
         if (selected != null) {
-            balance = runCatching { onGetSupplierBalance(selected.id) }.getOrDefault(
-                SupplierLedgerCalculator.calculateSupplierBalance(selected.id, purchases, payments, returns)
-            )
+            balance = runCatching { onGetSupplierBalance(selected.id) }.getOrNull()
         } else balance = null
     }
     val invoices = remember(current?.id, purchases, returns, invoiceFilter, invoiceSearch) {

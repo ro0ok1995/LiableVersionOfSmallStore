@@ -87,19 +87,13 @@ class SalesRepository(
                 ?: throw IllegalArgumentException("Financial account not found: $accountId")
             require(account.isActive) { "Financial account is inactive: $accountId" }
         }
-        val currentMovements = stockMovementDao.getAllMovementsSync()
         lines.filter { !it.productId.isNullOrBlank() }.groupBy { it.productId!! }.forEach { (productId, requestedLines) ->
             val product = database.productDao().getProductById(productId)
                 ?: throw IllegalArgumentException("Product not found: $productId")
-            val stock = CentralAccountingEngine.calculateProductStockFromMovements(
-                productId = productId,
-                movements = currentMovements,
-                fallbackUnitCost = product.costPrice,
-                productName = product.name
-            )
+            val availableStock = stockMovementDao.getAvailableStockForProduct(productId)
             val requestedQty = requestedLines.sumOf { it.quantity }
-            require(requestedQty <= stock.quantityOnHand) {
-                "Insufficient stock for '${product.name}'. Available: ${stock.quantityOnHand}, requested: $requestedQty"
+            require(requestedQty <= availableStock) {
+                "Insufficient stock for '${product.name}'. Available: $availableStock, requested: $requestedQty"
             }
         }
 
