@@ -1,0 +1,679 @@
+package com.example.ui.screens
+
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Payments
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.material.icons.filled.ShoppingBag
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.model.AppCurrency
+import com.example.model.CustomerAccount
+import com.example.model.LanguageMode
+import com.example.model.StoreStrings
+import com.example.ui.components.CustomerSelectorField
+import com.example.ui.components.RecordAdjustmentDialog
+import com.example.ui.theme.statusGreen
+import com.example.ui.theme.statusGreenContainer
+import com.example.ui.theme.statusRed
+import com.example.ui.theme.statusRedContainer
+import java.util.Locale
+
+/**
+ * Full-screen Customer Profile (ملف الزبون)
+ *
+ * Header:
+ * - Back arrow
+ * - Title ("ملف الزبون" / "Customer Profile")
+ * - Subtitle with selected customer name
+ * - Edit icon button (safe informational feedback)
+ *
+ * Customer selector at top:
+ * - When opened without a preselected customer, allows choosing an existing customer.
+ * - When opened with an already selected customer, shows that customer immediately.
+ *
+ * Customer Information Card:
+ * - Avatar/initial, name, phone (if present), balance/debt, and status badge.
+ * - Strictly uses existing CustomerAccount fields (no invented address).
+ *
+ * Basic Actions:
+ * - 1. Record Purchase ("تسجيل مشتريات") -> Existing purchases flow.
+ * - 2. View Account Statement ("عرض كشف الحساب") -> Existing Analysis Center statement flow.
+ * - 3. Record Payment ("تسجيل دفعة سداد") -> Existing Quick Payment flow.
+ * - 4. Record Adjustment ("تسوية / تعديل الرصيد") -> Documented accounting adjustment.
+ */
+@Composable
+fun CustomerProfileScreen(
+    customer: CustomerAccount?,
+    allCustomers: List<CustomerAccount>,
+    languageMode: LanguageMode,
+    onBackClick: () -> Unit,
+    onCustomerSelected: (CustomerAccount?) -> Unit,
+    onRecordPurchase: (CustomerAccount) -> Unit,
+    onViewAccountStatement: (CustomerAccount) -> Unit,
+    onRecordPayment: (CustomerAccount) -> Unit,
+    onArchiveCustomer: (CustomerAccount) -> Unit = {},
+    onRecordAdjustment: ((direction: String, amount: Double, date: String, reason: String, reference: String?) -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    val isArabic = languageMode == LanguageMode.ARABIC
+    val context = LocalContext.current
+    val currency = AppCurrency.SYMBOL
+    var showArchiveConfirmDialog by remember { mutableStateOf(false) }
+    var showAdjustmentDialog by remember { mutableStateOf(false) }
+
+    BackHandler {
+        onBackClick()
+    }
+
+    Scaffold(
+        topBar = {
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                shadowElevation = 1.dp
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = onBackClick,
+                        modifier = Modifier.testTag("customer_profile_back_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = if (isArabic) "رجوع" else "Back",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(4.dp))
+
+                    Column(
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = if (isArabic) StoreStrings.CUSTOMER_PROFILE_AR else StoreStrings.CUSTOMER_PROFILE_EN,
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 19.sp
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.testTag("customer_profile_title")
+                        )
+                        if (customer != null) {
+                            Text(
+                                text = customer.customerName,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    IconButton(
+                        onClick = {
+                            val msg = if (isArabic) {
+                                "تعديل بيانات العميل غير متاح حالياً"
+                            } else {
+                                "Customer editing is not available currently"
+                            }
+                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.testTag("customer_profile_edit_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = if (isArabic) "تعديل" else "Edit",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        },
+        modifier = modifier
+            .fillMaxSize()
+            .testTag("customer_profile_screen")
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .background(MaterialTheme.colorScheme.background)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // =================================================================
+            // CUSTOMER SELECTOR AT TOP
+            // =================================================================
+            Column {
+                Text(
+                    text = if (isArabic) "اختر الزبون" else "Select Customer",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
+                CustomerSelectorField(
+                    customers = allCustomers,
+                    selectedCustomer = customer,
+                    onCustomerSelected = onCustomerSelected,
+                    isArabic = isArabic,
+                    allowAllCustomers = false,
+                    placeholderText = if (isArabic) "اختر زبوناً لعرض الملف..." else "Select customer to view profile...",
+                    showBalance = true,
+                    isRequired = false,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("customer_profile_selector"),
+                    testTag = "customer_profile_selector_field"
+                )
+            }
+
+            if (customer == null) {
+                // Empty state when opened from Global Drawer without pre-selection
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 16.dp)
+                        .testTag("customer_profile_empty_state")
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 36.dp, horizontal = 20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                            shape = CircleShape,
+                            modifier = Modifier.size(64.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Person,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Text(
+                            text = if (isArabic) "يرجى اختيار زبون" else "Please select a customer",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Text(
+                            text = if (isArabic) {
+                                "اختر أحد الزبائن المسجلين من القائمة أعلاه لعرض ملفه وعملياته الأساسية."
+                            } else {
+                                "Choose a customer from the dropdown above to view their profile and perform actions."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            } else {
+                // =============================================================
+                // CUSTOMER INFORMATION CARD
+                // =============================================================
+                val hasDebt = customer.balance > 0.0
+                val isPaidUp = customer.balance <= 0.0
+
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("customer_info_card")
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Avatar
+                            Surface(
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                shape = CircleShape,
+                                modifier = Modifier.size(52.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = customer.customerName.take(1),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 22.sp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(14.dp))
+
+                            Column(
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = customer.customerName,
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 17.sp
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.testTag("customer_profile_name")
+                                )
+
+                                if (customer.phone.isNotBlank()) {
+                                    Spacer(modifier = Modifier.height(3.dp))
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Phone,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = customer.phone,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.testTag("customer_profile_phone")
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Status badge
+                            Surface(
+                                color = if (isPaidUp) {
+                                    MaterialTheme.colorScheme.statusGreenContainer
+                                } else {
+                                    MaterialTheme.colorScheme.statusRedContainer
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.testTag("customer_profile_status_badge")
+                            ) {
+                                Text(
+                                    text = if (isPaidUp) {
+                                        if (isArabic) "مسدد بالكامل" else "Paid Up"
+                                    } else {
+                                        if (isArabic) "عليه مستحقات" else "Has Debt"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = if (isPaidUp) {
+                                        MaterialTheme.colorScheme.statusGreen
+                                    } else {
+                                        MaterialTheme.colorScheme.statusRed
+                                    },
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                            modifier = Modifier.padding(vertical = 14.dp)
+                        )
+
+                        // Balances Row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text(
+                                    text = if (isArabic) StoreStrings.TOTAL_BALANCE_AR else StoreStrings.TOTAL_BALANCE_EN,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = String.format(Locale.US, "%,.2f %s", customer.balance, currency),
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 17.sp
+                                    ),
+                                    color = if (hasDebt) {
+                                        MaterialTheme.colorScheme.statusRed
+                                    } else {
+                                        MaterialTheme.colorScheme.statusGreen
+                                    },
+                                    modifier = Modifier.testTag("customer_profile_balance")
+                                )
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Text(
+                                    text = when {
+                                        customer.balance > 0.001 -> if (isArabic) "مدين (Debit): العميل مدين لك بهذا الرصيد" else "Debit: customer owes you this balance"
+                                        customer.balance < -0.001 -> if (isArabic) "دائن (Credit): أنت مدين للعميل بهذا الرصيد" else "Credit: you owe the customer this balance"
+                                        else -> if (isArabic) "الرصيد مسدد" else "Balance settled"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    text = if (isArabic) StoreStrings.HISTORICAL_CREDIT_SALES_AR else StoreStrings.HISTORICAL_CREDIT_SALES_EN,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = String.format(Locale.US, "%,.2f %s", customer.totalDebt, currency),
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 17.sp
+                                    ),
+                                    color = MaterialTheme.colorScheme.statusRed,
+                                    modifier = Modifier.testTag("customer_profile_historical_credit_sales")
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // =============================================================
+                // MAIN SECTION: BASIC ACTIONS (العمليات الأساسية)
+                // =============================================================
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = if (isArabic) StoreStrings.BASIC_ACTIONS_AR else StoreStrings.BASIC_ACTIONS_EN,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier
+                            .padding(vertical = 4.dp)
+                            .testTag("basic_actions_title")
+                    )
+
+                    // 1. Record Purchase ("تسجيل مشتريات")
+                    ProfileActionButton(
+                        icon = Icons.Default.ShoppingBag,
+                        iconTint = MaterialTheme.colorScheme.primary,
+                        iconContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                        title = if (isArabic) StoreStrings.RECORD_PURCHASE_AR else StoreStrings.RECORD_PURCHASE_EN,
+                        subtitle = if (isArabic) "تسجيل عملية بيع ومشتريات جديدة للزبون" else "Record new sales & purchases for customer",
+                        testTag = "action_record_purchase",
+                        onClick = { onRecordPurchase(customer) }
+                    )
+
+                    // 2. View Account Statement ("عرض كشف الحساب")
+                    ProfileActionButton(
+                        icon = Icons.Default.ReceiptLong,
+                        iconTint = MaterialTheme.colorScheme.secondary,
+                        iconContainerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f),
+                        title = if (isArabic) StoreStrings.VIEW_ACCOUNT_STATEMENT_AR else StoreStrings.VIEW_ACCOUNT_STATEMENT_EN,
+                        subtitle = if (isArabic) "الاطلاع على الحركات والتقرير المالي التفصيلي" else "View detailed transactions & statement",
+                        testTag = "action_view_statement",
+                        onClick = { onViewAccountStatement(customer) }
+                    )
+
+                    // 3. Record Payment ("تسجيل دفعة سداد")
+                    ProfileActionButton(
+                        icon = Icons.Default.Payments,
+                        iconTint = MaterialTheme.colorScheme.statusGreen,
+                        iconContainerColor = MaterialTheme.colorScheme.statusGreenContainer,
+                        title = if (isArabic) StoreStrings.RECORD_PAYMENT_AR else StoreStrings.RECORD_PAYMENT_EN,
+                        subtitle = if (isArabic) "تسجيل دفعة نقدية فورية لتقليص المديونية" else "Record cash payment to settle customer balance",
+                        testTag = "action_record_payment",
+                        onClick = { onRecordPayment(customer) }
+                    )
+
+                    // 4. Record Adjustment ("تسوية / تعديل الرصيد")
+                    ProfileActionButton(
+                        icon = Icons.Default.Tune,
+                        iconTint = MaterialTheme.colorScheme.tertiary,
+                        iconContainerColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f),
+                        title = if (isArabic) "تسوية / تعديل الرصيد" else "Record Balance Adjustment",
+                        subtitle = if (isArabic) "تسجيل تعديل محاسبي موثق لزيادة أو تخفيض الرصيد" else "Record documented debit/credit balance adjustment",
+                        testTag = "action_record_adjustment",
+                        onClick = { showAdjustmentDialog = true }
+                    )
+
+                    // 5. Archive Customer ("أرشفة العميل") - For ACTIVE customer only
+                    if (!customer.isArchived) {
+                        ProfileActionButton(
+                            icon = Icons.Default.Archive,
+                            iconTint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            iconContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            title = if (isArabic) StoreStrings.ARCHIVE_CUSTOMER_AR else StoreStrings.ARCHIVE_CUSTOMER_EN,
+                            subtitle = if (isArabic) StoreStrings.ARCHIVE_CUSTOMER_SUBTITLE_AR else StoreStrings.ARCHIVE_CUSTOMER_SUBTITLE_EN,
+                            testTag = "action_archive_customer",
+                            onClick = { showArchiveConfirmDialog = true }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    if (showArchiveConfirmDialog && customer != null) {
+        AlertDialog(
+            onDismissRequest = { showArchiveConfirmDialog = false },
+            title = {
+                Text(
+                    text = if (isArabic) StoreStrings.ARCHIVE_CONFIRM_TITLE_AR else StoreStrings.ARCHIVE_CONFIRM_TITLE_EN,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Text(
+                    text = if (isArabic) StoreStrings.ARCHIVE_CONFIRM_MESSAGE_AR else StoreStrings.ARCHIVE_CONFIRM_MESSAGE_EN,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showArchiveConfirmDialog = false
+                        onArchiveCustomer(customer)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    ),
+                    modifier = Modifier.testTag("confirm_archive_customer_button")
+                ) {
+                    Text(
+                        text = if (isArabic) StoreStrings.ARCHIVE_CUSTOMER_AR else StoreStrings.ARCHIVE_CUSTOMER_EN,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showArchiveConfirmDialog = false },
+                    modifier = Modifier.testTag("cancel_archive_customer_button")
+                ) {
+                    Text(
+                        text = if (isArabic) StoreStrings.CANCEL_AR else StoreStrings.CANCEL_EN
+                    )
+                }
+            },
+            modifier = Modifier.testTag("archive_customer_dialog")
+        )
+    }
+
+    if (showAdjustmentDialog && customer != null) {
+        val liveCustomer = allCustomers.find { it.id == customer.id } ?: customer
+        RecordAdjustmentDialog(
+            customer = liveCustomer,
+            currency = currency,
+            isArabic = isArabic,
+            onDismiss = { showAdjustmentDialog = false },
+            onConfirm = { direction, amount, date, reason, reference ->
+                showAdjustmentDialog = false
+                onRecordAdjustment?.invoke(direction, amount, date, reason, reference)
+                val successMsg = if (isArabic) "تم تسجيل التسوية بنجاح" else "Adjustment recorded successfully"
+                Toast.makeText(context, successMsg, Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+}
+
+@Composable
+private fun ProfileActionButton(
+    icon: ImageVector,
+    iconTint: androidx.compose.ui.graphics.Color,
+    iconContainerColor: androidx.compose.ui.graphics.Color,
+    title: String,
+    subtitle: String,
+    testTag: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .testTag(testTag)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                color = iconContainerColor,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.size(42.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = iconTint,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(14.dp))
+
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontSize = 12.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
