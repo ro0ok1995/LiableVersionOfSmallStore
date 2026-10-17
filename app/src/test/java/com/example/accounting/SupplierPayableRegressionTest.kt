@@ -60,4 +60,65 @@ class SupplierPayableRegressionTest {
         )
         assertEquals(-120.0, result.balance, 0.001)
     }
+
+    @Test
+    fun supplierOpeningBalanceCreditAndDebitAffectsBalanceAndStatement() {
+        val creditSupplier = "supplier-ob-credit"
+        val creditOb = OpeningBalance(
+            id = "ob-c1", entityType = "SUPPLIER", entityId = creditSupplier,
+            amount = 750.0, direction = "CREDIT", date = "2026-10-01"
+        )
+        val creditSummary = SupplierLedgerCalculator.calculateSupplierBalance(
+            supplierId = creditSupplier,
+            purchases = emptyList(),
+            payments = emptyList(),
+            returns = emptyList(),
+            openingBalances = listOf(creditOb)
+        )
+        assertEquals(750.0, creditSummary.openingBalance, 0.001)
+        assertEquals(750.0, creditSummary.balance, 0.001)
+
+        val creditStatement = SupplierLedgerCalculator.buildSupplierLedger(
+            supplierId = creditSupplier,
+            purchases = emptyList(),
+            payments = emptyList(),
+            returns = emptyList(),
+            openingBalances = listOf(creditOb)
+        )
+        assertEquals(1, creditStatement.size)
+        assertEquals(SupplierLedgerEntryType.OPENING_BALANCE, creditStatement[0].entryType)
+        assertEquals(750.0, creditStatement[0].credit, 0.001)
+        assertEquals(0.0, creditStatement[0].debit, 0.001)
+        assertEquals(750.0, creditStatement[0].runningBalance, 0.001)
+
+        // Debit opening balance (supplier advance)
+        val debitSupplier = "supplier-ob-debit"
+        val debitOb = OpeningBalance(
+            id = "ob-d1", entityType = "SUPPLIER", entityId = debitSupplier,
+            amount = 300.0, direction = "DEBIT", date = "2026-10-01"
+        )
+        val debitSummary = SupplierLedgerCalculator.calculateSupplierBalance(
+            supplierId = debitSupplier,
+            purchases = emptyList(),
+            payments = emptyList(),
+            returns = emptyList(),
+            openingBalances = listOf(debitOb)
+        )
+        assertEquals(-300.0, debitSummary.openingBalance, 0.001)
+        assertEquals(-300.0, debitSummary.balance, 0.001)
+
+        val debitStatement = SupplierLedgerCalculator.buildSupplierLedger(
+            supplierId = debitSupplier,
+            purchases = emptyList(),
+            payments = emptyList(),
+            returns = emptyList(),
+            openingBalances = listOf(debitOb)
+        )
+        assertEquals(1, debitStatement.size)
+        assertEquals(SupplierLedgerEntryType.OPENING_BALANCE, debitStatement[0].entryType)
+        assertEquals(0.0, debitStatement[0].credit, 0.001)
+        assertEquals(300.0, debitStatement[0].debit, 0.001)
+        assertEquals(-300.0, debitStatement[0].runningBalance, 0.001)
+    }
 }
+

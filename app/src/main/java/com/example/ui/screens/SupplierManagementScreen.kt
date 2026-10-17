@@ -140,14 +140,65 @@ fun SupplierManagementScreen(
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), contentPadding = PaddingValues(vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(visible, key = { it.id }) { supplier ->
-                    SupplierManagementCard(supplier, isArabic, balances[supplier.id]?.balance, balanceErrors.contains(supplier.id), onEdit = { supplierToEdit = supplier }, onArchive = { supplierToArchive = supplier }, onRestore = { supplierToRestore = supplier })
+                    SupplierManagementCard(
+                        supplier = supplier,
+                        isArabic = isArabic,
+                        balance = balances[supplier.id]?.balance,
+                        balanceError = balanceErrors.contains(supplier.id),
+                        onEdit = { supplierToEdit = supplier },
+                        onOpeningBalance = { supplierForOpeningBalance = supplier },
+                        onArchive = { supplierToArchive = supplier },
+                        onRestore = { supplierToRestore = supplier }
+                    )
                 }
             }
         }
     }
 
-    if (showAddDialog) SupplierEditDialog(isArabic, null, onDismiss = { showAddDialog = false }, onConfirm = { name, phone -> onAddSupplier(name, phone); showAddDialog = false })
-    supplierToEdit?.let { supplier -> SupplierEditDialog(isArabic, supplier, onDismiss = { supplierToEdit = null }, onConfirm = { name, phone -> onUpdateSupplier(supplier.copy(name = name.trim(), phone = phone.trim())); supplierToEdit = null }) }
+    if (showAddDialog) {
+        AddSupplierDialog(
+            isArabic = isArabic,
+            onDismiss = { showAddDialog = false },
+            onConfirm = { name, phone, amount, direction ->
+                if (amount != null && amount > 0.0) {
+                    onAddSupplierWithOpeningBalance(name, phone, amount, direction)
+                } else {
+                    onAddSupplier(name, phone)
+                }
+                showAddDialog = false
+                refreshBalanceTrigger++
+            }
+        )
+    }
+
+    supplierToEdit?.let { supplier ->
+        SupplierEditDialog(
+            isArabic = isArabic,
+            supplier = supplier,
+            onDismiss = { supplierToEdit = null },
+            onConfirm = { name, phone ->
+                onUpdateSupplier(supplier.copy(name = name.trim(), phone = phone.trim()))
+                supplierToEdit = null
+            }
+        )
+    }
+
+    supplierForOpeningBalance?.let { supplier ->
+        SupplierOpeningBalanceDialog(
+            isArabic = isArabic,
+            title = if (isArabic) "إضافة رصيد افتتاحي للمورد «${supplier.name}»" else "Add opening balance for “${supplier.name}”",
+            onDismiss = { supplierForOpeningBalance = null },
+            onConfirm = { amount, direction ->
+                onRecordOpeningBalance(supplier.id, amount, direction) { result ->
+                    if (result.isSuccess) {
+                        supplierForOpeningBalance = null
+                        refreshBalanceTrigger++
+                    }
+                }
+            }
+        )
+    }
+
     supplierToArchive?.let { supplier ->
         AlertDialog(onDismissRequest = { supplierToArchive = null }, icon = { Icon(Icons.Default.Archive, null, tint = GeoPrimary) }, title = { Text(if (isArabic) "نقل إلى الأرشيف" else "Move to Archive", fontWeight = FontWeight.Bold) }, text = { Text(if (isArabic) "هل تريد أرشفة المورد «${supplier.name}»؟ ستبقى جميع السجلات المالية محفوظة." else "Archive supplier “${supplier.name}”? All financial records will be preserved.") }, confirmButton = { Button(onClick = { onUpdateSupplier(supplier.copy(isArchived = true)); supplierToArchive = null }) { Text(if (isArabic) "أرشفة" else "Archive") } }, dismissButton = { TextButton(onClick = { supplierToArchive = null }) { Text(if (isArabic) "إلغاء" else "Cancel") } })
     }
@@ -157,7 +208,16 @@ fun SupplierManagementScreen(
 }
 
 @Composable
-private fun SupplierManagementCard(supplier: Supplier, isArabic: Boolean, balance: Double?, balanceError: Boolean, onEdit: () -> Unit, onArchive: () -> Unit, onRestore: () -> Unit) {
+private fun SupplierManagementCard(
+    supplier: Supplier,
+    isArabic: Boolean,
+    balance: Double?,
+    balanceError: Boolean,
+    onEdit: () -> Unit,
+    onOpeningBalance: () -> Unit,
+    onArchive: () -> Unit,
+    onRestore: () -> Unit
+) {
     Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), modifier = Modifier.fillMaxWidth().border(1.dp, GeoOutlineVariant, RoundedCornerShape(18.dp))) {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -199,10 +259,160 @@ private fun SupplierManagementCard(supplier: Supplier, isArabic: Boolean, balanc
             Spacer(Modifier.height(14.dp)); HorizontalDivider(color = GeoOutlineVariant.copy(alpha = .55f)); Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedButton(onClick = if (supplier.isArchived) onRestore else onArchive, shape = RoundedCornerShape(10.dp), border = androidx.compose.foundation.BorderStroke(1.dp, GeoOutlineVariant)) { Icon(if (supplier.isArchived) Icons.Default.Refresh else Icons.Default.Archive, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(5.dp)); Text(if (supplier.isArchived) { if (isArabic) "استعادة" else "Restore" } else { if (isArabic) "أرشفة" else "Archive" }) }
+                if (!supplier.isArchived) {
+                    OutlinedButton(onClick = onOpeningBalance, shape = RoundedCornerShape(10.dp), border = androidx.compose.foundation.BorderStroke(1.dp, GeoOutlineVariant)) {
+                        Text(if (isArabic) "رصيد افتتاحي" else "Opening Balance", color = GeoPrimary)
+                    }
+                }
                 OutlinedButton(onClick = onEdit, shape = RoundedCornerShape(10.dp), border = androidx.compose.foundation.BorderStroke(1.dp, GeoOutlineVariant)) { Icon(Icons.Default.Edit, null, tint = GeoPrimary, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(5.dp)); Text(if (isArabic) "تعديل المورد" else "Edit Supplier", color = GeoPrimary) }
             }
         }
     }
+}
+
+@Composable
+private fun AddSupplierDialog(
+    isArabic: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (name: String, phone: String, openingAmount: Double?, openingDirection: String) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
+    var openingAmount by remember { mutableStateOf("") }
+    var direction by remember { mutableStateOf("CREDIT") }
+    var nameError by remember { mutableStateOf(false) }
+    var amountError by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                if (isArabic) "إضافة مورد جديد" else "Add New Supplier",
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it; nameError = false },
+                    label = { Text(if (isArabic) "اسم المورد *" else "Supplier name *") },
+                    isError = nameError,
+                    supportingText = { if (nameError) Text(if (isArabic) "اسم المورد مطلوب" else "Supplier name is required") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("supplier_name_input")
+                )
+                OutlinedTextField(
+                    value = phone,
+                    onValueChange = { phone = it },
+                    label = { Text(if (isArabic) "رقم الهاتف" else "Phone number") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("supplier_phone_input")
+                )
+                Text(
+                    if (isArabic) "الرصيد الافتتاحي (اختياري) — ₪" else "Opening balance (optional) — ₪",
+                    style = MaterialTheme.typography.labelLarge
+                )
+                OutlinedTextField(
+                    value = openingAmount,
+                    onValueChange = { openingAmount = it; amountError = false },
+                    label = { Text(if (isArabic) "المبلغ" else "Amount") },
+                    isError = amountError,
+                    supportingText = { if (amountError) Text(if (isArabic) "أدخل مبلغًا موجبًا وصحيحًا مثل 150.25" else "Enter a valid positive amount, e.g. 150.25") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("supplier_opening_balance_amount")
+                )
+                Text(
+                    if (isArabic) "اتجاه الرصيد" else "Balance direction",
+                    style = MaterialTheme.typography.labelLarge
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = direction == "CREDIT",
+                        onClick = { direction = "CREDIT" },
+                        label = { Text(if (isArabic) "المحل مدين للمورد (مستحق)" else "Store owes supplier") }
+                    )
+                    FilterChip(
+                        selected = direction == "DEBIT",
+                        onClick = { direction = "DEBIT" },
+                        label = { Text(if (isArabic) "المورد مدين للمحل (رصيد مقدم)" else "Supplier owes store") }
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (name.trim().isBlank()) { nameError = true; return@Button }
+                    val amount = if (openingAmount.isBlank()) null else openingAmount.trim().replace(',', '.').toDoubleOrNull()
+                    if (openingAmount.isNotBlank() && (amount == null || !amount.isFinite() || amount <= 0.0)) { amountError = true; return@Button }
+                    onConfirm(name.trim(), phone.trim(), amount, direction)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = GeoPrimary),
+                modifier = Modifier.testTag("save_add_supplier_button")
+            ) { Text(if (isArabic) "إضافة" else "Add") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(if (isArabic) "إلغاء" else "Cancel") } }
+    )
+}
+
+@Composable
+private fun SupplierOpeningBalanceDialog(
+    isArabic: Boolean,
+    title: String,
+    onDismiss: () -> Unit,
+    onConfirm: (Double, String) -> Unit
+) {
+    var amountText by remember { mutableStateOf("") }
+    var direction by remember { mutableStateOf("CREDIT") }
+    var error by remember { mutableStateOf<String?>(null) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = amountText,
+                    onValueChange = { amountText = it; error = null },
+                    label = { Text(if (isArabic) "المبلغ بالشيكل ₪" else "Amount in ILS ₪") },
+                    isError = error != null,
+                    supportingText = { if (error != null) Text(error!!) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("existing_supplier_ob_amount")
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = direction == "CREDIT",
+                        onClick = { direction = "CREDIT" },
+                        label = { Text(if (isArabic) "المحل مدين للمورد" else "Store owes supplier") }
+                    )
+                    FilterChip(
+                        selected = direction == "DEBIT",
+                        onClick = { direction = "DEBIT" },
+                        label = { Text(if (isArabic) "المورد مدين للمحل" else "Supplier owes store") }
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val amount = amountText.trim().replace(',', '.').toDoubleOrNull()
+                    if (amount == null || !amount.isFinite() || amount <= 0.0) {
+                        error = if (isArabic) "أدخل مبلغًا موجبًا صحيحًا" else "Enter a valid positive amount"
+                    } else {
+                        onConfirm(amount, direction)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = GeoPrimary),
+                modifier = Modifier.testTag("save_supplier_ob_button")
+            ) { Text(if (isArabic) "حفظ الرصيد" else "Save balance") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(if (isArabic) "إلغاء" else "Cancel") } }
+    )
 }
 
 @Composable
