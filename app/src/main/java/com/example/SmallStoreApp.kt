@@ -790,12 +790,6 @@ fun SmallStoreApp(
                                         mainViewModel.navigateBack()
                                     },
                                     onAddSupplier = { name, phone -> mainViewModel.addSupplier(name, phone) },
-                                    onAddSupplierWithOpeningBalance = { name, phone, amount, direction ->
-                                        mainViewModel.addSupplierWithOpeningBalance(name, phone, amount, direction)
-                                    },
-                                    onRecordOpeningBalance = { supplierId, amount, direction, onComplete ->
-                                        mainViewModel.recordOpeningBalance("SUPPLIER", supplierId, amount, direction, onComplete)
-                                    },
                                     onUpdateSupplier = { supplier -> mainViewModel.updateSupplier(supplier) },
                                     onGetSupplierBalance = { supplierId -> mainViewModel.getSupplierBalance(supplierId) }
                                 )
