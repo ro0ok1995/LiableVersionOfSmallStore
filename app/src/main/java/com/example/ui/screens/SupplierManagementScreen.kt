@@ -45,6 +45,8 @@ fun SupplierManagementScreen(
     languageMode: LanguageMode,
     onBackClick: () -> Unit,
     onAddSupplier: (name: String, phone: String) -> Unit,
+    onAddSupplierWithOpeningBalance: (name: String, phone: String, openingAmount: Double?, openingDirection: String) -> Unit = { name, phone, _, _ -> onAddSupplier(name, phone) },
+    onRecordOpeningBalance: (String, Double, String, (Result<Unit>) -> Unit) -> Unit = { _, _, _, onComplete -> onComplete(Result.success(Unit)) },
     onUpdateSupplier: (Supplier) -> Unit,
     onGetSupplierBalance: suspend (String) -> SupplierBalanceSummary,
     modifier: Modifier = Modifier
@@ -56,12 +58,14 @@ fun SupplierManagementScreen(
     var supplierToEdit by remember { mutableStateOf<Supplier?>(null) }
     var supplierToArchive by remember { mutableStateOf<Supplier?>(null) }
     var supplierToRestore by remember { mutableStateOf<Supplier?>(null) }
+    var supplierForOpeningBalance by remember { mutableStateOf<Supplier?>(null) }
+    var refreshBalanceTrigger by remember { mutableIntStateOf(0) }
 
     val active = remember(suppliers) { suppliers.filterNot { it.isArchived } }
     val archived = remember(suppliers) { suppliers.filter { it.isArchived } }
     var balances by remember { mutableStateOf<Map<String, SupplierBalanceSummary>>(emptyMap()) }
     var balanceErrors by remember { mutableStateOf<Set<String>>(emptySet()) }
-    LaunchedEffect(suppliers) {
+    LaunchedEffect(suppliers, refreshBalanceTrigger) {
         val nextBalances = mutableMapOf<String, SupplierBalanceSummary>()
         val nextErrors = mutableSetOf<String>()
         suppliers.forEach { supplier ->
