@@ -795,7 +795,7 @@ fun HomeScreen(
                                             fontWeight = FontWeight.ExtraBold,
                                             fontSize = 24.sp
                                         ),
-                                        color = if (customerReceivables > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                                        color = if (customerReceivables > 0) MaterialTheme.colorScheme.statusGreen else MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.testTag("stat_total_debt")
                                     )
                                 }

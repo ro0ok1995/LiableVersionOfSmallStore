@@ -115,6 +115,7 @@ fun AccountsScreen(
     onSupplierClick: ((Supplier) -> Unit)? = null,
     onOpenAddSupplierDialog: (() -> Unit)? = null,
     onGetSupplierBalance: (suspend (String) -> SupplierBalanceSummary)? = null,
+    onGetCustomerBalance: (suspend (String) -> com.example.accounting.CustomerBalanceSummary)? = null,
     initialSelectedAccountTab: Int = 0,
     modifier: Modifier = Modifier
 ) {
@@ -152,15 +153,41 @@ fun AccountsScreen(
         }
     }
 
-    val customerBalances = remember(accounts) {
-        accounts.associate { customer -> customer.id to customer.balance }
+    var customerBalances by remember { mutableStateOf<Map<String, Double>>(emptyMap()) }
+    var customerBalanceErrors by remember { mutableStateOf<Set<String>>(emptySet()) }
+    LaunchedEffect(accounts) {
+        val values = mutableMapOf<String, Double>()
+        val errors = mutableSetOf<String>()
+        accounts.forEach { customer ->
+            if (onGetCustomerBalance == null) {
+                values[customer.id] = customer.balance
+            } else {
+                runCatching { onGetCustomerBalance(customer.id).balance }
+                    .onSuccess { values[customer.id] = it }
+                    .onFailure { errors += customer.id }
+            }
+        }
+        customerBalances = values
+        customerBalanceErrors = errors
     }
 
-    val sortedAccounts = remember(accounts, sortOption, customerCashTotals, customerBalances) {
+    val visibleAccounts = remember(accounts, searchQuery, filter, customerBalances) {
+        val query = searchQuery.trim().lowercase()
+        val searched = if (query.isEmpty()) accounts else accounts.filter {
+            it.customerName.lowercase().contains(query) || it.phone.contains(query)
+        }
+        when (filter) {
+            AccountFilter.ALL -> searched
+            AccountFilter.HAS_DEBT -> searched.filter { customerBalances[it.id]?.let { balance -> balance > 0.001 } == true }
+            AccountFilter.RECENTLY_ACTIVE -> searched.filter { it.hasRecentActivity }
+        }
+    }
+
+    val sortedAccounts = remember(visibleAccounts, sortOption, customerCashTotals, customerBalances) {
         when (sortOption) {
-            AccountSortOption.DEFAULT -> accounts
-            AccountSortOption.HIGHEST_DEBT -> accounts.sortedByDescending { customerBalances[it.id] ?: 0.0 }
-            AccountSortOption.HIGHEST_CASH -> accounts.sortedByDescending { customer ->
+            AccountSortOption.DEFAULT -> visibleAccounts
+            AccountSortOption.HIGHEST_DEBT -> visibleAccounts.sortedByDescending { customerBalances[it.id] ?: 0.0 }
+            AccountSortOption.HIGHEST_CASH -> visibleAccounts.sortedByDescending { customer ->
                 customerCashTotals[customer.id] ?: 0.0
             }
         }
@@ -168,14 +195,14 @@ fun AccountsScreen(
 
     // Authoritative supplier balances including opening balances, adjustments, and returns
     var supplierBalances by remember {
-        mutableStateOf<Map<String, SupplierBalanceSummary>>(emptyMap())
+        mutableStateOf<Map<String, SupplierBalanceSummary?>>(emptyMap())
     }
-    LaunchedEffect(activeSuppliers, purchases, supplierPayments, purchaseReturns, onGetSupplierBalance) {
+    LaunchedEffect(activeSuppliers, purchases, supplierPayments, purchaseReturns) {
         val updated = activeSuppliers.associate { supplier ->
             val authoritative = if (onGetSupplierBalance != null) {
                 runCatching { onGetSupplierBalance(supplier.id) }.getOrNull()
             } else null
-            supplier.id to (authoritative ?: SupplierBalanceSummary(supplierId = supplier.id))
+            supplier.id to authoritative
         }
         supplierBalances = updated
     }
@@ -193,8 +220,8 @@ fun AccountsScreen(
             }
         }
         when (supplierFilter) {
-            1 -> list.filter { sup -> (supplierBalances[sup.id]?.balance ?: 0.0) > 0.001 }
-            2 -> list.filter { sup -> Math.abs(supplierBalances[sup.id]?.balance ?: 0.0) <= 0.001 }
+            1 -> list.filter { sup -> supplierBalances[sup.id]?.balance?.let { it > 0.001 } == true }
+            2 -> list.filter { sup -> supplierBalances[sup.id]?.balance?.let { Math.abs(it) <= 0.001 } == true }
             else -> list
         }
     }
@@ -652,7 +679,11 @@ fun AccountsScreen(
                         }
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = if (isArabic) StoreStrings.NO_CUSTOMERS_YET_AR else StoreStrings.NO_CUSTOMERS_YET_EN,
+                            text = if (accounts.isEmpty()) {
+                                if (isArabic) StoreStrings.NO_CUSTOMERS_YET_AR else StoreStrings.NO_CUSTOMERS_YET_EN
+                            } else {
+                                if (isArabic) "لا توجد نتائج تطابق البحث أو الفلتر" else "No customers match this search or filter"
+                            },
                             style = MaterialTheme.typography.bodyLarge.copy(
                                 fontWeight = FontWeight.Medium,
                                 fontSize = 15.sp
@@ -660,6 +691,12 @@ fun AccountsScreen(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(modifier = Modifier.height(16.dp))
+                        if (accounts.isNotEmpty()) {
+                            OutlinedButton(onClick = { onSearchQueryChange(""); onFilterChange(AccountFilter.ALL) }) {
+                                Text(if (isArabic) "مسح البحث والفلاتر" else "Clear search and filters")
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
                         Button(
                             onClick = onOpenAddCustomerDialog,
                             shape = RoundedCornerShape(10.dp),
@@ -695,6 +732,7 @@ fun AccountsScreen(
                         CustomerCardItem(
                             customer = customer,
                             balance = liveBalance,
+                            balanceUnavailable = customerBalanceErrors.contains(customer.id) || !customerBalances.containsKey(customer.id),
                             currency = currency,
                             isArabic = isArabic,
                             onClick = { onCustomerClick(customer) }
@@ -780,10 +818,11 @@ fun AccountsScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                     }
                     items(items = filteredSuppliers, key = { it.id }) { supplier ->
-                        val summary = supplierBalances[supplier.id] ?: SupplierBalanceSummary(supplierId = supplier.id)
+                        val summary = supplierBalances[supplier.id]
                         SupplierAccountCardItem(
                             supplier = supplier,
                             summary = summary,
+                            balanceLoading = !supplierBalances.containsKey(supplier.id),
                             currency = currency,
                             isArabic = isArabic,
                             onClick = { onSupplierClick?.invoke(supplier) }
@@ -810,6 +849,7 @@ fun AccountsScreen(
 private fun CustomerCardItem(
     customer: CustomerAccount,
     balance: Double,
+    balanceUnavailable: Boolean = false,
     currency: String,
     isArabic: Boolean = true,
     onClick: () -> Unit
@@ -873,7 +913,14 @@ private fun CustomerCardItem(
                 }
             }
             Spacer(modifier = Modifier.width(10.dp))
-            if (isPaidUp) {
+            if (balanceUnavailable) {
+                Text(
+                    text = if (isArabic) "تعذر تحميل الرصيد" else "Balance unavailable",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = StatusRed
+                )
+            } else if (isPaidUp) {
                 Surface(
                     color = StatusGreenBg,
                     shape = RoundedCornerShape(6.dp)
@@ -1030,14 +1077,15 @@ private fun AddCustomerDialog(
 @Composable
 private fun SupplierAccountCardItem(
     supplier: Supplier,
-    summary: SupplierBalanceSummary,
+    summary: SupplierBalanceSummary?,
+    balanceLoading: Boolean = false,
     currency: String,
     isArabic: Boolean = true,
     onClick: () -> Unit
 ) {
-    val payable = summary.balance
-    val hasPayable = payable > 0.001
-    val isSettled = Math.abs(payable) <= 0.001
+    val payable = summary?.balance
+    val hasPayable = payable != null && payable > 0.001
+    val isSettled = payable != null && Math.abs(payable) <= 0.001
 
     Card(
         shape = RoundedCornerShape(14.dp),
@@ -1095,7 +1143,18 @@ private fun SupplierAccountCardItem(
                 }
             }
             Spacer(modifier = Modifier.width(10.dp))
-            if (isSettled) {
+            if (payable == null) {
+                Text(
+                    text = if (balanceLoading) {
+                        if (isArabic) "جارٍ تحميل الرصيد" else "Loading balance"
+                    } else {
+                        if (isArabic) "تعذر تحميل الرصيد" else "Balance unavailable"
+                    },
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = StatusRed
+                )
+            } else if (isSettled) {
                 Surface(
                     color = StatusGreenBg,
                     shape = RoundedCornerShape(6.dp)

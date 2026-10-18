@@ -93,6 +93,8 @@ fun SmallStoreApp(
     val focusManager = LocalFocusManager.current
     var supplierInitialAction by remember { mutableStateOf(SupplierInitialAction.NONE) }
     var accountsInitialTab by remember { mutableIntStateOf(0) }
+    var openCustomerAddOnEntry by remember { mutableStateOf(false) }
+    var openSupplierAddOnEntry by remember { mutableStateOf(false) }
 
     // Sync drawer state with ViewModel
     LaunchedEffect(uiState.isDrawerOpen) {
@@ -411,20 +413,7 @@ fun SmallStoreApp(
                             }
 
                             NavDestination.ACCOUNTS -> {
-                                val filteredAccounts = remember(uiState.customers, uiState.allTransactions, uiState.accountsSearchQuery, uiState.accountsFilter) {
-                                    var list = uiState.customers
-                                    if (uiState.accountsSearchQuery.isNotBlank()) {
-                                        val q = uiState.accountsSearchQuery.trim().lowercase()
-                                        list = list.filter { it.customerName.lowercase().contains(q) || it.phone.contains(q) }
-                                    }
-                                    when (uiState.accountsFilter) {
-                                        AccountFilter.ALL -> list
-                                        AccountFilter.HAS_DEBT -> list.filter { cust ->
-                                            CustomerLedgerCalculator.calculateCustomerBalance(cust.id, uiState.allTransactions).balance > 0.001
-                                        }
-                                        AccountFilter.RECENTLY_ACTIVE -> list.filter { it.hasRecentActivity }
-                                    }
-                                }
+                                val filteredAccounts = uiState.customers
 
                                 AccountsScreen(
                                     accounts = filteredAccounts,
@@ -441,7 +430,11 @@ fun SmallStoreApp(
                                         mainViewModel.openCustomerDetailsFromAccounts(customer)
                                     },
                                     onOpenAddCustomerDialog = {
-                                        mainViewModel.openAddCustomerDialog()
+                                        focusManager.clearFocus()
+                                        accountsInitialTab = 0
+                                        openCustomerAddOnEntry = true
+                                        mainViewModel.navigateTo(NavDestination.DATA_CENTER)
+                                        mainViewModel.navigateTo(NavDestination.CUSTOMER_MANAGEMENT)
                                     },
                                     onCloseAddCustomerDialog = {
                                         mainViewModel.closeAddCustomerDialog()
@@ -460,9 +453,13 @@ fun SmallStoreApp(
                                     },
                                     onOpenAddSupplierDialog = {
                                         focusManager.clearFocus()
-                                        mainViewModel.navigateTo(NavDestination.SUPPLIER_OPERATIONS)
+                                        accountsInitialTab = 1
+                                        openSupplierAddOnEntry = true
+                                        mainViewModel.navigateTo(NavDestination.DATA_CENTER)
+                                        mainViewModel.navigateTo(NavDestination.SUPPLIER_MANAGEMENT)
                                     },
                                     onGetSupplierBalance = { supplierId -> mainViewModel.getSupplierBalance(supplierId) },
+                                    onGetCustomerBalance = { customerId -> mainViewModel.getCustomerBalance(customerId) },
                                     initialSelectedAccountTab = accountsInitialTab
                                 )
                             }
@@ -764,10 +761,17 @@ fun SmallStoreApp(
                                         focusManager.clearFocus()
                                         mainViewModel.navigateBack()
                                     },
-                                    onAddCustomer = { name, phone, amount, direction ->
-                                        mainViewModel.addCustomerWithOpeningBalance(name, phone, amount, direction)
+                                    onAddCustomer = { name, phone, amount, direction, onComplete ->
+                                        mainViewModel.addCustomerWithOpeningBalance(name, phone, amount, direction) { result ->
+                                            onComplete(result)
+                                            if (result.isSuccess) {
+                                                mainViewModel.navigateBack()
+                                                mainViewModel.navigateBack()
+                                            }
+                                        }
                                     },
-                                    onGetCustomerBalance = { customerId -> mainViewModel.getCustomerBalance(customerId) },
+                                    openAddDialogOnEntry = openCustomerAddOnEntry,
+                                    onAddDialogEntryConsumed = { openCustomerAddOnEntry = false },
                                     onRecordOpeningBalance = { customerId, amount, direction, onComplete ->
                                         mainViewModel.recordOpeningBalance("CUSTOMER", customerId, amount, direction, onComplete)
                                     },
@@ -791,15 +795,23 @@ fun SmallStoreApp(
                                         focusManager.clearFocus()
                                         mainViewModel.navigateBack()
                                     },
-                                    onAddSupplier = { name, phone -> mainViewModel.addSupplier(name, phone) },
+                                    onAddSupplier = { name, phone ->
+                                        mainViewModel.addSupplier(name, phone) { result ->
+                                            if (result.isSuccess) { mainViewModel.navigateBack(); mainViewModel.navigateBack() }
+                                        }
+                                    },
                                     onAddSupplierWithOpeningBalance = { name, phone, amount, direction ->
-                                        mainViewModel.addSupplierWithOpeningBalance(name, phone, amount, direction)
+                                        mainViewModel.addSupplierWithOpeningBalance(name, phone, amount, direction) { result ->
+                                            if (result.isSuccess) { mainViewModel.navigateBack(); mainViewModel.navigateBack() }
+                                        }
                                     },
                                     onRecordOpeningBalance = { supplierId, amount, direction, onComplete ->
                                         mainViewModel.recordOpeningBalance("SUPPLIER", supplierId, amount, direction, onComplete)
                                     },
                                     onUpdateSupplier = { supplier -> mainViewModel.updateSupplier(supplier) },
-                                    onGetSupplierBalance = { supplierId -> mainViewModel.getSupplierBalance(supplierId) }
+                                    onGetSupplierBalance = { supplierId -> mainViewModel.getSupplierBalance(supplierId) },
+                                    openAddDialogOnEntry = openSupplierAddOnEntry,
+                                    onAddDialogEntryConsumed = { openSupplierAddOnEntry = false }
                                 )
                             }
 

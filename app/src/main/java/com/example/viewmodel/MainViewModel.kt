@@ -610,8 +610,14 @@ class MainViewModel @JvmOverloads constructor(
         customerViewModel.addCustomer(name, phone, initialDebt)
     }
 
-    fun addCustomerWithOpeningBalance(name: String, phone: String, amount: Double?, direction: String) {
-        customerViewModel.addCustomerWithOpeningBalance(name, phone, amount, direction)
+    fun addCustomerWithOpeningBalance(
+        name: String,
+        phone: String,
+        amount: Double?,
+        direction: String,
+        onComplete: (Result<Unit>) -> Unit = {}
+    ) {
+        customerViewModel.addCustomerWithOpeningBalance(name, phone, amount, direction, onComplete)
     }
 
     fun updateCustomer(customer: CustomerAccount) {
