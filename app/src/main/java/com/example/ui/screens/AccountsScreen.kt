@@ -58,6 +58,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -75,9 +76,11 @@ import com.example.model.SettlementType
 import com.example.model.StoreStrings
 import com.example.model.TransactionItem
 import com.example.accounting.FinancialReportCalculator
+import com.example.accounting.CustomerBalanceSummary
 import com.example.accounting.CustomerLedgerCalculator
 import com.example.accounting.SupplierBalanceSummary
 import com.example.accounting.SupplierLedgerCalculator
+import com.example.data.repository.StoreRepository
 import com.example.data.db.Purchase
 import com.example.data.db.Supplier
 import com.example.data.db.SupplierPayment
@@ -116,6 +119,7 @@ fun AccountsScreen(
     onSupplierClick: ((Supplier) -> Unit)? = null,
     onOpenAddSupplierDialog: (() -> Unit)? = null,
     onGetSupplierBalance: (suspend (String) -> SupplierBalanceSummary)? = null,
+    onGetCustomerBalance: (suspend (String) -> CustomerBalanceSummary)? = null,
     initialSelectedAccountTab: Int = 0,
     onSelectedAccountTabChange: (Int) -> Unit = {},
     modifier: Modifier = Modifier
@@ -146,19 +150,72 @@ fun AccountsScreen(
         }
     }
 
-    // Always use the authoritative ledger calculation, never the legacy cached balance field.
-    val customerBalances = remember(allCustomers, accounts, transactions) {
-        val pool = if (allCustomers.isNotEmpty()) allCustomers else accounts
-        pool.associate { customer ->
-            customer.id to CustomerLedgerCalculator.calculateCustomerBalance(customer.id, transactions).balance
+    val context = LocalContext.current
+    val repository = remember(context) { runCatching { StoreRepository.getInstance(context) }.getOrNull() }
+
+    val customerPool = remember(allCustomers, accounts) {
+        if (allCustomers.isNotEmpty()) allCustomers else accounts
+    }
+
+    // Authoritative customer balances including opening balances, adjustments, and returns
+    var customerBalances by remember { mutableStateOf<Map<String, CustomerBalanceSummary>>(emptyMap()) }
+    var customerBalanceLoading by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var customerBalanceErrors by remember { mutableStateOf<Set<String>>(emptySet()) }
+
+    LaunchedEffect(customerPool, transactions, onGetCustomerBalance, repository) {
+        customerBalanceLoading = customerPool.map { it.id }.toSet()
+        val updated = mutableMapOf<String, CustomerBalanceSummary>()
+        val errors = mutableSetOf<String>()
+        customerPool.forEach { customer ->
+            val result = runCatching {
+                if (onGetCustomerBalance != null) {
+                    onGetCustomerBalance(customer.id)
+                } else if (repository != null) {
+                    repository.getCustomerBalance(customer.id)
+                } else {
+                    CustomerLedgerCalculator.calculateCustomerBalance(customer.id, transactions)
+                }
+            }
+            result.onSuccess { summary ->
+                updated[customer.id] = summary
+            }.onFailure {
+                errors += customer.id
+            }
+        }
+        customerBalances = updated
+        customerBalanceErrors = errors
+        customerBalanceLoading = emptySet()
+    }
+
+    val filteredCustomerAccounts = remember(customerPool, searchQuery, filter, customerBalances) {
+        var list = customerPool
+        val q = searchQuery.trim().lowercase()
+        if (q.isNotEmpty()) {
+            list = list.filter { cust ->
+                cust.customerName.lowercase().contains(q) || cust.phone.contains(q)
+            }
+        }
+        when (filter) {
+            AccountFilter.ALL -> list
+            AccountFilter.HAS_DEBT -> list.filter { cust ->
+                val summary = customerBalances[cust.id]
+                if (summary != null) {
+                    summary.balance > 0.001
+                } else {
+                    CustomerLedgerCalculator.calculateCustomerBalance(cust.id, transactions).balance > 0.001
+                }
+            }
+            AccountFilter.RECENTLY_ACTIVE -> list.filter { it.hasRecentActivity }
         }
     }
 
-    val sortedAccounts = remember(accounts, sortOption, customerCashTotals, customerBalances) {
+    val sortedAccounts = remember(filteredCustomerAccounts, sortOption, customerCashTotals, customerBalances) {
         when (sortOption) {
-            AccountSortOption.DEFAULT -> accounts
-            AccountSortOption.HIGHEST_DEBT -> accounts.sortedByDescending { customerBalances[it.id] ?: 0.0 }
-            AccountSortOption.HIGHEST_CASH -> accounts.sortedByDescending { customer ->
+            AccountSortOption.DEFAULT -> filteredCustomerAccounts
+            AccountSortOption.HIGHEST_DEBT -> filteredCustomerAccounts.sortedByDescending { cust ->
+                customerBalances[cust.id]?.balance ?: CustomerLedgerCalculator.calculateCustomerBalance(cust.id, transactions).balance
+            }
+            AccountSortOption.HIGHEST_CASH -> filteredCustomerAccounts.sortedByDescending { customer ->
                 customerCashTotals[customer.id] ?: 0.0
             }
         }
@@ -694,7 +751,10 @@ fun AccountsScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                     }
                     items(items = sortedAccounts, key = { it.id }) { customer ->
-                        val liveBalance = customerBalances[customer.id] ?: 0.0
+                        val summary = customerBalances[customer.id]
+                        val liveBalance = summary?.balance ?: if (customer.id !in customerBalanceErrors) {
+                            CustomerLedgerCalculator.calculateCustomerBalance(customer.id, transactions).balance
+                        } else null
                         CustomerCardItem(
                             customer = customer,
                             balance = liveBalance,
@@ -832,13 +892,13 @@ fun AccountsScreen(
 @Composable
 private fun CustomerCardItem(
     customer: CustomerAccount,
-    balance: Double,
+    balance: Double?,
     currency: String,
     isArabic: Boolean = true,
     onClick: () -> Unit
 ) {
-    val hasDebt = balance > 0.001
-    val isPaidUp = Math.abs(balance) <= 0.001
+    val hasDebt = balance != null && balance > 0.001
+    val isPaidUp = balance != null && Math.abs(balance) <= 0.001
 
     Card(
         shape = RoundedCornerShape(14.dp),
@@ -896,7 +956,20 @@ private fun CustomerCardItem(
                 }
             }
             Spacer(modifier = Modifier.width(10.dp))
-            if (isPaidUp) {
+            if (balance == null) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Text(
+                        text = if (isArabic) "تعذر تحميل الرصيد" else "Balance unavailable",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            } else if (isPaidUp) {
                 Surface(
                     color = StatusGreenBg,
                     shape = RoundedCornerShape(6.dp)
