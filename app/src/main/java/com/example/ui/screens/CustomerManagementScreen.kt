@@ -94,6 +94,7 @@ fun CustomerManagementScreen(
     onUpdateCustomer: (CustomerAccount) -> Unit,
     onArchiveCustomer: (String) -> Unit,
     onUnarchiveCustomer: (String) -> Unit,
+    autoOpenAddDialog: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
@@ -109,7 +110,7 @@ fun CustomerManagementScreen(
     var openingBalanceCustomer by remember { mutableStateOf<CustomerAccount?>(null) }
 
     // Dialog states
-    var showAddDialog by remember { mutableStateOf(false) }
+    var showAddDialog by remember(autoOpenAddDialog) { mutableStateOf(autoOpenAddDialog) }
     var customerToEdit by remember { mutableStateOf<CustomerAccount?>(null) }
     var customerToArchive by remember { mutableStateOf<CustomerAccount?>(null) }
     var customerToRestore by remember { mutableStateOf<CustomerAccount?>(null) }

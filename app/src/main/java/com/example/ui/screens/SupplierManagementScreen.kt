@@ -49,12 +49,13 @@ fun SupplierManagementScreen(
     onRecordOpeningBalance: (String, Double, String, (Result<Unit>) -> Unit) -> Unit = { _, _, _, onComplete -> onComplete(Result.success(Unit)) },
     onUpdateSupplier: (Supplier) -> Unit,
     onGetSupplierBalance: suspend (String) -> SupplierBalanceSummary,
+    autoOpenAddDialog: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf(SupplierFilterTab.ACTIVE) }
-    var showAddDialog by remember { mutableStateOf(false) }
+    var showAddDialog by remember(autoOpenAddDialog) { mutableStateOf(autoOpenAddDialog) }
     var supplierToEdit by remember { mutableStateOf<Supplier?>(null) }
     var supplierToArchive by remember { mutableStateOf<Supplier?>(null) }
     var supplierToRestore by remember { mutableStateOf<Supplier?>(null) }

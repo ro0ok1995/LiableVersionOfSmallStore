@@ -75,6 +75,7 @@ import com.example.model.SettlementType
 import com.example.model.StoreStrings
 import com.example.model.TransactionItem
 import com.example.accounting.FinancialReportCalculator
+import com.example.accounting.CustomerLedgerCalculator
 import com.example.accounting.SupplierBalanceSummary
 import com.example.accounting.SupplierLedgerCalculator
 import com.example.data.db.Purchase
@@ -116,6 +117,7 @@ fun AccountsScreen(
     onOpenAddSupplierDialog: (() -> Unit)? = null,
     onGetSupplierBalance: (suspend (String) -> SupplierBalanceSummary)? = null,
     initialSelectedAccountTab: Int = 0,
+    onSelectedAccountTabChange: (Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
@@ -132,18 +134,10 @@ fun AccountsScreen(
     var selectedSupplier by remember { mutableStateOf<Supplier?>(null) }
     // 0 = All, 1 = Has Payable (Debt), 2 = Settled
     var supplierFilter by remember { mutableIntStateOf(0) }
-    var showLocalAddSupplierDialog by remember { mutableStateOf(false) }
 
     // Exclude archived suppliers from the active supplier list
     val activeSuppliers = remember(suppliers) {
         suppliers.filter { !it.isArchived }
-    }
-
-    val matchingCustomers = remember(searchQuery, allCustomers, accounts) {
-        val pool = if (allCustomers.isNotEmpty()) allCustomers else accounts
-        val q = searchQuery.trim().lowercase()
-        if (q.isEmpty()) emptyList()
-        else pool.filter { it.customerName.lowercase().contains(q) || it.phone.contains(q) }
     }
 
     val customerCashTotals = remember(transactions) {
@@ -152,8 +146,12 @@ fun AccountsScreen(
         }
     }
 
-    val customerBalances = remember(accounts) {
-        accounts.associate { customer -> customer.id to customer.balance }
+    // Always use the authoritative ledger calculation, never the legacy cached balance field.
+    val customerBalances = remember(allCustomers, accounts, transactions) {
+        val pool = if (allCustomers.isNotEmpty()) allCustomers else accounts
+        pool.associate { customer ->
+            customer.id to CustomerLedgerCalculator.calculateCustomerBalance(customer.id, transactions).balance
+        }
     }
 
     val sortedAccounts = remember(accounts, sortOption, customerCashTotals, customerBalances) {
@@ -167,17 +165,26 @@ fun AccountsScreen(
     }
 
     // Authoritative supplier balances including opening balances, adjustments, and returns
-    var supplierBalances by remember {
-        mutableStateOf<Map<String, SupplierBalanceSummary>>(emptyMap())
-    }
+    var supplierBalances by remember { mutableStateOf<Map<String, SupplierBalanceSummary>>(emptyMap()) }
+    var supplierBalanceLoading by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var supplierBalanceErrors by remember { mutableStateOf<Set<String>>(emptySet()) }
     LaunchedEffect(activeSuppliers, purchases, supplierPayments, purchaseReturns, onGetSupplierBalance) {
-        val updated = activeSuppliers.associate { supplier ->
-            val authoritative = if (onGetSupplierBalance != null) {
-                runCatching { onGetSupplierBalance(supplier.id) }.getOrNull()
-            } else null
-            supplier.id to (authoritative ?: SupplierBalanceSummary(supplierId = supplier.id))
+        supplierBalanceLoading = activeSuppliers.map { it.id }.toSet()
+        supplierBalanceErrors = emptySet()
+        val updated = mutableMapOf<String, SupplierBalanceSummary>()
+        val errors = mutableSetOf<String>()
+        activeSuppliers.forEach { supplier ->
+            if (onGetSupplierBalance == null) {
+                errors += supplier.id
+            } else {
+                runCatching { onGetSupplierBalance(supplier.id) }
+                    .onSuccess { updated[supplier.id] = it }
+                    .onFailure { errors += supplier.id }
+            }
         }
         supplierBalances = updated
+        supplierBalanceErrors = errors
+        supplierBalanceLoading = emptySet()
     }
 
     val filteredSuppliers = remember(activeSuppliers, supplierSearchQuery, supplierFilter, supplierBalances, selectedSupplier) {
@@ -193,8 +200,8 @@ fun AccountsScreen(
             }
         }
         when (supplierFilter) {
-            1 -> list.filter { sup -> (supplierBalances[sup.id]?.balance ?: 0.0) > 0.001 }
-            2 -> list.filter { sup -> Math.abs(supplierBalances[sup.id]?.balance ?: 0.0) <= 0.001 }
+            1 -> list.filter { sup -> supplierBalances[sup.id]?.balance?.let { it > 0.001 } == true }
+            2 -> list.filter { sup -> supplierBalances[sup.id]?.balance?.let { Math.abs(it) <= 0.001 } == true }
             else -> list
         }
     }
@@ -250,13 +257,7 @@ fun AccountsScreen(
                     }
                 } else {
                     Button(
-                        onClick = {
-                            if (onOpenAddSupplierDialog != null) {
-                                onOpenAddSupplierDialog()
-                            } else {
-                                showLocalAddSupplierDialog = true
-                            }
-                        },
+                        onClick = { onOpenAddSupplierDialog?.invoke() },
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = GeoPrimary),
                         contentPadding = ButtonDefaults.ContentPadding,
@@ -294,7 +295,7 @@ fun AccountsScreen(
                     border = if (selectedAccountTab == 0) null else BorderStroke(1.dp, GeoOutlineVariant),
                     modifier = Modifier
                         .weight(1f)
-                        .clickable { selectedAccountTab = 0 }
+                        .clickable { selectedAccountTab = 0; onSelectedAccountTabChange(0) }
                         .testTag("tab_customers")
                 ) {
                     Box(
@@ -316,7 +317,7 @@ fun AccountsScreen(
                     border = if (selectedAccountTab == 1) null else BorderStroke(1.dp, GeoOutlineVariant),
                     modifier = Modifier
                         .weight(1f)
-                        .clickable { selectedAccountTab = 1 }
+                        .clickable { selectedAccountTab = 1; onSelectedAccountTabChange(1) }
                         .testTag("tab_suppliers")
                 ) {
                     Box(
@@ -652,7 +653,9 @@ fun AccountsScreen(
                         }
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = if (isArabic) StoreStrings.NO_CUSTOMERS_YET_AR else StoreStrings.NO_CUSTOMERS_YET_EN,
+                            text = if (searchQuery.isNotBlank() || filter != AccountFilter.ALL) {
+                                if (isArabic) "لا توجد نتائج مطابقة" else "No matching results"
+                            } else if (isArabic) StoreStrings.NO_CUSTOMERS_YET_AR else StoreStrings.NO_CUSTOMERS_YET_EN,
                             style = MaterialTheme.typography.bodyLarge.copy(
                                 fontWeight = FontWeight.Medium,
                                 fontSize = 15.sp
@@ -660,22 +663,22 @@ fun AccountsScreen(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(modifier = Modifier.height(16.dp))
-                        Button(
-                            onClick = onOpenAddCustomerDialog,
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = GeoPrimary),
-                            modifier = Modifier.testTag("empty_state_add_customer_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (isArabic) StoreStrings.ADD_CUSTOMER_AR else StoreStrings.ADD_CUSTOMER_EN,
-                                fontWeight = FontWeight.Bold
-                            )
+                        if (searchQuery.isBlank() && filter == AccountFilter.ALL) {
+                            Button(
+                                onClick = onOpenAddCustomerDialog,
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = GeoPrimary),
+                                modifier = Modifier.testTag("empty_state_add_customer_button")
+                            ) {
+                                Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(text = if (isArabic) StoreStrings.ADD_CUSTOMER_AR else StoreStrings.ADD_CUSTOMER_EN, fontWeight = FontWeight.Bold)
+                            }
+                        } else {
+                            OutlinedButton(onClick = {
+                                onSearchQueryChange("")
+                                onFilterChange(AccountFilter.ALL)
+                            }) { Text(if (isArabic) "مسح البحث والتصفية" else "Clear search and filters") }
                         }
                     }
                 }
@@ -735,7 +738,13 @@ fun AccountsScreen(
                         }
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = if (isArabic) "لا يوجد موردون مسجلون بعد" else "No suppliers registered yet",
+                            text = if (supplierSearchQuery.isNotBlank() || supplierFilter != 0 || selectedSupplier != null) {
+                                if (isArabic) "لا توجد نتائج مطابقة" else "No matching results"
+                            } else if (supplierBalanceLoading.isNotEmpty() && activeSuppliers.isNotEmpty()) {
+                                if (isArabic) "جارٍ تحميل الحسابات..." else "Loading account balances..."
+                            } else if (supplierBalanceErrors.isNotEmpty() && activeSuppliers.isNotEmpty()) {
+                                if (isArabic) "تعذر تحميل أرصدة بعض الموردين" else "Some supplier balances could not be loaded"
+                            } else if (isArabic) "لا يوجد موردون مسجلون بعد" else "No suppliers registered yet",
                             style = MaterialTheme.typography.bodyLarge.copy(
                                 fontWeight = FontWeight.Medium,
                                 fontSize = 15.sp
@@ -744,13 +753,7 @@ fun AccountsScreen(
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Button(
-                            onClick = {
-                                if (onOpenAddSupplierDialog != null) {
-                                    onOpenAddSupplierDialog()
-                                } else {
-                                    showLocalAddSupplierDialog = true
-                                }
-                            },
+                            onClick = { onOpenAddSupplierDialog?.invoke() },
                             shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = GeoPrimary),
                             modifier = Modifier.testTag("empty_state_add_supplier_button")
@@ -780,14 +783,34 @@ fun AccountsScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                     }
                     items(items = filteredSuppliers, key = { it.id }) { supplier ->
-                        val summary = supplierBalances[supplier.id] ?: SupplierBalanceSummary(supplierId = supplier.id)
-                        SupplierAccountCardItem(
-                            supplier = supplier,
-                            summary = summary,
-                            currency = currency,
-                            isArabic = isArabic,
-                            onClick = { onSupplierClick?.invoke(supplier) }
-                        )
+                        val summary = supplierBalances[supplier.id]
+                        if (summary != null) {
+                            SupplierAccountCardItem(
+                                supplier = supplier,
+                                summary = summary,
+                                currency = currency,
+                                isArabic = isArabic,
+                                onClick = { onSupplierClick?.invoke(supplier) }
+                            )
+                        } else {
+                            Card(
+                                modifier = Modifier.fillMaxWidth().testTag("supplier_balance_unavailable_${supplier.id}"),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                border = BorderStroke(1.dp, GeoOutlineVariant)
+                            ) {
+                                Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(supplier.name, fontWeight = FontWeight.SemiBold)
+                                        Text(if (supplier.id in supplierBalanceLoading) {
+                                            if (isArabic) "جارٍ تحميل الرصيد..." else "Loading balance..."
+                                        } else {
+                                            if (isArabic) "تعذر تحميل الرصيد" else "Balance unavailable"
+                                        }, color = StatusRed, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    Text("—", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
                     }
                     item {
                         Spacer(modifier = Modifier.height(16.dp))
