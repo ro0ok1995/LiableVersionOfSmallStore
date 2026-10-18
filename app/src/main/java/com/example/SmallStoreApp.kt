@@ -310,20 +310,15 @@ fun SmallStoreApp(
                                     val expenseActivities = uiState.expenses.map {
                                         it.toTransactionItem(categoryNames[it.categoryId]?.name ?: "")
                                     }
+                                    // Keep reversed operations in the activity source so the dashboard can label them;
+                                    // KPI calculations explicitly exclude them.
                                     (uiState.allTransactions + purchaseActivities + supplierPaymentActivities + purchaseReturnActivities + expenseActivities)
-                                        .filter { it.typedOperationStatus != com.example.model.OperationStatus.REVERSED }
                                         .distinctBy { it.id }
                                         .sortedWith(compareByDescending<com.example.model.TransactionItem> { it.date }.thenByDescending { it.id })
                                 }
 
-                                val displayedTxs = remember(storeActivities, uiState.allTransactions, uiState.homeSelectedCustomer) {
-                                    val selectedCust = uiState.homeSelectedCustomer
-                                    if (selectedCust != null) {
-                                        uiState.allTransactions.filter { it.customerId == selectedCust.id }
-                                    } else {
-                                        storeActivities
-                                    }
-                                }
+                                // Pass the complete store activity set; HomeScreen applies customer search only to the activity list.
+                                val displayedTxs = storeActivities
 
                                 val totalDebt = remember(uiState.customers, uiState.allTransactions) {
                                     uiState.customers.sumOf { cust ->
@@ -340,6 +335,7 @@ fun SmallStoreApp(
                                     matchingCustomers = matching,
                                     allCustomers = uiState.customers,
                                     allTransactions = uiState.allTransactions,
+                                    authoritativeCustomerBalances = uiState.authoritativeCustomerBalances,
                                     selectedCustomer = uiState.homeSelectedCustomer,
                                     searchQuery = uiState.homeSearchQuery,
                                     selectedPeriod = uiState.homeSelectedPeriod,
@@ -353,8 +349,14 @@ fun SmallStoreApp(
                                     onNavigateToSuppliers = {
                                         mainViewModel.navigateTo(NavDestination.SUPPLIER_OPERATIONS)
                                     },
+                                    onViewAllTransactions = { period, start, end ->
+                                        analysisViewModel.openTransactionsReport(period, start, end)
+                                        mainViewModel.navigateTo(NavDestination.ANALYSIS_CENTER)
+                                    },
                                     onClearSelectedCustomer = { mainViewModel.clearHomeSelectedCustomer() },
                                     onSelectPeriod = { mainViewModel.setHomePeriod(it) },
+                                    selectedDashboardTab = uiState.homeDashboardTab,
+                                    onDashboardTabChange = { mainViewModel.setHomeDashboardTab(it) },
                                     customStartDate = uiState.homeCustomStartDate,
                                     customEndDate = uiState.homeCustomEndDate,
                                     showCustomDatePicker = uiState.showHomeCustomDatePicker,

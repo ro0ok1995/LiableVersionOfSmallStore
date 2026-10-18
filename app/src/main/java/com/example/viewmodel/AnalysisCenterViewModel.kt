@@ -68,7 +68,8 @@ data class CustomerDebtAgingResult(
     val bucket31To60: Double,
     val bucket61To90: Double,
     val bucket90Plus: Double,
-    val individualTransactions: List<TransactionAgingDetail>
+    val individualTransactions: List<TransactionAgingDetail>,
+    val unagedBalance: Double = 0.0
 ) {
     fun formatAgingSummary(isArabic: Boolean): String {
         if (currentDebt <= 0.0) return if (isArabic) "مسدد بالكامل" else "Fully Settled"
@@ -77,6 +78,7 @@ data class CustomerDebtAgingResult(
         if (bucket31To60 > 0.0) parts.add("${if (isArabic) "31-60:" else "31-60d:"} ${String.format(Locale.US, "%.0f", bucket31To60)}")
         if (bucket61To90 > 0.0) parts.add("${if (isArabic) "61-90:" else "61-90d:"} ${String.format(Locale.US, "%.0f", bucket61To90)}")
         if (bucket90Plus > 0.0) parts.add("${if (isArabic) "+90:" else "90+d:"} ${String.format(Locale.US, "%.0f", bucket90Plus)}")
+        if (unagedBalance > 0.0) parts.add("${if (isArabic) "عمر غير محدد:" else "Unaged:"} ${String.format(Locale.US, "%.2f", unagedBalance)}")
         return if (parts.isEmpty()) (if (isArabic) "لا توجد ديون" else "No debt") else parts.joinToString(" | ")
     }
 }
@@ -88,7 +90,8 @@ data class StoreDebtAgingSummary(
     val sum31To60: Double,
     val sum61To90: Double,
     val sum90Plus: Double,
-    val customerAgings: List<CustomerDebtAgingResult>
+    val customerAgings: List<CustomerDebtAgingResult>,
+    val sumUnaged: Double = 0.0
 )
 
 object DebtAgingUtils {
@@ -123,13 +126,14 @@ object DebtAgingUtils {
         customer: CustomerAccount,
         allTransactions: List<TransactionItem>,
         today: LocalDate = LocalDate.now(),
-        isArabic: Boolean = false
+        isArabic: Boolean = false,
+        authoritativeBalance: Double? = null
     ): CustomerDebtAgingResult {
-        // Authoritative ledger calculation (CustomerLedgerCalculator source of truth):
+        // Prefer the persistent ledger balance (sales, payments, opening balances, adjustments, returns and refunds).
         val ledgerSummary = CustomerLedgerCalculator.calculateCustomerBalance(customer.id, allTransactions)
 
-        // Net authoritative customer balance (never use cumulative historical customer.totalDebt):
-        val currentBalance = ledgerSummary.balance
+        // Fall back to the transaction-ledger calculation only while the persistent summary is unavailable.
+        val currentBalance = authoritativeBalance ?: ledgerSummary.balance
         // Active outstanding receivable obligation (balance > 0 means customer owes store):
         val outstandingDebt = currentBalance.coerceAtLeast(0.0)
 
@@ -138,8 +142,10 @@ object DebtAgingUtils {
 
         // Candidate receivable entries: active operations that created receivable debit:
         val candidateEntries = customerEntries.filter { entry ->
-            entry.operationStatus != OperationStatus.REVERSED && entry.debit > 0.0001
-        }.sortedByDescending { it.date }
+            entry.operationStatus != OperationStatus.REVERSED &&
+                entry.transactionType == com.example.model.TransactionType.SALE &&
+                entry.debit > 0.0001
+        }.sortedWith(compareBy({ it.date }, { it.transactionId }))
 
         if (outstandingDebt <= 0.0001) {
             return CustomerDebtAgingResult(
@@ -156,7 +162,7 @@ object DebtAgingUtils {
             )
         }
 
-        // Allocate outstanding debt to aging buckets (newest to oldest)
+        // Allocate remaining debt oldest-first so partial payments reduce the oldest invoices first.
         var remainingDebt = outstandingDebt
         var b0To30 = 0.0
         var b31To60 = 0.0
@@ -187,11 +193,8 @@ object DebtAgingUtils {
             )
         }
 
-        // Any leftover debt not covered by recorded debt transactions (e.g. initial debt balance)
-        // is placed in 90+ days bucket
-        if (remainingDebt > 0.0001) {
-            b90Plus += remainingDebt
-        }
+        // Opening/legacy balances without a reliable transaction date must not be mislabelled as 90+ days.
+        val unagedBalance = remainingDebt.coerceAtLeast(0.0)
 
         return CustomerDebtAgingResult(
             customerId = customer.id,
@@ -203,7 +206,8 @@ object DebtAgingUtils {
             bucket31To60 = b31To60,
             bucket61To90 = b61To90,
             bucket90Plus = b90Plus,
-            individualTransactions = activeDetails
+            individualTransactions = activeDetails,
+            unagedBalance = unagedBalance
         )
     }
 
@@ -215,10 +219,11 @@ object DebtAgingUtils {
         customers: List<CustomerAccount>,
         allTransactions: List<TransactionItem>,
         today: LocalDate = LocalDate.now(),
-        isArabic: Boolean = false
+        isArabic: Boolean = false,
+        authoritativeBalances: Map<String, Double> = emptyMap()
     ): StoreDebtAgingSummary {
         val customerAgings = customers.map { cust ->
-            calculateCustomerAging(cust, allTransactions, today, isArabic)
+            calculateCustomerAging(cust, allTransactions, today, isArabic, authoritativeBalances[cust.id])
         }.sortedByDescending { it.currentDebt }
 
         return StoreDebtAgingSummary(
@@ -228,7 +233,8 @@ object DebtAgingUtils {
             sum31To60 = customerAgings.sumOf { it.bucket31To60 },
             sum61To90 = customerAgings.sumOf { it.bucket61To90 },
             sum90Plus = customerAgings.sumOf { it.bucket90Plus },
-            customerAgings = customerAgings
+            customerAgings = customerAgings,
+            sumUnaged = customerAgings.sumOf { it.unagedBalance }
         )
     }
 }
@@ -527,6 +533,14 @@ class AnalysisCenterViewModel : ViewModel() {
 
     fun selectReportType(type: ReportType) {
         _uiState.update { it.copy(selectedReportType = type) }
+    }
+
+    /** Opens the complete transactions report with the period selected on the dashboard. */
+    fun openTransactionsReport(period: PeriodFilter, startDate: LocalDate?, endDate: LocalDate?) {
+        selectTab(AnalysisTab.REPORTS)
+        selectPeriod(period)
+        if (period == PeriodFilter.CUSTOM) setCustomDateRange(startDate, endDate)
+        selectReportType(ReportType.TRANSACTIONS)
     }
 
     fun setExportSuccessMessage(msg: String?) {

@@ -38,9 +38,13 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,6 +68,7 @@ import com.example.model.TransactionItem
 import com.example.model.TransactionType
 import com.example.model.typedSaleType
 import com.example.model.typedTransactionType
+import com.example.model.typedOperationStatus
 import com.example.ui.components.CustomerSelectorField
 import com.example.ui.theme.GeoOutlineVariant
 import com.example.ui.theme.GeoPrimary
@@ -188,7 +193,25 @@ internal fun ReportsTabContent(
     val totalItemProfitMargin = remember(itemBreakdowns) { itemBreakdowns.sumOf { it.profitMargin } }
 
     // 3. TRANSACTIONS calculations
-    val sortedTransactions = remember(periodTransactions) { periodTransactions.sortedByDescending { it.date } }
+    val sortedTransactions = remember(periodTransactions) { periodTransactions.sortedWith(compareByDescending<TransactionItem> { it.date }.thenByDescending { it.id }) }
+    var transactionSearchQuery by remember { mutableStateOf("") }
+    var transactionPage by remember { mutableStateOf(0) }
+    val filteredTransactionRows = remember(sortedTransactions, transactionSearchQuery) {
+        val query = transactionSearchQuery.trim()
+        if (query.isBlank()) sortedTransactions else sortedTransactions.filter { tx ->
+            tx.title.contains(query, ignoreCase = true) ||
+                tx.customerNameSnapshot.contains(query, ignoreCase = true) ||
+                tx.customerName.contains(query, ignoreCase = true) ||
+                tx.activityType.contains(query, ignoreCase = true) ||
+                tx.date.contains(query, ignoreCase = true) ||
+                tx.notes.contains(query, ignoreCase = true) ||
+                tx.amount.toString().contains(query)
+        }
+    }
+    val transactionPageSize = 25
+    val transactionPageCount = ((filteredTransactionRows.size + transactionPageSize - 1) / transactionPageSize).coerceAtLeast(1)
+    val safeTransactionPage = transactionPage.coerceIn(0, transactionPageCount - 1)
+    val visibleTransactionRows = filteredTransactionRows.drop(safeTransactionPage * transactionPageSize).take(transactionPageSize)
     val totalTxCash = salesBreakdown.cashSales
     val totalTxDebt = salesBreakdown.creditSales
     val totalTxPayments = salesBreakdown.customerPayments
@@ -630,6 +653,47 @@ internal fun ReportsTabContent(
                     customerItemBreakdowns = customerItemBreakdowns,
                     previewRows = previewRows
                 )
+            }
+        }
+
+        if (uiState.selectedReportType == ReportType.TRANSACTIONS) {
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, GeoOutlineVariant),
+                modifier = Modifier.fillMaxWidth().testTag("transactions_report_browser")
+            ) {
+                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(if (isArabic) "كل معاملات الفترة" else "All Transactions in Period", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                    OutlinedTextField(
+                        value = transactionSearchQuery,
+                        onValueChange = { transactionSearchQuery = it; transactionPage = 0 },
+                        modifier = Modifier.fillMaxWidth().testTag("transactions_report_search"),
+                        singleLine = true,
+                        label = { Text(if (isArabic) "بحث في النوع أو الاسم أو التاريخ أو الملاحظات" else "Search type, name, date, or notes") }
+                    )
+                    Text(if (isArabic) "${filteredTransactionRows.size} نتيجة · ${sortedTransactions.size} معاملة في الفترة" else "${filteredTransactionRows.size} results · ${sortedTransactions.size} transactions in period", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (visibleTransactionRows.isEmpty()) {
+                        Text(if (isArabic) "لا توجد معاملات مطابقة." else "No matching transactions.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        visibleTransactionRows.forEach { tx ->
+                            Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(tx.customerNameSnapshot.ifBlank { tx.customerName }.ifBlank { tx.title }, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text("${tx.activityType} · ${tx.date}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    if (tx.typedOperationStatus == com.example.model.OperationStatus.REVERSED) Text(if (isArabic) "ملغاة" else "Reversed", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                                }
+                                Text(String.format(Locale.US, "%,.2f %s", tx.amount, currency), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                            }
+                            androidx.compose.material3.HorizontalDivider(color = GeoOutlineVariant.copy(alpha = 0.5f))
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(onClick = { transactionPage = (safeTransactionPage - 1).coerceAtLeast(0) }, enabled = safeTransactionPage > 0) { Text(if (isArabic) "السابق" else "Previous") }
+                        Text(if (isArabic) "صفحة ${safeTransactionPage + 1} من $transactionPageCount" else "Page ${safeTransactionPage + 1} of $transactionPageCount", style = MaterialTheme.typography.labelMedium)
+                        OutlinedButton(onClick = { transactionPage = (safeTransactionPage + 1).coerceAtMost(transactionPageCount - 1) }, enabled = safeTransactionPage < transactionPageCount - 1) { Text(if (isArabic) "التالي" else "Next") }
+                    }
+                }
             }
         }
 

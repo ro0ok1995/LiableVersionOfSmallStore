@@ -12,6 +12,11 @@ import com.example.data.db.SaleReturnDao
 import com.example.data.db.RefundDao
 import com.example.data.db.TransactionDao
 import com.example.data.db.toModel
+import com.example.data.db.toEntity
+import com.example.model.typedTransactionType
+import com.example.model.OperationStatus
+import com.example.model.TransactionType
+import com.example.model.TransactionItem
 import com.example.data.db.FinancialAccountDao
 import com.example.data.db.PaymentMethodDao
 import com.example.data.db.SmallStoreDatabase
@@ -52,9 +57,33 @@ class CustomerPaymentRepository(
         return customerPaymentDao.getPaymentById(id)
     }
 
-    /** Raw insertion is intentionally private so callers cannot bypass ledger validation. */
+    /** Raw insertion is private; reject duplicate IDs instead of silently replacing historical records. */
     private suspend fun insertCustomerPayment(payment: CustomerPayment) {
+        require(customerPaymentDao.getPaymentById(payment.id) == null) { "Customer payment already exists: ${payment.id}" }
+        require(transactionDao.getTransactionById(payment.id) == null) { "A transaction already uses customer payment ID: ${payment.id}" }
         customerPaymentDao.insertPayment(payment)
+    }
+
+    /** Every authoritative customer payment gets one same-ID transaction mirror for activity/reporting/reversal. */
+    private suspend fun insertPaymentTransactionMirror(payment: CustomerPayment, customerName: String) {
+        val transaction = TransactionItem(
+            id = payment.id,
+            title = "Customer Payment: $customerName",
+            customerNameSnapshot = customerName,
+            activityType = "تسديد",
+            amount = payment.amount,
+            isCredit = false,
+            date = payment.transactionDate,
+            relativeTime = "الآن",
+            notes = payment.notes.orEmpty(),
+            customerId = payment.customerId,
+            customerName = customerName,
+            transactionType = TransactionType.CUSTOMER_PAYMENT,
+            operationStatus = OperationStatus.ACTIVE,
+            paidAmount = payment.amount,
+            creditAmount = 0.0
+        )
+        transactionDao.insertTransaction(transaction.toEntity())
     }
 
     private suspend fun currentOutstandingBalance(customerId: String): Double {
@@ -73,8 +102,11 @@ class CustomerPaymentRepository(
     }
 
     private fun requireWithinOutstanding(amount: Double, balance: Double, customerId: String) {
-        // Customer advances and credit balances are supported: amount can exceed balance to create a customer credit
         require(amount.isFinite() && amount > 0.0) { "Customer payment amount must be finite and strictly positive" }
+        require(balance > 0.0001) { "Customer has no outstanding debt: $customerId" }
+        require(amount <= balance + 0.0001) {
+            "Payment exceeds outstanding customer debt: amount=$amount, outstanding=$balance, customer=$customerId"
+        }
     }
 
     suspend fun recordCustomerPayment(
@@ -121,6 +153,7 @@ class CustomerPaymentRepository(
         )
 
         insertCustomerPayment(payment)
+        insertPaymentTransactionMirror(payment, customer.customerName)
 
         customerDao.updateCustomer(
             customer.copy(
@@ -130,6 +163,22 @@ class CustomerPaymentRepository(
         )
 
         payment
+    }
+
+    /** Atomically stores the customer payment ledger row and the dashboard/report transaction row. */
+    suspend fun recordCustomerPaymentWithTransaction(
+        payment: CustomerPayment,
+        transaction: com.example.model.TransactionItem
+    ): CustomerPayment = database.withTransaction {
+        require(transaction.id == payment.id) { "Payment and transaction IDs must match for reversal safety" }
+        require(transaction.customerId == payment.customerId) { "Payment and transaction customer IDs must match" }
+        require(transaction.amount == payment.amount) { "Payment and transaction amounts must match" }
+        require(transaction.typedTransactionType == com.example.model.TransactionType.CUSTOMER_PAYMENT) {
+            "Paired transaction must be CUSTOMER_PAYMENT"
+        }
+        // recordCustomerPayment validates and atomically writes both the authoritative payment
+        // and its same-ID transaction mirror. Do not insert the supplied transaction again.
+        recordCustomerPayment(payment)
     }
 
     private fun dateIsValid(value: String): Boolean = try {
@@ -158,6 +207,7 @@ class CustomerPaymentRepository(
 
         val normalizedPayment = payment.copy(financialAccountId = accountId)
         insertCustomerPayment(normalizedPayment)
+        insertPaymentTransactionMirror(normalizedPayment, customer.customerName)
 
         customerDao.updateCustomer(
             customer.copy(

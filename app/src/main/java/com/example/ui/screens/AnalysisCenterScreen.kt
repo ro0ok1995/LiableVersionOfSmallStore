@@ -80,6 +80,7 @@ import com.example.data.db.Supplier
 import com.example.data.db.Purchase
 import com.example.data.db.SupplierPayment
 import com.example.data.db.PurchaseReturn
+import com.example.data.db.toTransactionItem
 import com.example.accounting.SupplierLedgerEntry
 import com.example.accounting.SupplierLedgerCalculator
 import com.example.model.LanguageMode
@@ -122,6 +123,20 @@ fun AnalysisCenterScreen(
     var supplierChartType by remember { mutableStateOf(BreakdownChartType.DONUT) }
     var supplierStatementEntries by remember { mutableStateOf<List<SupplierLedgerEntry>>(emptyList()) }
     val selectedSupplier = suppliers.firstOrNull { it.id == selectedSupplierId } ?: suppliers.firstOrNull()
+    // The transactions report must include authoritative supplier records that may not be mirrored in legacy transactions.
+    val reportTransactions = remember(transactions, suppliers, supplierPurchases, supplierPayments, supplierReturns) {
+        val supplierNames = suppliers.associate { it.id to it.name }
+        val purchasesById = supplierPurchases.associateBy { it.id }
+        val supplierRows = supplierPurchases.map { it.toTransactionItem(supplierNames[it.supplierId].orEmpty()) } +
+            supplierPayments.map { it.toTransactionItem(supplierNames[it.supplierId].orEmpty()) } +
+            supplierReturns.map { ret ->
+                ret.toTransactionItem(
+                    supplierName = supplierNames[ret.supplierId].orEmpty(),
+                    invoiceNumber = purchasesById[ret.purchaseId]?.invoiceNumber.orEmpty()
+                )
+            }
+        (transactions + supplierRows).distinctBy { it.id }
+    }
     LaunchedEffect(initialSupplierId, suppliers) {
         if (initialSupplierId != null) analysisEntityMode = 1
         if (initialSupplierId != null && suppliers.any { it.id == initialSupplierId }) selectedSupplierId = initialSupplierId
@@ -327,7 +342,7 @@ fun AnalysisCenterScreen(
                         viewModel = viewModel,
                         uiState = uiState,
                         customers = customers,
-                        allTransactions = transactions,
+                        allTransactions = reportTransactions,
                         products = products,
                         transactionLines = transactionLines,
                         activePeriod = activePeriod,

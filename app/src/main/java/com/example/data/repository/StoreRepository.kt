@@ -602,6 +602,9 @@ class StoreRepository private constructor(
     suspend fun recordCustomerPayment(payment: CustomerPayment): CustomerPayment =
         customerPaymentRepository.recordCustomerPayment(payment)
 
+    suspend fun recordQuickCustomerPayment(transaction: TransactionItem, payment: CustomerPayment): CustomerPayment =
+        customerPaymentRepository.recordCustomerPaymentWithTransaction(payment, transaction)
+
     // =========================================================================
     // Phase 5: Opening Balances
     // =========================================================================
@@ -762,7 +765,9 @@ class StoreRepository private constructor(
 
         // Look up original transaction across supported sources
         val sale = saleDao.getSaleById(originalTransactionId)
+        // Backward compatibility for older quick-payment pairs that used cp_<transactionId>.
         val payment = customerPaymentDao.getPaymentById(originalTransactionId)
+            ?: customerPaymentDao.getPaymentById("cp_$originalTransactionId")
         val adjustment = adjustmentDao.getAdjustmentById(originalTransactionId)
         val expense = expenseDao.getExpenseById(originalTransactionId)
         val supplierPayment = supplierPaymentDao.getPaymentById(originalTransactionId)

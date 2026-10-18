@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Reply
@@ -97,6 +98,7 @@ import com.example.data.db.Purchase
 import com.example.data.db.SupplierPayment
 import com.example.data.db.PurchaseReturn
 import com.example.accounting.SupplierBalanceSummary
+import com.example.accounting.CustomerLedgerCalculator
 import com.example.ui.components.RecordSaleReturnDialog
 import com.example.model.TransactionItem
 import com.example.model.TransactionType
@@ -134,9 +136,12 @@ fun HomeScreen(
     onSelectCustomer: (CustomerAccount) -> Unit,
     onClearSelectedCustomer: () -> Unit,
     onSelectPeriod: (PeriodFilter) -> Unit,
+    selectedDashboardTab: Int = 0,
+    onDashboardTabChange: (Int) -> Unit = {},
     modifier: Modifier = Modifier,
     allCustomers: List<CustomerAccount> = matchingCustomers,
     allTransactions: List<TransactionItem> = transactions,
+    authoritativeCustomerBalances: Map<String, Double>? = null,
     customStartDate: LocalDate? = null,
     customEndDate: LocalDate? = null,
     showCustomDatePicker: Boolean = false,
@@ -147,6 +152,7 @@ fun HomeScreen(
     onNavigateToCustomerProfile: ((CustomerAccount) -> Unit)? = null,
     onNavigateToSupplierProfile: ((Supplier) -> Unit)? = null,
     onNavigateToSuppliers: (() -> Unit)? = null,
+    onViewAllTransactions: ((PeriodFilter, LocalDate?, LocalDate?) -> Unit)? = null,
     onReverseTransaction: ((TransactionItem, String, String) -> Unit)? = null,
     onReturnTransaction: ((TransactionItem, List<SaleReturnLineRequest>, String, String, RefundRequest?) -> Unit)? = null,
     onLoadReturnDetails: (suspend (String) -> Triple<Sale?, List<SaleLine>, Map<String, Int>>)? = null,
@@ -163,34 +169,33 @@ fun HomeScreen(
     var transactionToReturn by remember { mutableStateOf<TransactionItem?>(null) }
     var isSearchExpanded by remember { mutableStateOf(false) }
     var showOverdueCustomersDialog by remember { mutableStateOf(false) }
-    var selectedDashboardTab by remember { mutableStateOf(0) } // 0: Customers, 1: Suppliers
     var selectedSupplier by remember { mutableStateOf<Supplier?>(null) }
     var supplierSearchQuery by remember { mutableStateOf("") }
+    var showSupplierPayablesDialog by remember { mutableStateOf(false) }
+    var showSupplierAdvancesDialog by remember { mutableStateOf(false) }
 
 
     // CURRENT BALANCES (Never filtered by period):
     // 1. Customer Receivables & Debt Aging
-    val storeAgingSummary = remember(allCustomers, allTransactions, isArabic) {
+    val storeAgingSummary = remember(allCustomers, allTransactions, isArabic, authoritativeCustomerBalances) {
         DebtAgingUtils.calculateStoreDebtAgingSummary(
             customers = allCustomers.ifEmpty { matchingCustomers },
             allTransactions = allTransactions,
-            isArabic = isArabic
+            isArabic = isArabic,
+            authoritativeBalances = authoritativeCustomerBalances.orEmpty()
         )
     }
 
-    val customerReceivables = if (selectedCustomer != null) {
-        selectedCustomer.balance.coerceAtLeast(0.0)
+    // Dashboard headline indicators remain store-wide and prefer persistent balances including opening balances/adjustments.
+    val customerReceivables = if (authoritativeCustomerBalances != null) {
+        authoritativeCustomerBalances.values.sumOf { it.coerceAtLeast(0.0) }
     } else if (allCustomers.isNotEmpty()) {
-        allCustomers.sumOf { it.balance.coerceAtLeast(0.0) }
-    } else {
-        totalDebt.coerceAtLeast(0.0)
-    }
+        allCustomers.sumOf { customer ->
+            CustomerLedgerCalculator.calculateCustomerBalance(customer.id, allTransactions).balance.coerceAtLeast(0.0)
+        }
+    } else totalDebt.coerceAtLeast(0.0)
 
-    val customersWithDebtCount = if (selectedCustomer != null) {
-        if (selectedCustomer.balance > 0.001) 1 else 0
-    } else {
-        storeAgingSummary.totalCustomersWithDebtCount
-    }
+    val customersWithDebtCount = storeAgingSummary.totalCustomersWithDebtCount
 
     // Overdue Receivables (Aging > 30 days)
     val overdueReceivables = storeAgingSummary.sum31To60 + storeAgingSummary.sum61To90 + storeAgingSummary.sum90Plus
@@ -200,12 +205,14 @@ fun HomeScreen(
     // This avoids reconstructing balances from generic transaction labels or customerId.
     var supplierPayables by remember { mutableStateOf<Double?>(null) }
     var supplierAdvances by remember { mutableStateOf<Double?>(null) }
+    var supplierBalancesById by remember { mutableStateOf<Map<String, Double>?>(null) }
     LaunchedEffect(suppliers, supplierPurchases, supplierPayments, supplierReturns, onGetSupplierBalance) {
         val activeSuppliers = suppliers.filter { !it.isArchived }
         if (onGetSupplierBalance == null) {
             // Do not show an incomplete fallback: it omits opening balances and adjustments.
             supplierPayables = null
             supplierAdvances = null
+            supplierBalancesById = null
         } else {
             val summaries = activeSuppliers.map { supplier ->
                 runCatching { onGetSupplierBalance(supplier.id) }.getOrNull()
@@ -214,8 +221,11 @@ fun HomeScreen(
                 // Avoid silently presenting a partial/incorrect total when any supplier ledger fails.
                 supplierPayables = null
                 supplierAdvances = null
+                supplierBalancesById = null
             } else {
-                val balances = summaries.filterNotNull().map { it.balance }
+                val byId = activeSuppliers.mapIndexed { index, supplier -> supplier.id to summaries[index]!!.balance }.toMap()
+                supplierBalancesById = byId
+                val balances = byId.values
                 supplierPayables = balances.sumOf { it.coerceAtLeast(0.0) }
                 supplierAdvances = balances.sumOf { (-it).coerceAtLeast(0.0) }
             }
@@ -258,25 +268,19 @@ fun HomeScreen(
         }.sumOf { it.amount }
     }
 
-    // PERIOD FLOWS (Filtered strictly by selected period):
-    val periodTransactions = remember(transactions, selectedPeriod, selectedCustomer, selectedDashboardTab, customStartDate, customEndDate) {
-        val base = if (selectedDashboardTab == 0 && selectedCustomer != null) {
-            transactions.filter { it.customerId == selectedCustomer.id }
-        } else {
-            transactions
-        }
-        base.filter { tx ->
-            DateFilterUtils.isDateInPeriod(
-                dateStr = tx.date,
-                period = selectedPeriod,
-                customStartDate = customStartDate,
-                customEndDate = customEndDate
-            )
+    // Store-wide period data drives KPIs. Search/selected customer only filters the activity list.
+    val allPeriodTransactions = remember(transactions, selectedPeriod, customStartDate, customEndDate) {
+        transactions.filter { tx ->
+            DateFilterUtils.isDateInPeriod(tx.date, selectedPeriod, customStartDate, customEndDate)
         }
     }
+    val periodTransactions = remember(allPeriodTransactions, selectedCustomer, selectedDashboardTab) {
+        if (selectedDashboardTab == 0 && selectedCustomer != null) allPeriodTransactions.filter { it.customerId == selectedCustomer.id }
+        else allPeriodTransactions
+    }
 
-    // Period KPI metrics:
-    val periodSalesTxs = remember(periodTransactions) {
+    // Period KPI metrics always use the store-wide period, never the search scope.
+    val periodSalesTxs = remember(allPeriodTransactions) {
         periodTransactions.filter { 
             it.typedOperationStatus != OperationStatus.REVERSED && 
             it.typedTransactionType == TransactionType.SALE 
@@ -284,23 +288,23 @@ fun HomeScreen(
     }
     val totalPeriodSales = periodSalesTxs.sumOf { it.amount }
     val periodSalesCount = periodSalesTxs.size
-    val periodSaleReturns = remember(periodTransactions) {
-        periodTransactions.filter { 
+    val periodSaleReturns = remember(allPeriodTransactions) {
+        allPeriodTransactions.filter { 
             it.typedOperationStatus != OperationStatus.REVERSED && 
             it.typedTransactionType == TransactionType.SALE_RETURN 
         }.sumOf { it.amount }
     }
     val totalPeriodNetSales = (totalPeriodSales - periodSaleReturns).coerceAtLeast(0.0)
 
-    val totalPeriodCollections = remember(periodTransactions) {
-        periodTransactions.filter { 
+    val totalPeriodCollections = remember(allPeriodTransactions) {
+        allPeriodTransactions.filter { 
             it.typedOperationStatus != OperationStatus.REVERSED && 
             it.typedTransactionType == TransactionType.CUSTOMER_PAYMENT 
         }.sumOf { it.amount }
     }
 
-    val totalPeriodExpenses = remember(periodTransactions) {
-        periodTransactions.filter { 
+    val totalPeriodExpenses = remember(allPeriodTransactions) {
+        allPeriodTransactions.filter { 
             it.typedOperationStatus != OperationStatus.REVERSED && 
             it.typedTransactionType == TransactionType.EXPENSE 
         }.sumOf { it.amount }
@@ -310,8 +314,8 @@ fun HomeScreen(
         periodSalesTxs.sumOf { it.creditAmount }
     }
 
-    val totalPeriodPurchases = remember(periodTransactions) {
-        periodTransactions.filter { 
+    val totalPeriodPurchases = remember(allPeriodTransactions) {
+        allPeriodTransactions.filter { 
             it.typedOperationStatus != OperationStatus.REVERSED && 
             it.typedTransactionType == TransactionType.PURCHASE 
         }.sumOf { it.amount }
@@ -331,7 +335,7 @@ fun HomeScreen(
         val supplierMap = suppliers.associateBy { it.id }
 
         val purchaseItems = supplierPurchases.filter { purchase ->
-            purchase.status != "REVERSED" && DateFilterUtils.isDateInPeriod(
+            DateFilterUtils.isDateInPeriod(
                 dateStr = purchase.purchaseDate,
                 period = selectedPeriod,
                 customStartDate = customStartDate,
@@ -365,7 +369,7 @@ fun HomeScreen(
         }
 
         val paymentItems = supplierPayments.filter { payment ->
-            payment.status != "REVERSED" && DateFilterUtils.isDateInPeriod(
+            DateFilterUtils.isDateInPeriod(
                 dateStr = payment.paymentDate,
                 period = selectedPeriod,
                 customStartDate = customStartDate,
@@ -398,7 +402,7 @@ fun HomeScreen(
         }
 
         val returnItems = supplierReturns.filter { ret ->
-            ret.status != "REVERSED" && DateFilterUtils.isDateInPeriod(
+            DateFilterUtils.isDateInPeriod(
                 dateStr = ret.returnDate,
                 period = selectedPeriod,
                 customStartDate = customStartDate,
@@ -465,7 +469,7 @@ fun HomeScreen(
             } else {
                 supplierPeriodActivities
             }
-            filteredBySelectedSupplier.take(6)
+            filteredBySelectedSupplier.sortedWith(compareByDescending<TransactionItem> { it.date }.thenByDescending { it.id }).take(30)
         } else {
             // CUSTOMER DASHBOARD: Sales, customer payments, sale returns
             val trimmedQuery = searchQuery.trim()
@@ -480,7 +484,7 @@ fun HomeScreen(
                     TransactionType.SALE_RETURN -> false
                     else -> tx.activityType.contains("مورد")
                 }
-                !isSupplierTx && tx.typedTransactionType != TransactionType.EXPENSE && !tx.activityType.contains("مصروف")
+                !isSupplierTx
             }
 
             val filtered = if (trimmedQuery.isBlank()) {
@@ -497,7 +501,7 @@ fun HomeScreen(
                     tx.customerNameSnapshot.contains(trimmedQuery, ignoreCase = true)
                 }
             }
-            filtered.take(6)
+            filtered.sortedWith(compareByDescending<TransactionItem> { it.date }.thenByDescending { it.id }).take(30)
         }
     }
 
@@ -652,14 +656,14 @@ fun HomeScreen(
                     label = if (isArabic) "لوحة العملاء" else "Customer Dashboard",
                     isSelected = selectedDashboardTab == 0,
                     testTag = "dashboard_tab_customer",
-                    onClick = { selectedDashboardTab = 0 },
+                    onClick = { onDashboardTabChange(0) },
                     modifier = Modifier.weight(1f)
                 )
                 PeriodChip(
                     label = if (isArabic) "لوحة الموردين" else "Supplier Dashboard",
                     isSelected = selectedDashboardTab == 1,
                     testTag = "dashboard_tab_supplier",
-                    onClick = { selectedDashboardTab = 1 },
+                    onClick = { onDashboardTabChange(1) },
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -701,17 +705,19 @@ fun HomeScreen(
                             valueColor = MaterialTheme.colorScheme.primary,
                             containerColor = MaterialTheme.colorScheme.surface,
                             testTag = "kpi_sales",
+                            helpText = if (isArabic) "صافي المبيعات = إجمالي المبيعات النشطة − مرتجعات المبيعات النشطة خلال الفترة. مثال: 1,000 − 100 = 900. لا تدخل العمليات الملغاة." else "Net sales = active sales − active sales returns in the selected period. Example: 1,000 − 100 = 900. Reversed operations are excluded.",
                             modifier = Modifier.weight(1f)
                         )
                         // KPI 2: Collections
                         KpiCard(
-                            title = if (isArabic) "التحصيلات النقدية" else "Collections",
+                            title = if (isArabic) "تحصيلات العملاء" else "Customer Collections",
                             subtitle = if (isArabic) "سداد العملاء" else "Customer payments",
                             amount = totalPeriodCollections,
                             currency = currency,
                             valueColor = MaterialTheme.colorScheme.statusGreen,
                             containerColor = MaterialTheme.colorScheme.surface,
                             testTag = "kpi_collections",
+                            helpText = if (isArabic) "مجموع دفعات العملاء المسجلة كتحصيلات خلال الفترة، بجميع وسائل الدفع المعتمدة، بعد استبعاد الملغى. مثال: دفعتان 100 و50 = 150. يجب ألا يُجمع سجل الدفعة مع سجل المعاملة نفسه مرتين." else "Sum of customer-payment transactions in the selected period across supported payment methods, excluding reversed entries. Example: 100 + 50 = 150. A payment and its mirrored transaction must not be counted twice.",
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -729,6 +735,7 @@ fun HomeScreen(
                             valueColor = MaterialTheme.colorScheme.error,
                             containerColor = MaterialTheme.colorScheme.surface,
                             testTag = "kpi_expenses",
+                            helpText = if (isArabic) "مجموع المصروفات غير الملغاة وتاريخها داخل الفترة المحددة. مثال: مصروف 30 + مصروف 20 = 50." else "Sum of non-reversed expenses dated within the selected period. Example: 30 + 20 = 50.",
                             modifier = Modifier.weight(1f)
                         )
                         // KPI 4: Credit Sales
@@ -740,6 +747,7 @@ fun HomeScreen(
                             valueColor = MaterialTheme.colorScheme.statusAmber,
                             containerColor = MaterialTheme.colorScheme.surface,
                             testTag = "kpi_credit_sales",
+                            helpText = if (isArabic) "مجموع الجزء الآجل (creditAmount) من المبيعات النشطة في الفترة، وليس إجمالي الفاتورة المختلطة. مثال: فاتورة 500، المدفوع 300، الآجل 200؛ المحتسب 200." else "Sum of the creditAmount portion of active sales in the period, not the full mixed invoice. Example: 500 invoice − 300 paid = 200 credit.",
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -822,13 +830,13 @@ fun HomeScreen(
                         Text(
                             text = if (isArabic) "يحتاج انتباهك" else "Needs Attention",
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.error
+                            color = MaterialTheme.colorScheme.statusAmber
                         )
 
                         Surface(
                             shape = RoundedCornerShape(12.dp),
                             color = MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.25f)),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.statusAmber.copy(alpha = 0.35f)),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { showOverdueCustomersDialog = true }
@@ -872,7 +880,7 @@ fun HomeScreen(
                                 Text(
                                     text = String.format(Locale.US, "%,.1f %s", overdueReceivables, currency),
                                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.error
+                                    color = MaterialTheme.colorScheme.statusAmber
                                 )
                             }
                         }
@@ -996,6 +1004,7 @@ fun HomeScreen(
                                 valueColor = MaterialTheme.colorScheme.primary,
                                 containerColor = MaterialTheme.colorScheme.surface,
                                 testTag = "home_purchases_period_card",
+                                helpText = if (isArabic) "مجموع إجمالي فواتير المشتريات المسجلة في الفترة، مع استبعاد الفواتير الملغاة. هذا إجمالي مشتريات وليس مقدار الدين وحده." else "Sum of purchase invoice totals dated in this period, excluding reversed invoices. This is gross purchases, not payable debt only.",
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -1038,6 +1047,7 @@ fun HomeScreen(
                                 valueColor = MaterialTheme.colorScheme.tertiary,
                                 containerColor = MaterialTheme.colorScheme.surface,
                                 testTag = "home_supplier_returns_period_card",
+                                helpText = if (isArabic) "مجموع مرتجعات المشتريات المسجلة في الفترة بعد استبعاد المرتجعات الملغاة. أثرها على المستحقات يعتمد على تسوية المرتجع الأصلي." else "Sum of purchase returns recorded in this period, excluding reversed returns. Their payable effect depends on the original purchase settlement.",
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -1050,6 +1060,7 @@ fun HomeScreen(
                                 valueColor = MaterialTheme.colorScheme.primary,
                                 containerColor = MaterialTheme.colorScheme.surface,
                                 testTag = "home_supplier_payments_period_card",
+                                helpText = if (isArabic) "مجموع دفعات الموردين المسجلة في الفترة بعد استبعاد الدفعات الملغاة." else "Sum of supplier payments recorded in this period, excluding reversed payments.",
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -1067,98 +1078,45 @@ fun HomeScreen(
                 }
             }
 
-            // 3. Below the two rows: Full-width Outstanding Supplier Debts / Amount Owed to Suppliers
+            // Current supplier balances are separate and drill down to the exact supplier list.
             item {
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = if (isArabic) "الأرصدة والمستحقات الحالية (لحظياً)" else "Current Outstanding Balances",
+                        text = if (isArabic) "الأرصدة والمستحقات الحالية" else "Current Supplier Balances",
                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-
-                    Card(
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .then(
-                                if (onNavigateToSuppliers != null) {
-                                    Modifier.clickable(onClick = onNavigateToSuppliers)
-                                } else Modifier
-                            )
-                            .testTag("home_supplier_payables_card")
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = if (isArabic) "إجمالي ديون الموردين (المستحقات عليك)" else "Amount Owed to Suppliers",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = supplierPayables?.let { String.format(Locale.US, "%,.2f %s", it, currency) } ?: if (isArabic) "تعذر تحميل الرصيد" else "Balance unavailable",
-                                        style = MaterialTheme.typography.headlineMedium.copy(
-                                            fontWeight = FontWeight.ExtraBold,
-                                            fontSize = 24.sp
-                                        ),
-                                        color = if ((supplierPayables ?: 0.0) > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.testTag("stat_total_supplier_debt")
-                                    )
-                                    if (supplierAdvances != null && (supplierAdvances ?: 0.0) > 0.0001) {
-                                        Text(
-                                            text = if (isArabic) "أرصدة مقدمة للموردين: ${String.format(Locale.US, "%,.2f %s", supplierAdvances, currency)}" else "Supplier advances: ${String.format(Locale.US, "%,.2f %s", supplierAdvances, currency)}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.tertiary
-                                        )
-                                    }
-                                }
-                                if (onNavigateToSuppliers != null) {
-                                    Surface(
-                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                                        shape = RoundedCornerShape(8.dp)
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
-                                        ) {
-                                            Text(
-                                                text = if (isArabic) "الموردين" else "Suppliers",
-                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Icon(
-                                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                                contentDescription = if (isArabic) "فتح إدارة الموردين" else "Open Supplier Management",
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(14.dp)
-                                            )
-                                        }
-                                    }
-                                }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        Card(
+                            onClick = { showSupplierPayablesDialog = true },
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier.weight(1f).testTag("home_supplier_payables_card")
+                        ) {
+                            Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                                Text(if (isArabic) "إجمالي ديون الموردين المستحقة على المحل" else "Supplier Debts Owed by Store", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.height(5.dp))
+                                Text(supplierPayables?.let { String.format(Locale.US, "%,.2f %s", it, currency) } ?: if (isArabic) "غير متاح" else "Unavailable", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold), color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("stat_total_supplier_debt"))
+                                Text(if (isArabic) "اضغط لعرض الموردين والمبالغ" else "Tap to list suppliers and amounts", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                             }
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = if (onNavigateToSuppliers != null) {
-                                    if (isArabic) "عرض وإدارة الموردين والمستحقات ↗" else "View & manage suppliers ↗"
-                                } else {
-                                    if (isArabic) "إجمالي رصيد الالتزام القائم حالياً" else "Total outstanding balance owed"
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (onNavigateToSuppliers != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        }
+                        Card(
+                            onClick = { showSupplierAdvancesDialog = true },
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier.weight(1f).testTag("home_supplier_advances_card")
+                        ) {
+                            Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                                Text(if (isArabic) "الأرصدة المقدمة للموردين" else "Supplier Advances", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.height(5.dp))
+                                Text(supplierAdvances?.let { String.format(Locale.US, "%,.2f %s", it, currency) } ?: if (isArabic) "غير متاح" else "Unavailable", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold), color = MaterialTheme.colorScheme.statusGreen)
+                                Text(if (isArabic) "اضغط لعرض الأرصدة المقدمة" else "Tap to list advances", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            }
                         }
                     }
                 }
@@ -1180,13 +1138,13 @@ fun HomeScreen(
                 ) {
                     Column {
                         Text(
-                            text = if (isArabic) "آخر نشاطات المتجر" else "Recent Store Activity",
+                            text = if (isArabic) "نشاطات المتجر خلال الفترة المحددة" else "Store Activity in Selected Period",
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         val totalEntriesCount = if (selectedDashboardTab == 1) supplierPeriodActivities.size else periodTransactions.size
                         Text(
-                            text = if (isArabic) "$totalEntriesCount عملية مسجلة" else "$totalEntriesCount total entries",
+                            text = if (isArabic) "يعرض ${recentActivities.size} من $totalEntriesCount عملية في الفترة" else "Showing ${recentActivities.size} of $totalEntriesCount entries in period",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1430,9 +1388,60 @@ fun HomeScreen(
                         }
                     }
                 }
+                Button(
+                    onClick = { onViewAllTransactions?.invoke(selectedPeriod, customStartDate, customEndDate) },
+                    enabled = onViewAllTransactions != null,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(if (isArabic) "عرض الكل" else "View All")
+                }
             }
         }
     }
+
+        if (showSupplierPayablesDialog || showSupplierAdvancesDialog) {
+            val advancesMode = showSupplierAdvancesDialog
+            val targetSuppliers = suppliers.filter { supplier ->
+                val balance = supplierBalancesById?.get(supplier.id)
+                balance != null && if (advancesMode) balance < -0.0001 else balance > 0.0001
+            }.sortedBy { it.name.lowercase(Locale.ROOT) }
+            AlertDialog(
+                onDismissRequest = { showSupplierPayablesDialog = false; showSupplierAdvancesDialog = false },
+                title = { Text(if (advancesMode) { if (isArabic) "الأرصدة المقدمة للموردين" else "Supplier Advances" } else { if (isArabic) "ديون الموردين المستحقة" else "Supplier Payables" }) },
+                text = {
+                    if (supplierBalancesById == null) {
+                        Text(if (isArabic) "تعذر تحميل أرصدة الموردين كاملة. أعد المحاولة لاحقًا." else "Supplier balances could not all be loaded. Please try again later.")
+                    } else if (targetSuppliers.isEmpty()) {
+                        Text(if (isArabic) "لا توجد أرصدة ضمن هذه القائمة." else "There are no balances in this list.")
+                    } else {
+                        LazyColumn(modifier = Modifier.heightIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            items(targetSuppliers, key = { it.id }) { supplier ->
+                                val balance = supplierBalancesById?.get(supplier.id) ?: 0.0
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth().clickable {
+                                        showSupplierPayablesDialog = false; showSupplierAdvancesDialog = false
+                                        onNavigateToSupplierProfile?.invoke(supplier)
+                                    },
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Row(Modifier.fillMaxWidth().padding(10.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(supplier.name, fontWeight = FontWeight.SemiBold)
+                                            if (supplier.phone.isNotBlank()) Text(supplier.phone, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                        Text(String.format(Locale.US, "%,.2f %s", kotlin.math.abs(balance), currency), fontWeight = FontWeight.Bold, color = if (advancesMode) MaterialTheme.colorScheme.statusGreen else MaterialTheme.colorScheme.error)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { showSupplierPayablesDialog = false; showSupplierAdvancesDialog = false }) { Text(if (isArabic) "إغلاق" else "Close") } }
+            )
+        }
+
 
     if (showCustomDatePicker) {
         CustomDateRangePickerDialog(
@@ -1482,7 +1491,7 @@ fun HomeScreen(
                     val customer = customerPool.find { it.id == aging.customerId }
                     Triple(
                         aging.customerName,
-                        customer?.balance?.coerceAtLeast(0.0) ?: aging.currentBalance.coerceAtLeast(0.0),
+                        aging.bucket31To60 + aging.bucket61To90 + aging.bucket90Plus,
                         customer
                     )
                 }
@@ -1583,8 +1592,10 @@ private fun KpiCard(
     containerColor: Color,
     testTag: String,
     modifier: Modifier = Modifier,
-    valueText: String? = null
+    valueText: String? = null,
+    helpText: String? = null
 ) {
+    var showHelp by remember { mutableStateOf(false) }
     Card(
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = containerColor),
@@ -1596,13 +1607,21 @@ private fun KpiCard(
                 .fillMaxWidth()
                 .padding(12.dp)
         ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                if (helpText != null) {
+                    IconButton(onClick = { showHelp = true }, modifier = Modifier.size(22.dp)) {
+                        Icon(Icons.Default.Info, contentDescription = if (title.isNotBlank()) "Explain $title" else "Explain metric", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(15.dp))
+                    }
+                }
+            }
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = valueText ?: String.format(Locale.US, "%,.2f %s", amount, currency),
@@ -1625,6 +1644,14 @@ private fun KpiCard(
                 )
             }
         }
+    }
+    if (showHelp && helpText != null) {
+        AlertDialog(
+            onDismissRequest = { showHelp = false },
+            title = { Text(title) },
+            text = { Text(helpText) },
+            confirmButton = { TextButton(onClick = { showHelp = false }) { Text("OK") } }
+        )
     }
 }
 

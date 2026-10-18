@@ -68,6 +68,7 @@ import java.time.LocalDate
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 
 data class MainUiState(
     val currentDestination: NavDestination = NavDestination.HOME,
@@ -121,6 +122,9 @@ data class MainUiState(
     val homeCustomStartDate: LocalDate? = null,
     val homeCustomEndDate: LocalDate? = null,
     val showHomeCustomDatePicker: Boolean = false,
+    val homeDashboardTab: Int = 0,
+    // Complete customer ledger balances, including opening balances and adjustments; null means unavailable.
+    val authoritativeCustomerBalances: Map<String, Double>? = null,
 
     // Accounts screen state
     val accountsSearchQuery: String = "",
@@ -176,7 +180,14 @@ class MainViewModel @JvmOverloads constructor(
 
         viewModelScope.launch {
             customerViewModel.customers.collect { list ->
-                _uiState.update { it.copy(customers = list) }
+                _uiState.update { it.copy(customers = list, authoritativeCustomerBalances = null) }
+                val calculated = list.map { customer ->
+                    customer.id to runCatching { repository.getCustomerBalance(customer.id).balance }.getOrNull()
+                }
+                val complete = calculated.all { it.second != null }
+                _uiState.update { state ->
+                    state.copy(authoritativeCustomerBalances = if (complete) calculated.associate { it.first to it.second!! } else null)
+                }
             }
         }
 
@@ -476,6 +487,11 @@ class MainViewModel @JvmOverloads constructor(
     }
 
     // HOME SCREEN
+    fun setHomeDashboardTab(tab: Int) {
+        if (tab !in 0..1) return
+        _uiState.update { it.copy(homeDashboardTab = tab) }
+    }
+
     fun setHomeSearchQuery(query: String) {
         _uiState.update { current ->
             val updatedCustomer = if (current.homeSelectedCustomer != null && query != current.homeSelectedCustomer.customerName) {
@@ -1356,7 +1372,7 @@ class MainViewModel @JvmOverloads constructor(
         if (debtAmount > 0.001 && customer == null) return
 
         val total = state.settlementTotal
-        val txId = "tx_${System.currentTimeMillis()}"
+        val txId = "tx_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(8)}"
 
         val saleType = when {
             debtAmount <= 0.001 -> SaleType.CASH
@@ -1477,9 +1493,12 @@ class MainViewModel @JvmOverloads constructor(
         val amount = state.quickPaymentAmount.toDoubleOrNull() ?: return
         if (amount <= 0.0) return
 
-        val txId = "tx_${System.currentTimeMillis()}"
+        val txId = "tx_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(8)}"
+        // This legacy in-memory balance is used only to label the payment status. The repository
+        // validates the amount against the persistent ledger (including opening balances/adjustments)
+        // and atomically rejects overpayments before writing either record.
         val liveBalance = CustomerLedgerCalculator.calculateCustomerBalance(customer.id, state.allTransactions).balance
-        val isFullPayment = amount >= (liveBalance - 0.001)
+        val isFullPayment = liveBalance > CustomerLedgerCalculator.EPSILON && amount >= (liveBalance - CustomerLedgerCalculator.EPSILON)
         val legacyFields = LegacyAccountingBridge.toLegacyFields(
             transactionType = TransactionType.CUSTOMER_PAYMENT,
             paymentStatus = if (isFullPayment) PaymentStatus.PAID else PaymentStatus.PARTIAL
@@ -1505,11 +1524,6 @@ class MainViewModel @JvmOverloads constructor(
             creditAmount = 0.0
         )
 
-        val updatedCustomer = customer.copy(
-            hasRecentActivity = true,
-            lastTransactionDate = todayDate
-        )
-
         val newNotif = NotificationItem(
             id = "notif_${System.currentTimeMillis()}",
             customerName = customer.customerName,
@@ -1522,7 +1536,7 @@ class MainViewModel @JvmOverloads constructor(
         )
 
         val newPayment = com.example.data.db.CustomerPayment(
-            id = "cp_${txId}",
+            id = txId,
             customerId = customer.id,
             amount = amount,
             paymentMethodId = "pm_cash",
@@ -1533,21 +1547,23 @@ class MainViewModel @JvmOverloads constructor(
             status = "ACTIVE"
         )
 
-        _uiState.update {
-            it.copy(
-                quickPaymentCustomer = null,
-                quickPaymentAmount = "",
-                quickPaymentNotes = "",
-                currentDestination = NavDestination.HOME,
-                activeBottomNav = NavDestination.HOME
-            )
-        }
-
         viewModelScope.launch {
-            repository.addTransaction(newTx)
-            repository.recordCustomerPayment(newPayment)
-            repository.updateCustomer(updatedCustomer)
-            repository.addNotification(newNotif)
+            val paymentResult = runCatching {
+                repository.recordQuickCustomerPayment(newTx, newPayment)
+            }
+            paymentResult.onSuccess {
+                _uiState.update {
+                    it.copy(
+                        quickPaymentCustomer = null,
+                        quickPaymentAmount = "",
+                        quickPaymentNotes = "",
+                        currentDestination = NavDestination.HOME,
+                        activeBottomNav = NavDestination.HOME
+                    )
+                }
+                // The payment repository already updates the customer's activity date atomically.
+                runCatching { repository.addNotification(newNotif) }
+            }
         }
     }
 
