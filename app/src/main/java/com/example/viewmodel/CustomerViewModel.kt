@@ -124,29 +124,16 @@ class CustomerViewModel @JvmOverloads constructor(
         addCustomerWithOpeningBalance(name, phone, initialDebt, "DEBIT")
     }
 
-    fun addCustomerWithOpeningBalance(
-        name: String,
-        phone: String,
-        amount: Double?,
-        direction: String,
-        onComplete: (Result<Unit>) -> Unit = {}
-    ) {
+    fun addCustomerWithOpeningBalance(name: String, phone: String, amount: Double?, direction: String) {
         val cleanName = name.trim()
-        if (cleanName.isBlank()) {
-            onComplete(Result.failure(IllegalArgumentException("Customer name is required")))
-            return
-        }
+        if (cleanName.isBlank()) return
         val customer = CustomerAccount(
             id = "c_${System.currentTimeMillis()}", customerName = cleanName, phone = phone.trim(),
             balance = 0.0, totalDebt = 0.0, hasRecentActivity = true
         )
         viewModelScope.launch {
-            runCatching { repository.addCustomerWithOpeningBalance(customer, amount, direction) }
-                .onSuccess {
-                    _showAddCustomerDialog.value = false
-                    onComplete(Result.success(Unit))
-                }
-                .onFailure { onComplete(Result.failure(it)) }
+            repository.addCustomerWithOpeningBalance(customer, amount, direction)
+            _showAddCustomerDialog.value = false
         }
     }
 

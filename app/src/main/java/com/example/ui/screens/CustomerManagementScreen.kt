@@ -88,14 +88,12 @@ fun CustomerManagementScreen(
     archivedCustomerIds: Set<String>,
     languageMode: LanguageMode,
     onBackClick: () -> Unit,
-    onAddCustomer: (name: String, phone: String, openingAmount: Double?, openingDirection: String, onComplete: (Result<Unit>) -> Unit) -> Unit,
+    onAddCustomer: (name: String, phone: String, openingAmount: Double?, openingDirection: String) -> Unit,
     onGetCustomerBalance: suspend (String) -> CustomerBalanceSummary,
     onRecordOpeningBalance: (String, Double, String, (Result<Unit>) -> Unit) -> Unit,
     onUpdateCustomer: (CustomerAccount) -> Unit,
     onArchiveCustomer: (String) -> Unit,
     onUnarchiveCustomer: (String) -> Unit,
-    openAddDialogOnEntry: Boolean = false,
-    onAddDialogEntryConsumed: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
@@ -112,12 +110,6 @@ fun CustomerManagementScreen(
 
     // Dialog states
     var showAddDialog by remember { mutableStateOf(false) }
-    LaunchedEffect(openAddDialogOnEntry) {
-        if (openAddDialogOnEntry) {
-            showAddDialog = true
-            onAddDialogEntryConsumed()
-        }
-    }
     var customerToEdit by remember { mutableStateOf<CustomerAccount?>(null) }
     var customerToArchive by remember { mutableStateOf<CustomerAccount?>(null) }
     var customerToRestore by remember { mutableStateOf<CustomerAccount?>(null) }
@@ -424,9 +416,8 @@ fun CustomerManagementScreen(
             isArabic = isArabic,
             onDismiss = { showAddDialog = false },
             onConfirm = { name, phone, amount, direction ->
-                onAddCustomer(name, phone, amount, direction) { result ->
-                    if (result.isSuccess) showAddDialog = false
-                }
+                onAddCustomer(name, phone, amount, direction)
+                showAddDialog = false
             }
         )
     }

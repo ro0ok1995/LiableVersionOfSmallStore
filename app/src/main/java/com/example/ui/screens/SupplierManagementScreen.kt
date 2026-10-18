@@ -49,20 +49,12 @@ fun SupplierManagementScreen(
     onRecordOpeningBalance: (String, Double, String, (Result<Unit>) -> Unit) -> Unit = { _, _, _, onComplete -> onComplete(Result.success(Unit)) },
     onUpdateSupplier: (Supplier) -> Unit,
     onGetSupplierBalance: suspend (String) -> SupplierBalanceSummary,
-    openAddDialogOnEntry: Boolean = false,
-    onAddDialogEntryConsumed: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf(SupplierFilterTab.ACTIVE) }
     var showAddDialog by remember { mutableStateOf(false) }
-    LaunchedEffect(openAddDialogOnEntry) {
-        if (openAddDialogOnEntry) {
-            showAddDialog = true
-            onAddDialogEntryConsumed()
-        }
-    }
     var supplierToEdit by remember { mutableStateOf<Supplier?>(null) }
     var supplierToArchive by remember { mutableStateOf<Supplier?>(null) }
     var supplierToRestore by remember { mutableStateOf<Supplier?>(null) }
