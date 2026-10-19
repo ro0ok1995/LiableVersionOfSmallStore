@@ -82,11 +82,23 @@ fun SupplierProfileScreen(
     BackHandler { onBack() }
 
     var balance by remember(current?.id) { mutableStateOf<SupplierBalanceSummary?>(null) }
-    LaunchedEffect(current?.id, purchases, payments, returns) {
+    var balanceLoading by remember(current?.id) { mutableStateOf(false) }
+    var balanceLoadFailed by remember(current?.id) { mutableStateOf(false) }
+    var balanceRetryKey by remember(current?.id) { mutableIntStateOf(0) }
+    LaunchedEffect(current?.id, purchases, payments, returns, balanceRetryKey) {
         val selected = current
         if (selected != null) {
-            balance = runCatching { onGetSupplierBalance(selected.id) }.getOrNull()
-        } else balance = null
+            balanceLoading = true
+            balanceLoadFailed = false
+            val result = runCatching { onGetSupplierBalance(selected.id) }
+            balance = result.getOrNull()
+            balanceLoadFailed = result.isFailure
+            balanceLoading = false
+        } else {
+            balance = null
+            balanceLoading = false
+            balanceLoadFailed = false
+        }
     }
     val invoices = remember(current?.id, purchases, returns, invoiceFilter, invoiceSearch) {
         val selectedId = current?.id
@@ -191,7 +203,7 @@ fun SupplierProfileScreen(
                                 current.address?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                             }
                             Surface(color = when { hasPayable -> MaterialTheme.colorScheme.statusRedContainer; hasAdvance -> MaterialTheme.colorScheme.statusGreenContainer; else -> MaterialTheme.colorScheme.surfaceVariant }, shape = RoundedCornerShape(8.dp), modifier = Modifier.testTag("supplier_profile_status_badge")) {
-                                Text(when { hasPayable -> if (ar) "مستحق للمورد" else "Payable"; hasAdvance -> if (ar) "رصيد مقدم" else "Advance"; else -> if (ar) "لا توجد مستحقات" else "Settled" }, style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = when { hasPayable -> MaterialTheme.colorScheme.statusRed; hasAdvance -> MaterialTheme.colorScheme.statusGreen; else -> MaterialTheme.colorScheme.onSurfaceVariant }, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                                Text(when { hasPayable -> if (ar) "مستحق للمورد" else "Payable"; hasAdvance -> if (ar) "للمحل رصيد لدى المورد" else "Store advance"; else -> if (ar) "خالص" else "Settled" }, style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = when { hasPayable -> MaterialTheme.colorScheme.statusRed; hasAdvance -> MaterialTheme.colorScheme.statusGreen; else -> MaterialTheme.colorScheme.statusGreen }, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
                             }
                         }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f), modifier = Modifier.padding(vertical = 14.dp))
@@ -199,9 +211,18 @@ fun SupplierProfileScreen(
                             Column(Modifier.weight(1f)) {
                                 Text(if (ar) "الرصيد الحالي" else "Current balance", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Spacer(Modifier.height(2.dp))
-                                Text(money(liveBalance), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 17.sp), color = when { hasPayable -> MaterialTheme.colorScheme.statusRed; hasAdvance -> MaterialTheme.colorScheme.statusGreen; else -> MaterialTheme.colorScheme.onSurface }, modifier = Modifier.testTag("supplier_profile_balance"))
-                                Spacer(Modifier.height(3.dp))
-                                Text(when { hasPayable -> if (ar) "مستحق للمورد على المحل" else "The store owes the supplier"; hasAdvance -> if (ar) "للمحل رصيد مقدم لدى المورد" else "The store has an advance with supplier"; else -> if (ar) "الحساب متوازن" else "Account settled" }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (balanceLoading) {
+                                    Text(if (ar) "جارٍ تحميل الرصيد…" else "Loading balance…", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("supplier_profile_balance_loading"))
+                                } else if (balanceLoadFailed || balance == null) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(if (ar) "تعذر تحميل الرصيد" else "Could not load balance", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("supplier_profile_balance_error"))
+                                        TextButton(onClick = { balanceRetryKey++ }, contentPadding = PaddingValues(0.dp)) { Text(if (ar) "إعادة المحاولة" else "Retry") }
+                                    }
+                                } else {
+                                    Text(money(liveBalance), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 17.sp), color = when { hasPayable -> MaterialTheme.colorScheme.statusRed; hasAdvance -> MaterialTheme.colorScheme.statusGreen; else -> MaterialTheme.colorScheme.statusGreen }, modifier = Modifier.testTag("supplier_profile_balance"))
+                                    Spacer(Modifier.height(3.dp))
+                                    Text(when { hasPayable -> if (ar) "مستحق للمورد على المحل" else "The store owes the supplier"; hasAdvance -> if (ar) "للمحل رصيد مقدم لدى المورد" else "The store has an advance with supplier"; else -> if (ar) "خالص" else "Settled" }, style = MaterialTheme.typography.labelSmall, color = if (kotlin.math.abs(liveBalance) <= 0.001) MaterialTheme.colorScheme.statusGreen else MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
                             }
                             Column(horizontalAlignment = Alignment.End) {
                                 Text(if (ar) "إجمالي المشتريات" else "Total purchases", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -261,7 +282,7 @@ fun SupplierProfileScreen(
                                 }
                                 Text(invoice.purchaseDate, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("${if (ar) "الإجمالي" else "Total"}: ${money(invoice.totalAmount)}", style = MaterialTheme.typography.bodySmall); Text("${if (ar) "المدفوع" else "Paid"}: ${money(invoice.paidAmount)}", style = MaterialTheme.typography.bodySmall) }
-                                Text("${if (ar) "المتبقي بعد المرتجعات" else "Remaining after returns"}: ${money(remaining)}", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                                Text("${if (ar) "المتبقي المرتبط بالفاتورة بعد المرتجعات" else "Invoice-linked remaining after returns"}: ${money(remaining)}", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
                             }
                         }
                     }

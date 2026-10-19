@@ -290,8 +290,10 @@ fun CustomerProfileScreen(
                 // =============================================================
                 // CUSTOMER INFORMATION CARD
                 // =============================================================
-                val hasDebt = customer.balance > 0.0
-                val isPaidUp = customer.balance <= 0.0
+                val hasDebt = customer.balance > 0.001
+                val customerOwesStore = customer.balance > 0.001
+                val storeOwesCustomer = customer.balance < -0.001
+                val isPaidUp = kotlin.math.abs(customer.balance) <= 0.001
 
                 Card(
                     shape = RoundedCornerShape(16.dp),
@@ -368,27 +370,27 @@ fun CustomerProfileScreen(
 
                             // Status badge
                             Surface(
-                                color = if (isPaidUp) {
-                                    MaterialTheme.colorScheme.statusGreenContainer
-                                } else {
-                                    MaterialTheme.colorScheme.statusRedContainer
+                                color = when {
+                                    customerOwesStore -> MaterialTheme.colorScheme.statusGreenContainer
+                                    storeOwesCustomer -> MaterialTheme.colorScheme.statusRedContainer
+                                    else -> MaterialTheme.colorScheme.statusGreenContainer
                                 },
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier.testTag("customer_profile_status_badge")
                             ) {
                                 Text(
-                                    text = if (isPaidUp) {
-                                        if (isArabic) "مسدد بالكامل" else "Paid Up"
-                                    } else {
-                                        if (isArabic) "عليه مستحقات" else "Has Debt"
+                                    text = when {
+                                        customerOwesStore -> if (isArabic) "مستحقات المحل لدى العميل" else "Customer owes store"
+                                        storeOwesCustomer -> if (isArabic) "مستحقات العميل لدى المحل" else "Store owes customer"
+                                        else -> if (isArabic) "خالص" else "Settled"
                                     },
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         fontWeight = FontWeight.Bold
                                     ),
-                                    color = if (isPaidUp) {
-                                        MaterialTheme.colorScheme.statusGreen
-                                    } else {
-                                        MaterialTheme.colorScheme.statusRed
+                                    color = when {
+                                        customerOwesStore -> MaterialTheme.colorScheme.statusGreen
+                                        storeOwesCustomer -> MaterialTheme.colorScheme.statusRed
+                                        else -> MaterialTheme.colorScheme.statusGreen
                                     },
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                 )
@@ -418,10 +420,10 @@ fun CustomerProfileScreen(
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 17.sp
                                     ),
-                                    color = if (hasDebt) {
-                                        MaterialTheme.colorScheme.statusRed
-                                    } else {
-                                        MaterialTheme.colorScheme.statusGreen
+                                    color = when {
+                                        customer.balance > 0.001 -> MaterialTheme.colorScheme.statusGreen
+                                        customer.balance < -0.001 -> MaterialTheme.colorScheme.statusRed
+                                        else -> MaterialTheme.colorScheme.statusGreen
                                     },
                                     modifier = Modifier.testTag("customer_profile_balance")
                                 )
@@ -430,7 +432,7 @@ fun CustomerProfileScreen(
                                     text = when {
                                         customer.balance > 0.001 -> if (isArabic) "مدين (Debit): العميل مدين لك بهذا الرصيد" else "Debit: customer owes you this balance"
                                         customer.balance < -0.001 -> if (isArabic) "دائن (Credit): أنت مدين للعميل بهذا الرصيد" else "Credit: you owe the customer this balance"
-                                        else -> if (isArabic) "الرصيد مسدد" else "Balance settled"
+                                        else -> if (isArabic) "خالص" else "Settled"
                                     },
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
