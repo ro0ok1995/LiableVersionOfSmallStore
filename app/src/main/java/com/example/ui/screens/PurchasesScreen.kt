@@ -129,6 +129,7 @@ fun PurchasesScreen(
     onRemoveFromCart: (productId: String) -> Unit = {},
     onToggleCartExpanded: () -> Unit = {},
     onSelectCustomer: (CustomerAccount) -> Unit = {},
+    onRestoreArchivedCustomer: (CustomerAccount, onSuccess: () -> Unit) -> Unit = { _, onSuccess -> onSuccess() },
     onClearCustomer: () -> Unit = {},
     onCompleteTransaction: () -> Unit = {},
     onCompleteTransactionWithItems: ((List<CartItem>) -> Unit)? = null,
@@ -602,7 +603,8 @@ fun PurchasesScreen(
             onSelectCustomer = {
                 onSelectCustomer(it)
                 showCustomerPicker = false
-            }
+            },
+            onRestoreArchivedCustomer = onRestoreArchivedCustomer
         )
     }
 }

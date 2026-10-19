@@ -52,9 +52,11 @@ fun CustomerPickerDialog(
     selectedCustomerId: String?,
     isArabic: Boolean,
     onDismiss: () -> Unit,
-    onSelectCustomer: (CustomerAccount) -> Unit
+    onSelectCustomer: (CustomerAccount) -> Unit,
+    onRestoreArchivedCustomer: (CustomerAccount, onSuccess: () -> Unit) -> Unit = { _, onSuccess -> onSuccess() }
 ) {
     var searchQuery by remember { mutableStateOf("") }
+    var archivedCustomerToRestore by remember { mutableStateOf<CustomerAccount?>(null) }
     val filteredCustomers = remember(customers, searchQuery) {
         if (searchQuery.isBlank()) customers
         else {
@@ -149,7 +151,10 @@ fun CustomerPickerDialog(
                                         if (isSelected) GeoPrimary.copy(alpha = 0.12f)
                                         else Color.Transparent
                                     )
-                                    .clickable { onSelectCustomer(customer) }
+                                    .clickable {
+                                        if (customer.isArchived) archivedCustomerToRestore = customer
+                                        else onSelectCustomer(customer)
+                                    }
                                     .padding(horizontal = 12.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
@@ -160,11 +165,21 @@ fun CustomerPickerDialog(
                                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                         color = if (isSelected) GeoPrimary else MaterialTheme.colorScheme.onSurface
                                     )
-                                    Text(
-                                        text = customer.phone,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    if (customer.phone.isNotBlank()) {
+                                        Text(
+                                            text = customer.phone,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    if (customer.isArchived) {
+                                        Text(
+                                            text = if (isArabic) "مؤرشف" else "Archived",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.error,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
                                 if (isSelected) {
                                     Icon(
@@ -196,4 +211,31 @@ fun CustomerPickerDialog(
         shape = RoundedCornerShape(16.dp),
         containerColor = MaterialTheme.colorScheme.surface
     )
+
+    archivedCustomerToRestore?.let { archivedCustomer ->
+        AlertDialog(
+            onDismissRequest = { archivedCustomerToRestore = null },
+            title = { Text(if (isArabic) "العميل مؤرشف" else "Customer is archived") },
+            text = {
+                Text(
+                    if (isArabic) "العميل «${archivedCustomer.customerName}» مؤرشف. هل تريد إعادة تفعيله بشكل دائم ومتابعة البيع؟"
+                    else "${archivedCustomer.customerName} is archived. Reactivate this customer permanently and continue the sale?"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onRestoreArchivedCustomer(archivedCustomer) {
+                        archivedCustomerToRestore = null
+                        onSelectCustomer(archivedCustomer.copy(isArchived = false, archivedDate = null))
+                    }
+                }) { Text(if (isArabic) "إعادة التفعيل والمتابعة" else "Reactivate and continue") }
+            },
+            dismissButton = {
+                TextButton(onClick = { archivedCustomerToRestore = null }) {
+                    Text(if (isArabic) "إلغاء" else "Cancel")
+                }
+            },
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
 }
