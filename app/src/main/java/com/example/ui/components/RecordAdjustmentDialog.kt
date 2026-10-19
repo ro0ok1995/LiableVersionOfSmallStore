@@ -66,6 +66,7 @@ fun RecordAdjustmentDialog(
     customer: CustomerAccount,
     currency: String,
     isArabic: Boolean,
+    isSaving: Boolean = false,
     onDismiss: () -> Unit,
     onConfirm: (direction: String, amount: Double, date: String, reason: String, reference: String?) -> Unit
 ) {
@@ -83,14 +84,14 @@ fun RecordAdjustmentDialog(
     var attemptedSubmit by remember { mutableStateOf(false) }
 
     val amount = amountText.toDoubleOrNull()
-    val isAmountValid = amount != null && amount > 0.0
+    val isAmountValid = amount != null && amount.isFinite() && amount > 0.0
     val isReasonValid = reasonText.isNotBlank()
-    val isDateValid = dateText.isNotBlank()
+    val isDateValid = isValidIsoDate(dateText.trim())
 
     val isValid = isAmountValid && isReasonValid && isDateValid
 
     // Projected new balance
-    val projectedBalance = if (amount != null && amount > 0.0) {
+    val projectedBalance = if (amount != null && amount.isFinite() && amount > 0.0) {
         if (direction == "DEBIT") customer.balance + amount else customer.balance - amount
     } else {
         customer.balance
@@ -98,8 +99,10 @@ fun RecordAdjustmentDialog(
 
     AlertDialog(
         onDismissRequest = {
-            focusManager.clearFocus()
-            onDismiss()
+            if (!isSaving) {
+                focusManager.clearFocus()
+                onDismiss()
+            }
         },
         title = {
             Row(
@@ -166,7 +169,7 @@ fun RecordAdjustmentDialog(
                         Text(
                             text = String.format(Locale.US, "%.2f %s", customer.balance, currency),
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = if (customer.balance > 0) StatusRed else StatusGreen
+                            color = if (customer.balance >= 0) StatusGreen else StatusRed
                         )
                     }
                 }
@@ -214,11 +217,11 @@ fun RecordAdjustmentDialog(
                     Card(
                         shape = RoundedCornerShape(10.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = if (isDebitSelected) StatusRed.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surface
+                            containerColor = if (isDebitSelected) StatusGreen.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surface
                         ),
                         border = BorderStroke(
                             width = if (isDebitSelected) 2.dp else 1.dp,
-                            color = if (isDebitSelected) StatusRed else GeoOutlineVariant
+                            color = if (isDebitSelected) StatusGreen else GeoOutlineVariant
                         ),
                         modifier = Modifier
                             .weight(1f)
@@ -237,19 +240,19 @@ fun RecordAdjustmentDialog(
                                 Icon(
                                     imageVector = Icons.Default.TrendingUp,
                                     contentDescription = null,
-                                    tint = StatusRed,
+                                    tint = StatusGreen,
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Text(
                                     text = if (isArabic) "مدين (+)" else "Debit (+)",
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = if (isDebitSelected) StatusRed else MaterialTheme.colorScheme.onSurface
+                                    color = if (isDebitSelected) StatusGreen else MaterialTheme.colorScheme.onSurface
                                 )
                                 if (isDebitSelected) {
                                     Icon(
                                         imageVector = Icons.Default.Check,
                                         contentDescription = null,
-                                        tint = StatusRed,
+                                        tint = StatusGreen,
                                         modifier = Modifier.size(16.dp)
                                     )
                                 }
@@ -268,11 +271,11 @@ fun RecordAdjustmentDialog(
                     Card(
                         shape = RoundedCornerShape(10.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = if (isCreditSelected) StatusGreen.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surface
+                            containerColor = if (isCreditSelected) StatusRed.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surface
                         ),
                         border = BorderStroke(
                             width = if (isCreditSelected) 2.dp else 1.dp,
-                            color = if (isCreditSelected) StatusGreen else GeoOutlineVariant
+                            color = if (isCreditSelected) StatusRed else GeoOutlineVariant
                         ),
                         modifier = Modifier
                             .weight(1f)
@@ -291,19 +294,19 @@ fun RecordAdjustmentDialog(
                                 Icon(
                                     imageVector = Icons.Default.TrendingDown,
                                     contentDescription = null,
-                                    tint = StatusGreen,
+                                    tint = StatusRed,
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Text(
                                     text = if (isArabic) "دائن (-)" else "Credit (-)",
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = if (isCreditSelected) StatusGreen else MaterialTheme.colorScheme.onSurface
+                                    color = if (isCreditSelected) StatusRed else MaterialTheme.colorScheme.onSurface
                                 )
                                 if (isCreditSelected) {
                                     Icon(
                                         imageVector = Icons.Default.Check,
                                         contentDescription = null,
-                                        tint = StatusGreen,
+                                        tint = StatusRed,
                                         modifier = Modifier.size(16.dp)
                                     )
                                 }
@@ -353,7 +356,7 @@ fun RecordAdjustmentDialog(
                 )
 
                 // Projected Balance Preview
-                if (amount != null && amount > 0.0) {
+                if (amount != null && amount.isFinite() && amount > 0.0) {
                     Card(
                         shape = RoundedCornerShape(8.dp),
                         colors = CardDefaults.cardColors(
@@ -377,7 +380,7 @@ fun RecordAdjustmentDialog(
                             Text(
                                 text = String.format(Locale.US, "%.2f %s", projectedBalance, currency),
                                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = if (projectedBalance > 0) StatusRed else StatusGreen
+                                color = if (projectedBalance >= 0) StatusGreen else StatusRed
                             )
                         }
                     }
@@ -440,7 +443,13 @@ fun RecordAdjustmentDialog(
                     value = dateText,
                     onValueChange = { dateText = it },
                     label = {
-                        Text(if (isArabic) "تاريخ القيد" else "Date")
+                        Text(if (isArabic) "تاريخ القيد (yyyy-MM-dd) *" else "Date (yyyy-MM-dd) *")
+                    },
+                    isError = attemptedSubmit && !isDateValid,
+                    supportingText = {
+                        if (attemptedSubmit && !isDateValid) {
+                            Text(if (isArabic) "أدخل تاريخًا صحيحًا بصيغة سنة-شهر-يوم، مثل 2026-10-19" else "Enter a valid date as yyyy-MM-dd, e.g. 2026-10-19", color = MaterialTheme.colorScheme.error)
+                        }
                     },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
@@ -456,9 +465,10 @@ fun RecordAdjustmentDialog(
         },
         confirmButton = {
             Button(
+                enabled = !isSaving,
                 onClick = {
                     attemptedSubmit = true
-                    if (isValid && amount != null) {
+                    if (isValid && amount != null && amount.isFinite()) {
                         focusManager.clearFocus()
                         onConfirm(
                             direction,
@@ -477,7 +487,12 @@ fun RecordAdjustmentDialog(
                 modifier = Modifier.testTag("adjustment_confirm_button")
             ) {
                 Text(
-                    text = if (isArabic) "حفظ التسوية" else "Save Adjustment",
+                    text = when {
+                        isSaving && isArabic -> "جارٍ الحفظ..."
+                        isSaving -> "Saving..."
+                        isArabic -> "حفظ التسوية"
+                        else -> "Save Adjustment"
+                    },
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -485,9 +500,12 @@ fun RecordAdjustmentDialog(
         dismissButton = {
             OutlinedButton(
                 onClick = {
-                    focusManager.clearFocus()
-                    onDismiss()
+                    if (!isSaving) {
+                        focusManager.clearFocus()
+                        onDismiss()
+                    }
                 },
+                enabled = !isSaving,
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.testTag("adjustment_dismiss_button")
             ) {
@@ -495,4 +513,15 @@ fun RecordAdjustmentDialog(
             }
         }
     )
+}
+
+private fun isValidIsoDate(value: String): Boolean {
+    if (!value.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) return false
+    return try {
+        val formatter = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false }
+        val parsed = formatter.parse(value) ?: return false
+        formatter.format(parsed) == value
+    } catch (_: Exception) {
+        false
+    }
 }

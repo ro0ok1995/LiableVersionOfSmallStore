@@ -541,7 +541,7 @@ fun SmallStoreApp(
                                         mainViewModel.archiveCustomer(customer.id)
                                         mainViewModel.navigateBackFromCustomerDetails()
                                     },
-                                    onRecordAdjustment = { direction, amount, date, reason, reference ->
+                                    onRecordAdjustment = { direction, amount, date, reason, reference, onComplete ->
                                         val cust = uiState.accountsSelectedCustomerDetails
                                         if (cust != null) {
                                             mainViewModel.recordCustomerAdjustment(
@@ -550,8 +550,11 @@ fun SmallStoreApp(
                                                 direction = direction,
                                                 date = date,
                                                 reason = reason,
-                                                reference = reference
+                                                reference = reference,
+                                                onComplete = onComplete
                                             )
+                                        } else {
+                                            onComplete(Result.failure(IllegalStateException("لم يتم تحديد عميل للحفظ")))
                                         }
                                     }
                                 )

@@ -635,9 +635,10 @@ class MainViewModel @JvmOverloads constructor(
         direction: String,
         date: String,
         reason: String,
-        reference: String? = null
+        reference: String? = null,
+        onComplete: (Result<Unit>) -> Unit = {}
     ) {
-        customerViewModel.recordCustomerAdjustment(customerId, amount, direction, date, reason, reference)
+        customerViewModel.recordCustomerAdjustment(customerId, amount, direction, date, reason, reference, onComplete)
     }
 
     // Phase 7: Reversal Engine

@@ -468,6 +468,32 @@ class AdjustmentLedgerTest {
     }
 
     /**
+     * Strict date validation: malformed, impossible, and trailing-character dates must be rejected.
+     */
+    @Test
+    fun repository_recordAdjustment_rejectsMalformedDates() = runBlocking {
+        val invalidDates = listOf("2026-02-30", "2026-9-03", "2026-09-23abc", "not-a-date")
+        invalidDates.forEach { invalidDate ->
+            try {
+                repository.recordAdjustment(
+                    entityType = "CUSTOMER",
+                    entityId = testCustomerId,
+                    amount = 10.0,
+                    direction = "DEBIT",
+                    date = invalidDate,
+                    reason = "Date validation test"
+                )
+                fail("Expected IllegalArgumentException for invalid date: $invalidDate")
+            } catch (e: IllegalArgumentException) {
+                assertTrue(
+                    "Exception should identify date validation",
+                    e.message?.contains("date", ignoreCase = true) == true
+                )
+            }
+        }
+    }
+
+    /**
      * Requirement: Adjustment appears in the customer statement/history.
      */
     @Test

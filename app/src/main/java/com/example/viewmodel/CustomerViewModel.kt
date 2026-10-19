@@ -149,18 +149,25 @@ class CustomerViewModel @JvmOverloads constructor(
         direction: String,
         date: String,
         reason: String,
-        reference: String? = null
+        reference: String? = null,
+        onComplete: (Result<Unit>) -> Unit = {}
     ) {
         viewModelScope.launch {
-            repository.recordAdjustment(
-                entityType = "CUSTOMER",
-                entityId = customerId,
-                amount = amount,
-                direction = direction,
-                date = date,
-                reason = reason,
-                reference = reference
-            )
+            runCatching {
+                repository.recordAdjustment(
+                    entityType = "CUSTOMER",
+                    entityId = customerId,
+                    amount = amount,
+                    direction = direction,
+                    date = date,
+                    reason = reason,
+                    reference = reference
+                )
+            }.onSuccess {
+                onComplete(Result.success(Unit))
+            }.onFailure { error ->
+                onComplete(Result.failure(error))
+            }
         }
     }
 

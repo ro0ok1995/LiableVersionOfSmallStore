@@ -110,9 +110,15 @@ class AdjustmentRepository(
         adjustment
     }
 
-    private fun dateIsValid(value: String): Boolean = try {
-        val format = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).apply { isLenient = false }
-        format.parse(value) != null
-    } catch (_: Exception) { false }
+    private fun dateIsValid(value: String): Boolean {
+        if (!value.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) return false
+        return try {
+            val format = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).apply { isLenient = false }
+            val parsed = format.parse(value) ?: return false
+            format.format(parsed) == value
+        } catch (_: Exception) {
+            false
+        }
+    }
 
 }

@@ -106,7 +106,7 @@ fun CustomerProfileScreen(
     onViewAccountStatement: (CustomerAccount) -> Unit,
     onRecordPayment: (CustomerAccount) -> Unit,
     onArchiveCustomer: (CustomerAccount) -> Unit = {},
-    onRecordAdjustment: ((direction: String, amount: Double, date: String, reason: String, reference: String?) -> Unit)? = null,
+    onRecordAdjustment: ((direction: String, amount: Double, date: String, reason: String, reference: String?, onComplete: (Result<Unit>) -> Unit) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
@@ -114,6 +114,7 @@ fun CustomerProfileScreen(
     val currency = AppCurrency.SYMBOL
     var showArchiveConfirmDialog by remember { mutableStateOf(false) }
     var showAdjustmentDialog by remember { mutableStateOf(false) }
+    var isSavingAdjustment by remember(customer?.id) { mutableStateOf(false) }
 
     BackHandler {
         onBackClick()
@@ -593,12 +594,29 @@ fun CustomerProfileScreen(
             customer = liveCustomer,
             currency = currency,
             isArabic = isArabic,
-            onDismiss = { showAdjustmentDialog = false },
+            isSaving = isSavingAdjustment,
+            onDismiss = {
+                if (!isSavingAdjustment) showAdjustmentDialog = false
+            },
             onConfirm = { direction, amount, date, reason, reference ->
-                showAdjustmentDialog = false
-                onRecordAdjustment?.invoke(direction, amount, date, reason, reference)
-                val successMsg = if (isArabic) "تم تسجيل التسوية بنجاح" else "Adjustment recorded successfully"
-                Toast.makeText(context, successMsg, Toast.LENGTH_SHORT).show()
+                val submit = onRecordAdjustment
+                if (submit == null) {
+                    isSavingAdjustment = false
+                    Toast.makeText(context, if (isArabic) "تعذر حفظ التسوية: إجراء الحفظ غير متاح" else "Could not save adjustment: save action unavailable", Toast.LENGTH_LONG).show()
+                } else if (!isSavingAdjustment) {
+                    isSavingAdjustment = true
+                    submit(direction, amount, date, reason, reference) { result ->
+                        isSavingAdjustment = false
+                        result.onSuccess {
+                            showAdjustmentDialog = false
+                            Toast.makeText(context, if (isArabic) "تم تسجيل التسوية بنجاح" else "Adjustment saved successfully", Toast.LENGTH_SHORT).show()
+                        }.onFailure { error ->
+                            val message = error.message?.takeIf { it.isNotBlank() }
+                                ?: if (isArabic) "حدث خطأ غير معروف" else "An unknown error occurred"
+                            Toast.makeText(context, if (isArabic) "فشل حفظ التسوية: $message" else "Failed to save adjustment: $message", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
             }
         )
     }
