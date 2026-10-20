@@ -594,7 +594,7 @@ fun SmallStoreApp(
                             NavDestination.PURCHASES -> {
                                 PurchasesScreen(
                                     customer = uiState.purchasesCustomer,
-                                    allCustomers = uiState.customers,
+                                    allCustomers = uiState.customers + uiState.archivedCustomers,
                                     products = uiState.products,
                                     cart = uiState.cart,
                                     searchQuery = uiState.purchasesSearchQuery,
@@ -612,6 +612,10 @@ fun SmallStoreApp(
                                     onSearchQueryChange = { mainViewModel.setPurchasesSearchQuery(it) },
                                     onAddToCart = { mainViewModel.addToCart(it) },
                                     onUpdateCartQuantity = { id, delta -> mainViewModel.updateCartQuantity(id, delta) },
+                                    onSetCartQuantity = { id, quantity -> mainViewModel.setCartQuantity(id, quantity) },
+                                    onRestoreArchivedCustomer = { customer, onSuccess ->
+                                        mainViewModel.requestRestoreCustomer(customer, activeList = uiState.customers, onSuccess = onSuccess)
+                                    },
                                     onRemoveFromCart = { mainViewModel.removeFromCart(it) },
                                     onToggleCartExpanded = { mainViewModel.toggleCartExpanded() },
                                     onSelectCustomer = { mainViewModel.setPurchasesCustomer(it) },
@@ -845,10 +849,11 @@ fun SmallStoreApp(
                                     initialAction = supplierInitialAction,
                                     onGetSupplierBalance = { supplierId -> mainViewModel.getSupplierBalance(supplierId) },
                                     onGetPurchaseLines = { purchaseId -> mainViewModel.getPurchaseLines(purchaseId) },
+                                    onGetRemainingPurchaseReturnQuantities = { purchaseId -> mainViewModel.getRemainingPurchaseReturnQuantities(purchaseId) },
                                     onLinkItemToSupplier = { supplierId, productId, lastCost ->
                                         mainViewModel.linkProductToSupplier(supplierId, productId, lastCost)
                                     },
-                                    onAddNewCatalogItemForSupplier = { supplierId, name, unit, costPrice, category, isRawMaterial, imageUri ->
+                                    onAddNewCatalogItemForSupplier = { supplierId, name, unit, costPrice, category, isRawMaterial, imageUri, onComplete ->
                                         mainViewModel.addNewCatalogItemForSupplier(
                                             supplierId = supplierId,
                                             name = name,
@@ -856,7 +861,8 @@ fun SmallStoreApp(
                                             costPrice = costPrice,
                                             category = category,
                                             isRawMaterial = isRawMaterial,
-                                            imageUri = imageUri
+                                            imageUri = imageUri,
+                                            onComplete = onComplete
                                         )
                                     },
                                     onUpdateProductCost = { supplierId, productId, newCost ->
@@ -869,6 +875,11 @@ fun SmallStoreApp(
                                     },
                                     onRecordSupplierPayment = { supplierId, amount, date, acc, notes, onComplete ->
                                         mainViewModel.recordSupplierPayment(supplierId, amount, date, acc, notes) { res ->
+                                            onComplete(res.map { })
+                                        }
+                                    },
+                                    onRecordSupplierReceipt = { supplierId, amount, date, acc, notes, onComplete ->
+                                        mainViewModel.recordSupplierReceiptSettlement(supplierId, amount, date, acc, notes) { res ->
                                             onComplete(res.map { })
                                         }
                                     },

@@ -776,6 +776,33 @@ class MainViewModel @JvmOverloads constructor(
         )
     }
 
+    fun recordSupplierReceiptSettlement(
+        supplierId: String,
+        amount: Double,
+        receiptDate: String = getCurrentDateString(),
+        financialAccountId: String,
+        notes: String? = null,
+        onComplete: (Result<List<Adjustment>>) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            runCatching {
+                repository.recordSupplierReceiptSettlement(
+                    supplierId = supplierId,
+                    amount = amount,
+                    receiptDate = receiptDate,
+                    financialAccountId = financialAccountId,
+                    notes = notes
+                )
+            }.fold(
+                onSuccess = { onComplete(Result.success(it)) },
+                onFailure = { onComplete(Result.failure(it)) }
+            )
+        }
+    }
+
+    suspend fun getRemainingPurchaseReturnQuantities(purchaseId: String): Map<String, Int> =
+        repository.getRemainingPurchaseReturnQuantities(purchaseId)
+
     fun recordPurchaseReturn(
         purchaseId: String,
         returnLines: List<PurchaseReturnLineRequest>,
@@ -1323,6 +1350,19 @@ class MainViewModel @JvmOverloads constructor(
                         val newQty = (item.quantity + delta).coerceAtMost(stock.quantityOnHand)
                         if (newQty > 0) item.copy(quantity = newQty) else null
                     } else item
+                })
+            }
+        }
+    }
+
+    fun setCartQuantity(productId: String, quantity: Int) {
+        if (quantity <= 0) return
+        viewModelScope.launch {
+            val stock = repository.getProductStock(productId)
+            if (quantity > stock.quantityOnHand) return@launch
+            _uiState.update { state ->
+                state.copy(cart = state.cart.map { item ->
+                    if (item.product.id == productId) item.copy(quantity = quantity) else item
                 })
             }
         }

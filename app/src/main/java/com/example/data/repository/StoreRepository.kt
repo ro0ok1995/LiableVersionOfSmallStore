@@ -1146,6 +1146,67 @@ class StoreRepository private constructor(
         referenceNumber = referenceNumber
     )
 
+    /**
+     * Records one real cash receipt while splitting its supplier-ledger effect into
+     * explicit settlement and excess-credit entries. All entries commit atomically.
+     * Financial-account DEBIT means an inflow in FinancialAccountLedgerCalculator.
+     */
+    suspend fun recordSupplierReceiptSettlement(
+        supplierId: String,
+        amount: Double,
+        receiptDate: String,
+        financialAccountId: String,
+        notes: String? = null
+    ): List<Adjustment> = database.withTransaction {
+        require(supplierId.isNotBlank()) { "Supplier ID cannot be blank" }
+        require(amount.isFinite() && amount > 0.0) { "Receipt amount must be greater than zero" }
+        require(receiptDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) { "Receipt date must be yyyy-MM-dd" }
+        val supplier = supplierDao.getSupplierById(supplierId)
+            ?: throw IllegalArgumentException("Supplier not found: $supplierId")
+        val account = financialAccountDao.getAccountById(financialAccountId)
+            ?: throw IllegalArgumentException("Financial account not found: $financialAccountId")
+        require(account.isActive) { "Financial account is inactive: $financialAccountId" }
+
+        val currentBalance = getSupplierBalance(supplierId).balance
+        val settlementAmount = when {
+            currentBalance < -0.001 -> minOf(amount, -currentBalance)
+            currentBalance > 0.001 -> minOf(amount, currentBalance)
+            else -> 0.0
+        }
+        val excessAmount = (amount - settlementAmount).coerceAtLeast(0.0)
+        val referenceId = "SUP-RECEIPT-${UUID.randomUUID()}"
+        val created = mutableListOf<Adjustment>()
+
+        if (settlementAmount > 0.001) {
+            val direction = if (currentBalance < -0.001) "CREDIT" else "DEBIT"
+            val reason = if (currentBalance < -0.001)
+                "تحصيل دين مستحق للمحل من المورد"
+            else "تحصيل من المورد لتسوية مستحقات المحل للمورد"
+            created += Adjustment(
+                id = "adj_${UUID.randomUUID()}", entityType = "SUPPLIER", entityId = supplierId,
+                amount = settlementAmount, direction = direction, date = receiptDate,
+                reason = if (notes.isNullOrBlank()) reason else "$reason — $notes", reference = referenceId
+            )
+        }
+        if (excessAmount > 0.001) {
+            val excessReason = "زيادة تحصيل من المورد — رصيد مستحق للمورد على المحل"
+            created += Adjustment(
+                id = "adj_${UUID.randomUUID()}", entityType = "SUPPLIER", entityId = supplierId,
+                amount = excessAmount, direction = "CREDIT", date = receiptDate,
+                reason = if (notes.isNullOrBlank()) excessReason else "$excessReason — $notes",
+                reference = referenceId
+            )
+        }
+        // One real cash movement for the full amount, linked to the two supplier-ledger entries.
+        created += Adjustment(
+            id = "adj_${UUID.randomUUID()}", entityType = "FINANCIAL_ACCOUNT", entityId = financialAccountId,
+            amount = amount, direction = "DEBIT", date = receiptDate,
+            reason = if (notes.isNullOrBlank()) "تحصيل من المورد ${supplier.name}" else "تحصيل من المورد ${supplier.name} — $notes", reference = referenceId
+        )
+        created.forEach { adjustmentDao.insertAdjustment(it) }
+        created
+    }
+
     suspend fun getPaymentsForSupplier(supplierId: String): List<SupplierPayment> =
         supplierPaymentRepository.getPaymentsForSupplier(supplierId)
 

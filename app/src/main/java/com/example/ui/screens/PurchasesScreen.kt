@@ -126,6 +126,8 @@ fun PurchasesScreen(
     onSearchQueryChange: (String) -> Unit = {},
     onAddToCart: (ProductItem) -> Unit = {},
     onUpdateCartQuantity: (productId: String, delta: Int) -> Unit = { _, _ -> },
+    onSetCartQuantity: (productId: String, quantity: Int) -> Unit = { _, _ -> },
+    onRestoreArchivedCustomer: (CustomerAccount, () -> Unit) -> Unit = { _, _ -> },
     onRemoveFromCart: (productId: String) -> Unit = {},
     onToggleCartExpanded: () -> Unit = {},
     onSelectCustomer: (CustomerAccount) -> Unit = {},
@@ -143,6 +145,7 @@ fun PurchasesScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     var showCustomerPicker by remember { mutableStateOf(false) }
+    var archivedCustomerToRestore by remember { mutableStateOf<CustomerAccount?>(null) }
     var activeSectionTab by remember { mutableIntStateOf(initialTab) }
     LaunchedEffect(initialTab) {
         activeSectionTab = initialTab
@@ -286,6 +289,7 @@ fun PurchasesScreen(
                                             isArabic = isArabic,
                                             onIncrement = { onUpdateCartQuantity(item.product.id, 1) },
                                             onDecrement = { onUpdateCartQuantity(item.product.id, -1) },
+                                            onSetQuantity = { quantity -> onSetCartQuantity(item.product.id, quantity) },
                                             onRemove = { onRemoveFromCart(item.product.id) }
                                         )
                                         HorizontalDivider(
@@ -388,7 +392,7 @@ fun PurchasesScreen(
                                 }
                                 coroutineScope.launch {
                                     snackbarHostState.showSnackbar(
-                                        message = if (isArabic) "تم فتح المحاسبة للعميل ${customer?.customerName}" else "Opened transaction settlement for ${customer?.customerName}"
+                                        message = if (isArabic) "تم فتح نافذة إتمام البيع" else "Opened sale checkout"
                                     )
                                 }
                             }
@@ -421,10 +425,10 @@ fun PurchasesScreen(
                     if (!isCheckoutEnabled) {
                         val requirementNote = when {
                             customer == null && cart.isEmpty() -> {
-                                if (isArabic) "أضف منتجًا واحدًا على الأقل لتتمكن من إتمام المعاملة" else "Add at least one product to checkout"
+                                if (isArabic) "اختر عميلاً وأضف منتجات لتتمكن من إتمام المعاملة" else "Select a customer and add items to checkout"
                             }
                             customer == null -> {
-                                if (isArabic) "يمكن إتمام البيع النقدي دون عميل؛ اختر عميلًا إذا كان البيع سيتضمن دينًا" else "Cash sales can be completed without a customer; select a customer for credit sales"
+                                if (isArabic) "يرجى اختيار عميل من الأعلى للمتابعة" else "Please select a customer above to continue"
                             }
                             else -> {
                                 if (isArabic) "يرجى إضافة منتج واحد على الأقل إلى السلة" else "Please add at least one product to the cart"
@@ -599,10 +603,31 @@ fun PurchasesScreen(
             selectedCustomerId = customer?.id,
             isArabic = isArabic,
             onDismiss = { showCustomerPicker = false },
-            onSelectCustomer = {
-                onSelectCustomer(it)
-                showCustomerPicker = false
+            onSelectCustomer = { selected ->
+                if (selected.isArchived) {
+                    archivedCustomerToRestore = selected
+                } else {
+                    onSelectCustomer(selected)
+                    showCustomerPicker = false
+                }
             }
+        )
+    }
+    archivedCustomerToRestore?.let { archived ->
+        AlertDialog(
+            onDismissRequest = { archivedCustomerToRestore = null },
+            title = { Text(if (isArabic) "العميل مؤرشف" else "Customer archived") },
+            text = { Text(if (isArabic) "العميل «${archived.customerName}» مؤرشف. هل تريد إعادة تفعيله لاستخدامه في البيع؟" else "${archived.customerName} is archived. Reactivate this customer for the sale?") },
+            confirmButton = {
+                Button(onClick = {
+                    onRestoreArchivedCustomer(archived) {
+                        onSelectCustomer(archived.copy(isArchived = false, archivedDate = null))
+                        archivedCustomerToRestore = null
+                        showCustomerPicker = false
+                    }
+                }) { Text(if (isArabic) "إعادة التفعيل" else "Reactivate") }
+            },
+            dismissButton = { TextButton(onClick = { archivedCustomerToRestore = null }) { Text(if (isArabic) "إلغاء" else "Cancel") } }
         )
     }
 }

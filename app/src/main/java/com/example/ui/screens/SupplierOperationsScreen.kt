@@ -46,7 +46,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,8 +60,9 @@ fun SupplierOperationsScreen(
     initialAction: SupplierInitialAction = SupplierInitialAction.NONE,
     onGetSupplierBalance: suspend (String) -> SupplierBalanceSummary,
     onGetPurchaseLines: suspend (String) -> List<PurchaseLine>,
+    onGetRemainingPurchaseReturnQuantities: suspend (String) -> Map<String, Int>,
     onLinkItemToSupplier: (supplierId: String, productId: String, lastCost: Double) -> Unit,
-    onAddNewCatalogItemForSupplier: (supplierId: String, name: String, unit: String, costPrice: Double, category: String, isRawMaterial: Boolean, imageUri: String?) -> Unit,
+    onAddNewCatalogItemForSupplier: (supplierId: String, name: String, unit: String, costPrice: Double, category: String, isRawMaterial: Boolean, imageUri: String?, onComplete: (Result<ProductItem>) -> Unit) -> Unit,
     onUpdateProductCost: (supplierId: String, productId: String, newCost: Double) -> Unit,
     onRecordPurchase: (
         supplierId: String,
@@ -78,6 +78,14 @@ fun SupplierOperationsScreen(
         amount: Double,
         paymentDate: String,
         financialAccountId: String?,
+        notes: String?,
+        onComplete: (Result<Unit>) -> Unit
+    ) -> Unit,
+    onRecordSupplierReceipt: (
+        supplierId: String,
+        amount: Double,
+        receiptDate: String,
+        financialAccountId: String,
         notes: String?,
         onComplete: (Result<Unit>) -> Unit
     ) -> Unit,
@@ -115,13 +123,12 @@ fun SupplierOperationsScreen(
 
     var supplierSearchQuery by remember { mutableStateOf("") }
     var isSupplierDropdownExpanded by remember { mutableStateOf(false) }
+    var pendingSupplierChange by remember { mutableStateOf<Supplier?>(null) }
 
     var itemSearchQuery by remember { mutableStateOf("") }
+    var isItemSearchExpanded by remember { mutableStateOf(true) }
 
-    // Keep the draft cart stable while the selected supplier changes; a confirmation controls any reset.
-    var supplierCart by remember { mutableStateOf<List<SupplierCartItem>>(emptyList()) }
-    var pendingSupplierChange by remember { mutableStateOf<Supplier?>(null) }
-    var operationError by remember { mutableStateOf<String?>(null) }
+    var supplierCart by remember(selectedSupplier?.id) { mutableStateOf<List<SupplierCartItem>>(emptyList()) }
     var isCartExpanded by remember { mutableStateOf(false) }
 
     var expandedCardItem by remember { mutableStateOf<ProductItem?>(null) }
@@ -129,6 +136,8 @@ fun SupplierOperationsScreen(
     var showReturnDialog by remember { mutableStateOf(initialAction == SupplierInitialAction.RETURN) }
     var showLinkOrAddItemDialog by remember { mutableStateOf(false) }
     var showSettlementSheet by remember { mutableStateOf(false) }
+    var showQuantitySchemaWarning by remember { mutableStateOf(false) }
+    var operationErrorMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(initialAction) {
         if (initialAction == SupplierInitialAction.PAYMENT) showPaymentDialog = true
@@ -248,13 +257,9 @@ fun SupplierOperationsScreen(
                                     }
                                 },
                                 onClick = {
+                                    selectedSupplier = sup
                                     isSupplierDropdownExpanded = false
                                     supplierSearchQuery = ""
-                                    if (selectedSupplier?.id != sup.id && supplierCart.isNotEmpty()) {
-                                        pendingSupplierChange = sup
-                                    } else {
-                                        selectedSupplier = sup
-                                    }
                                 }
                             )
                         }
@@ -310,7 +315,7 @@ fun SupplierOperationsScreen(
                             ) {
                                 Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text(if (isArabic) "سداد مورد" else "Pay Supplier")
+                                Text(if (isArabic) "تسوية حساب المورد" else "Settle Supplier Account")
                             }
 
                             OutlinedButton(
@@ -343,9 +348,14 @@ fun SupplierOperationsScreen(
                         Icon(Icons.Default.Search, contentDescription = null)
                     },
                     trailingIcon = {
-                        if (itemSearchQuery.isNotEmpty()) {
-                            IconButton(onClick = { itemSearchQuery = "" }) {
-                                Icon(Icons.Default.Clear, contentDescription = null)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (itemSearchQuery.isNotEmpty()) {
+                                IconButton(onClick = { itemSearchQuery = ""; isItemSearchExpanded = true }) {
+                                    Icon(Icons.Default.Clear, contentDescription = if (isArabic) "مسح البحث" else "Clear search")
+                                }
+                            }
+                            IconButton(onClick = { isItemSearchExpanded = !isItemSearchExpanded }) {
+                                Icon(if (isItemSearchExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown, contentDescription = if (isArabic) "عرض الأصناف" else "Show items")
                             }
                         }
                     },
@@ -365,7 +375,11 @@ fun SupplierOperationsScreen(
                 }
             }
 
-            if (supplierItems.isEmpty()) {
+            if (!isItemSearchExpanded) {
+                Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                    Text(if (isArabic) "قائمة الأصناف مخفية — اضغط السهم لعرضها" else "Item list hidden — tap the arrow to show it", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else if (supplierItems.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -454,7 +468,7 @@ fun SupplierOperationsScreen(
             isArabic = isArabic,
             onDismiss = { expandedCardItem = null },
             onConfirm = { confirmedQty, confirmedCost ->
-                // Keep supplier/catalog costs as draft values until the purchase invoice is saved successfully.
+                // Cost edits stay in the draft cart. Persist the stock cost only after invoice save.
                 val newCartItem = SupplierCartItem(
                     itemId = item.id,
                     name = item.name,
@@ -474,51 +488,103 @@ fun SupplierOperationsScreen(
         )
     }
 
+    if (showReturnDialog && selectedSupplier != null) {
+        SupplierPurchaseReturnDialog(
+            supplier = selectedSupplier!!,
+            purchases = supplierPurchases.filter { it.supplierId == selectedSupplier!!.id && it.status == "ACTIVE" },
+            financialAccounts = financialAccounts.filter { it.isActive },
+            isArabic = isArabic,
+            onGetPurchaseLines = onGetPurchaseLines,
+            onGetRemainingQuantities = onGetRemainingPurchaseReturnQuantities,
+            onDismiss = { showReturnDialog = false },
+            onConfirm = { purchaseId, returnLines, reason, date, mode, accountId, onComplete ->
+                onRecordPurchaseReturn(purchaseId, returnLines, reason, date, mode, accountId, onComplete)
+            },
+            onSuccess = { refreshTrigger++ }
+        )
+    }
+
+    pendingSupplierChange?.let { targetSupplier ->
+        AlertDialog(
+            onDismissRequest = { pendingSupplierChange = null },
+            title = { Text(if (isArabic) "تغيير المورد؟" else "Change supplier?") },
+            text = { Text(if (isArabic) "توجد أصناف في سلة التوريد. تغيير المورد سيُفرغ السلة الحالية. هل تريد المتابعة؟" else "The supplier cart contains items. Changing supplier will clear the current draft. Continue?") },
+            confirmButton = {
+                Button(onClick = {
+                    selectedSupplier = targetSupplier
+                    supplierSearchQuery = ""
+                    supplierCart = emptyList()
+                    isCartExpanded = false
+                    pendingSupplierChange = null
+                }) { Text(if (isArabic) "تغيير المورد وإفراغ السلة" else "Change supplier and clear cart") }
+            },
+            dismissButton = { TextButton(onClick = { pendingSupplierChange = null }) { Text(if (isArabic) "إلغاء" else "Cancel") } }
+        )
+    }
+
     if (showSettlementSheet && selectedSupplier != null) {
         val totalOrderAmount = supplierCart.sumOf { it.subtotal }
         SupplierSettlementSheet(
             supplier = selectedSupplier!!,
             totalAmount = totalOrderAmount,
-            financialAccounts = financialAccounts,
+            currentSupplierBalance = balancesMap[selectedSupplier!!.id]?.balance ?: 0.0,
+            financialAccounts = financialAccounts.filter { it.isActive },
             isArabic = isArabic,
             onDismiss = { showSettlementSheet = false },
-            onConfirmSettlement = { paidAmt, accountId, notes ->
-                val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-                val requests = supplierCart.map { cartItem ->
-                    val qtyInt = cartItem.quantity.roundToInt().coerceAtLeast(1)
-                    val effectiveUnitCost = AccountingDecimal.money(cartItem.subtotal / qtyInt)
-                    PurchaseLineRequest(
-                        productId = cartItem.itemId,
-                        productNameSnapshot = "${cartItem.name} (${formatQuantity(cartItem.quantity)} ${cartItem.unit})",
-                        quantity = qtyInt,
-                        unitCost = effectiveUnitCost
-                    )
-                }
-                onRecordPurchase(
-                    selectedSupplier!!.id,
-                    requests,
-                    paidAmt,
-                    accountId,
-                    notes,
-                    today
-                ) { result ->
-                    if (result.isSuccess) {
-                        // Only persist supplier linkage and last cost after the invoice itself succeeds.
-                        supplierCart.forEach { cartItem ->
-                            onLinkItemToSupplier(selectedSupplier!!.id, cartItem.itemId, cartItem.unitCost)
-                            onUpdateProductCost(selectedSupplier!!.id, cartItem.itemId, cartItem.unitCost)
+            onConfirmSettlement = { paidAmt, accountId, notes, purchaseDate ->
+                // The current Room purchase-line schema stores quantity as Int. Never round a fractional draft silently.
+                if (supplierCart.any { kotlin.math.abs(it.quantity - kotlin.math.round(it.quantity)) > 0.000001 }) {
+                    showQuantitySchemaWarning = true
+                } else {
+                    val requests = supplierCart.map { cartItem ->
+                        val qtyWhole = cartItem.quantity.toInt()
+                        PurchaseLineRequest(
+                            productId = cartItem.itemId,
+                            productNameSnapshot = "${cartItem.name} (${formatQuantity(cartItem.quantity)} ${cartItem.unit})",
+                            quantity = qtyWhole,
+                            unitCost = AccountingDecimal.money(cartItem.unitCost)
+                        )
+                    }
+                    onRecordPurchase(
+                        selectedSupplier!!.id,
+                        requests,
+                        paidAmt,
+                        accountId,
+                        notes,
+                        purchaseDate
+                    ) { result ->
+                        if (result.isSuccess) {
+                            supplierCart.forEach { item ->
+                                onLinkItemToSupplier(selectedSupplier!!.id, item.itemId, item.unitCost)
+                            }
+                            supplierCart = emptyList()
+                            isCartExpanded = false
+                            showSettlementSheet = false
+                            refreshTrigger++
+                        } else {
+                            operationErrorMessage = result.exceptionOrNull()?.message ?: if (isArabic) "فشل حفظ فاتورة الشراء." else "Failed to save purchase invoice."
                         }
-                        supplierCart = emptyList()
-                        isCartExpanded = false
-                        showSettlementSheet = false
-                        operationError = null
-                        refreshTrigger++
-                    } else {
-                        operationError = result.exceptionOrNull()?.localizedMessage
-                            ?: if (isArabic) "تعذر حفظ فاتورة الشراء" else "Could not save purchase invoice"
                     }
                 }
             }
+        )
+    }
+
+    operationErrorMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = { operationErrorMessage = null },
+            title = { Text(if (isArabic) "تعذر حفظ العملية" else "Operation could not be saved") },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = { operationErrorMessage = null }) { Text(if (isArabic) "حسنًا" else "OK") } }
+        )
+    }
+
+    if (showQuantitySchemaWarning) {
+        AlertDialog(
+            onDismissRequest = { showQuantitySchemaWarning = false },
+            title = { Text(if (isArabic) "تعذر حفظ الكمية العشرية بأمان" else "Fractional quantity cannot be saved safely") },
+            text = { Text(if (isArabic) "المصدر الحالي يخزّن كمية بند فاتورة الشراء كعدد صحيح. لم يتم تقريب الكمية أو حفظ الفاتورة حتى لا تتغير الكمية والتكلفة بصمت. يلزم ترحيل آمن لبيانات بنود الشراء والمرتجعات وحركات المخزون إلى دقة عشرية قبل تفعيل الكميات الكسرية." else "The current database schema stores purchase-line quantities as whole numbers. No rounding or save was performed. A safe decimal migration of purchase lines, returns, and stock movements is required first.") },
+            confirmButton = { TextButton(onClick = { showQuantitySchemaWarning = false }) { Text(if (isArabic) "حسنًا" else "OK") } }
         )
     }
 
@@ -526,19 +592,30 @@ fun SupplierOperationsScreen(
         SupplierQuickPaymentDialog(
             supplier = selectedSupplier!!,
             currentBalance = balancesMap[selectedSupplier!!.id]?.balance ?: 0.0,
-            financialAccounts = financialAccounts,
+            financialAccounts = financialAccounts.filter { it.isActive },
             isArabic = isArabic,
             onDismiss = { showPaymentDialog = false },
-            onConfirm = { amount, accountId, notes ->
-                val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-                onRecordSupplierPayment(selectedSupplier!!.id, amount, today, accountId, notes) {
-                    if (it.isSuccess) {
-                        showPaymentDialog = false
-                        operationError = null
-                        refreshTrigger++
+            onConfirm = { isCollection, amount, accountId, notes, operationDate, onComplete ->
+                if (isCollection) {
+                    val accId = accountId
+                    if (accId == null) {
+                        onComplete(Result.failure(IllegalArgumentException(if (isArabic) "اختر حسابًا ماليًا نشطًا." else "Select an active financial account.")))
                     } else {
-                        operationError = it.exceptionOrNull()?.localizedMessage
-                            ?: if (isArabic) "تعذر تسجيل دفعة المورد" else "Could not record supplier payment"
+                        onRecordSupplierReceipt(selectedSupplier!!.id, amount, operationDate, accId, notes) { result ->
+                            onComplete(result)
+                            if (result.isSuccess) {
+                                showPaymentDialog = false
+                                refreshTrigger++
+                            }
+                        }
+                    }
+                } else {
+                    onRecordSupplierPayment(selectedSupplier!!.id, amount, operationDate, accountId, notes) { result ->
+                        onComplete(result)
+                        if (result.isSuccess) {
+                            showPaymentDialog = false
+                            refreshTrigger++
+                        }
                     }
                 }
             }
@@ -551,11 +628,13 @@ fun SupplierOperationsScreen(
             linkedProductIds = supplierLinkedMap.keys,
             isArabic = isArabic,
             onDismiss = { showLinkOrAddItemDialog = false },
-            onLinkExisting = { prod ->
-                onLinkItemToSupplier(selectedSupplier!!.id, prod.id, prod.costPrice)
+            onLinkExisting = { selectedProducts ->
+                selectedProducts.forEach { prod ->
+                    onLinkItemToSupplier(selectedSupplier!!.id, prod.id, prod.costPrice)
+                }
                 showLinkOrAddItemDialog = false
             },
-            onCreateNew = { name, unit, cost, category, isRawMaterial ->
+            onCreateNew = { name, unit, cost, category, isRawMaterial, onComplete ->
                 onAddNewCatalogItemForSupplier(
                     selectedSupplier!!.id,
                     name,
@@ -563,49 +642,9 @@ fun SupplierOperationsScreen(
                     cost,
                     category,
                     isRawMaterial,
-                    null
+                    null,
+                    onComplete
                 )
-                showLinkOrAddItemDialog = false
-            }
-        )
-    }
-
-    pendingSupplierChange?.let { newSupplier ->
-        AlertDialog(
-            onDismissRequest = { pendingSupplierChange = null },
-            title = { Text(if (isArabic) "تغيير المورد" else "Change supplier") },
-            text = {
-                Text(
-                    if (isArabic) "توجد أصناف في سلة المورد الحالي. تغيير المورد سيمسح السلة. هل تريد المتابعة؟"
-                    else "The current supplier cart contains items. Changing supplier will clear it. Continue?"
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    selectedSupplier = newSupplier
-                    supplierCart = emptyList()
-                    isCartExpanded = false
-                    itemSearchQuery = ""
-                    pendingSupplierChange = null
-                }) { Text(if (isArabic) "تغيير ومسح السلة" else "Change and clear cart") }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingSupplierChange = null }) {
-                    Text(if (isArabic) "إلغاء" else "Cancel")
-                }
-            }
-        )
-    }
-
-    operationError?.let { message ->
-        AlertDialog(
-            onDismissRequest = { operationError = null },
-            title = { Text(if (isArabic) "تعذر إتمام العملية" else "Operation failed") },
-            text = { Text(message) },
-            confirmButton = {
-                TextButton(onClick = { operationError = null }) {
-                    Text(if (isArabic) "حسنًا" else "OK")
-                }
             }
         )
     }
@@ -1024,9 +1063,21 @@ private fun SupplierBottomCartBar(
     }
 }
 
+private fun isValidSupplierDate(value: String): Boolean {
+    return try {
+        val parser = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false }
+        parser.parse(value) != null
+    } catch (_: Exception) {
+        false
+    }
+}
+
 private fun formatQuantity(qty: Double): String {
-    if (!qty.isFinite()) return "—"
-    return String.format(Locale.US, "%.3f", qty).trimEnd('0').trimEnd('.')
+    return if (qty % 1.0 == 0.0) {
+        qty.toInt().toString()
+    } else {
+        String.format(Locale.US, "%.2f", qty).trimEnd('0').trimEnd('.')
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1034,24 +1085,33 @@ private fun formatQuantity(qty: Double): String {
 fun SupplierSettlementSheet(
     supplier: Supplier,
     totalAmount: Double,
+    currentSupplierBalance: Double,
     financialAccounts: List<FinancialAccount>,
     isArabic: Boolean,
     onDismiss: () -> Unit,
-    onConfirmSettlement: (paidAmt: Double, accountId: String?, notes: String) -> Unit
+    onConfirmSettlement: (paidAmt: Double, accountId: String?, notes: String, purchaseDate: String) -> Unit
 ) {
     var paidAmountText by remember { mutableStateOf(String.format(Locale.US, "%.2f", totalAmount)) }
     var selectedAccount by remember { mutableStateOf(financialAccounts.firstOrNull { it.isActive }?.id) }
     var notesText by remember { mutableStateOf("") }
-    var validationError by remember { mutableStateOf<String?>(null) }
-    val activeAccounts = remember(financialAccounts) { financialAccounts.filter { it.isActive } }
-
+    var purchaseDate by remember { mutableStateOf(SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = System.currentTimeMillis())
+    val parsedPaidAmount = paidAmountText.replace(',', '.').toDoubleOrNull()
+    val validPurchaseDate = isValidSupplierDate(purchaseDate)
+    
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier.padding(16.dp).fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text(if (isArabic) "إتمام معاملة المورد" else "Complete Supplier Transaction", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Text(if (isArabic) "الإجمالي: $totalAmount" else "Total Amount: $totalAmount", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text(if (isArabic) "إجمالي الفاتورة: ${String.format(Locale.US, "%.2f", totalAmount)} ₪" else "Invoice total: ${String.format(Locale.US, "%.2f", totalAmount)} ₪", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text(
+                if (isArabic) "الرصيد الحالي: ${String.format(Locale.US, "%.2f", currentSupplierBalance)} ₪ • الرصيد المتوقع بعد الفاتورة: ${String.format(Locale.US, "%.2f", currentSupplierBalance + totalAmount - (paidAmountText.replace(',', '.').toDoubleOrNull() ?: 0.0))} ₪" else "Current balance: ${String.format(Locale.US, "%.2f", currentSupplierBalance)} ₪ • Expected balance after invoice: ${String.format(Locale.US, "%.2f", currentSupplierBalance + totalAmount - (paidAmountText.replace(',', '.').toDoubleOrNull() ?: 0.0))} ₪",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             
             OutlinedTextField(
                 value = paidAmountText,
@@ -1061,10 +1121,10 @@ fun SupplierSettlementSheet(
                 modifier = Modifier.fillMaxWidth()
             )
             
-            if (activeAccounts.isNotEmpty()) {
+            if (financialAccounts.isNotEmpty()) {
                 Text(if (isArabic) "حساب الدفع" else "Payment Account")
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(activeAccounts) { acc ->
+                    items(financialAccounts) { acc ->
                         FilterChip(
                             selected = selectedAccount == acc.id,
                             onClick = { selectedAccount = acc.id },
@@ -1074,29 +1134,50 @@ fun SupplierSettlementSheet(
                 }
             }
             
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = purchaseDate,
+                    onValueChange = { purchaseDate = it },
+                    label = { Text(if (isArabic) "تاريخ الفاتورة (yyyy-MM-dd)" else "Invoice date (yyyy-MM-dd)") },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true
+                )
+                IconButton(onClick = { showDatePicker = true }) {
+                    Icon(Icons.Default.CalendarMonth, contentDescription = if (isArabic) "اختيار التاريخ" else "Choose date")
+                }
+            }
             OutlinedTextField(
                 value = notesText,
                 onValueChange = { notesText = it },
                 label = { Text(if (isArabic) "ملاحظات الفاتورة (اختياري)" else "Notes (Optional)") },
                 modifier = Modifier.fillMaxWidth()
             )
+            if (showDatePicker) {
+                DatePickerDialog(
+                    onDismissRequest = { showDatePicker = false },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            datePickerState.selectedDateMillis?.let { millis ->
+                                purchaseDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(millis))
+                            }
+                            showDatePicker = false
+                        }) { Text(if (isArabic) "اختيار" else "Select") }
+                    },
+                    dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text(if (isArabic) "إلغاء" else "Cancel") } }
+                ) { DatePicker(state = datePickerState) }
+            }
             
-            validationError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            if (parsedPaidAmount != null && parsedPaidAmount > totalAmount + 0.001) {
+                Text(if (isArabic) "المبلغ المدفوع لا يمكن أن يتجاوز إجمالي الفاتورة." else "Paid amount cannot exceed invoice total.", color = MaterialTheme.colorScheme.error)
+            }
             Button(
+                enabled = parsedPaidAmount != null && parsedPaidAmount.isFinite() && parsedPaidAmount >= 0.0 && parsedPaidAmount <= totalAmount + 0.001 && validPurchaseDate && (parsedPaidAmount <= 0.001 || selectedAccount != null),
                 onClick = {
-                    val amt = paidAmountText.trim().toDoubleOrNull()
-                    validationError = when {
-                        amt == null || !amt.isFinite() -> if (isArabic) "أدخل مبلغًا رقميًا صحيحًا" else "Enter a valid numeric amount"
-                        amt < 0.0 -> if (isArabic) "لا يمكن أن يكون المبلغ سالبًا" else "Amount cannot be negative"
-                        amt > totalAmount + 0.001 -> if (isArabic) "المبلغ المدفوع لا يمكن أن يتجاوز إجمالي الفاتورة" else "Paid amount cannot exceed invoice total"
-                        amt > 0.0 && (selectedAccount == null || activeAccounts.none { it.id == selectedAccount }) -> if (isArabic) "اختر حسابًا ماليًا نشطًا للدفع" else "Select an active payment account"
-                        else -> null
-                    }
-                    if (validationError == null && amt != null) onConfirmSettlement(amt, if (amt > 0.0) selectedAccount else null, notesText.trim())
+                    onConfirmSettlement(parsedPaidAmount ?: 0.0, selectedAccount, notesText.trim(), purchaseDate)
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(if (isArabic) "تأكيد الدفع" else "Confirm Payment")
+                Text(if (isArabic) "تأكيد فاتورة الشراء" else "Confirm Purchase Invoice")
             }
             Spacer(modifier = Modifier.height(24.dp))
         }
@@ -1110,66 +1191,251 @@ fun SupplierQuickPaymentDialog(
     financialAccounts: List<FinancialAccount>,
     isArabic: Boolean,
     onDismiss: () -> Unit,
-    onConfirm: (amount: Double, accountId: String?, notes: String) -> Unit
+    onConfirm: (isCollection: Boolean, amount: Double, accountId: String?, notes: String, operationDate: String, onComplete: (Result<Unit>) -> Unit) -> Unit
 ) {
+    var isCollection by remember { mutableStateOf(currentBalance <= 0.001) }
+    var isSaving by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
     var amountText by remember { mutableStateOf("") }
     var selectedAccount by remember { mutableStateOf(financialAccounts.firstOrNull { it.isActive }?.id) }
     var notesText by remember { mutableStateOf("") }
-    var validationError by remember { mutableStateOf<String?>(null) }
-    val activeAccounts = remember(financialAccounts) { financialAccounts.filter { it.isActive } }
+    var operationDate by remember { mutableStateOf(SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())) }
+    val amount = amountText.replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 } ?: 0.0
+    val settlementCapacity = kotlin.math.abs(currentBalance)
+    val excess = (amount - settlementCapacity).coerceAtLeast(0.0)
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (isArabic) "سداد مورد: ${supplier.name}" else "Pay Supplier: ${supplier.name}") },
+        title = { Text(if (isArabic) "تسوية حساب المورد: ${supplier.name}" else "Settle Supplier: ${supplier.name}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    text = if (isArabic) "الرصيد المستحق: $currentBalance" else "Balance Payable: $currentBalance",
-                    color = MaterialTheme.colorScheme.error,
+                    text = when {
+                        currentBalance > 0.001 -> if (isArabic) "المحل مدين للمورد: ${String.format(Locale.US, "%.2f", currentBalance)} ₪" else "Store owes supplier: ${String.format(Locale.US, "%.2f", currentBalance)} ₪"
+                        currentBalance < -0.001 -> if (isArabic) "المورد مدين للمحل: ${String.format(Locale.US, "%.2f", -currentBalance)} ₪" else "Supplier owes store: ${String.format(Locale.US, "%.2f", -currentBalance)} ₪"
+                        else -> if (isArabic) "الرصيد خالص" else "Balance settled"
+                    },
+                    color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold
                 )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = !isCollection, onClick = { isCollection = false }, label = { Text(if (isArabic) "دفع للمورد" else "Pay supplier") })
+                    FilterChip(selected = isCollection, onClick = { isCollection = true }, label = { Text(if (isArabic) "تحصيل من المورد" else "Collect from supplier") })
+                }
                 OutlinedTextField(
                     value = amountText,
                     onValueChange = { amountText = it },
-                    label = { Text(if (isArabic) "المبلغ المراد سداده" else "Amount to Pay") },
+                    label = { Text(if (isCollection) if (isArabic) "المبلغ المستلم من المورد" else "Amount received" else if (isArabic) "المبلغ المدفوع للمورد" else "Amount paid") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
                 )
-                if (activeAccounts.isNotEmpty()) {
-                    Text(if (isArabic) "حساب السداد" else "Payment Account")
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(activeAccounts) { acc ->
-                            FilterChip(
-                                selected = selectedAccount == acc.id,
-                                onClick = { selectedAccount = acc.id },
-                                label = { Text(acc.name) }
+                if (isCollection && excess > 0.001) {
+                    Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(10.dp)) {
+                        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                if (isArabic) "تحذير: المبلغ أكبر من الرصيد القابل للتسوية بمقدار ${String.format(Locale.US, "%.2f", excess)} ₪." else "Warning: amount exceeds the settleable balance by ${String.format(Locale.US, "%.2f", excess)} ₪.",
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                if (isArabic) "سيُسجّل النظام عملية تسوية مستقلة بمقدار ${String.format(Locale.US, "%.2f", settlementCapacity)} ₪، وعملية ثانية للزيادة ${String.format(Locale.US, "%.2f", excess)} ₪ بعنوان «زيادة تحصيل من المورد — رصيد مستحق للمورد على المحل»." else "The system will record a settlement entry and a separate supplier-credit entry for the excess.",
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodySmall
                             )
                         }
                     }
                 }
                 OutlinedTextField(
+                    value = operationDate,
+                    onValueChange = { operationDate = it },
+                    label = { Text(if (isArabic) "تاريخ العملية (yyyy-MM-dd)" else "Operation date (yyyy-MM-dd)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                if (financialAccounts.isNotEmpty()) {
+                    Text(if (isArabic) "الحساب المالي" else "Financial account")
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(financialAccounts.filter { it.isActive }) { acc ->
+                            FilterChip(selected = selectedAccount == acc.id, onClick = { selectedAccount = acc.id }, label = { Text(acc.name) })
+                        }
+                    }
+                } else {
+                    Text(if (isArabic) "لا يوجد حساب مالي نشط؛ لا يمكن حفظ حركة نقدية." else "No active financial account is available.", color = MaterialTheme.colorScheme.error)
+                }
+                OutlinedTextField(
                     value = notesText,
                     onValueChange = { notesText = it },
-                    label = { Text(if (isArabic) "البيان / السند (اختياري)" else "Notes / Ref (Optional)") },
+                    label = { Text(if (isArabic) "البيان / السند (اختياري)" else "Notes / reference (optional)") },
                     modifier = Modifier.fillMaxWidth()
                 )
-                validationError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         },
         confirmButton = {
-            Button(onClick = {
-                val amount = amountText.trim().toDoubleOrNull()
-                validationError = when {
-                    amount == null || !amount.isFinite() -> if (isArabic) "أدخل مبلغًا رقميًا صحيحًا" else "Enter a valid numeric amount"
-                    amount <= 0.0 -> if (isArabic) "يجب أن يكون المبلغ أكبر من صفر" else "Amount must be greater than zero"
-                    selectedAccount == null || activeAccounts.none { it.id == selectedAccount } -> if (isArabic) "اختر حسابًا ماليًا نشطًا" else "Select an active financial account"
-                    else -> null
+            Button(
+                enabled = amount > 0.0 && selectedAccount != null && isValidSupplierDate(operationDate) && !isSaving,
+                onClick = {
+                    isSaving = true
+                    errorMessage = null
+                    onConfirm(isCollection, amount, selectedAccount, notesText.trim(), operationDate) { result ->
+                        isSaving = false
+                        result.onFailure { errorMessage = it.message ?: if (isArabic) "فشل حفظ العملية." else "Could not save operation." }
+                    }
                 }
-                if (validationError == null && amount != null) onConfirm(amount, selectedAccount, notesText)
-            }) {
-                Text(if (isArabic) "تأكيد" else "Confirm")
+            ) { Text(if (isSaving) if (isArabic) "جارٍ الحفظ..." else "Saving..." else if (isArabic) if (isCollection && excess > 0.001) "تأكيد العمليتين" else "تأكيد التسوية" else "Confirm settlement") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !isSaving) { Text(if (isArabic) "إلغاء" else "Cancel") } }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SupplierPurchaseReturnDialog(
+    supplier: Supplier,
+    purchases: List<Purchase>,
+    financialAccounts: List<FinancialAccount>,
+    isArabic: Boolean,
+    onGetPurchaseLines: suspend (String) -> List<PurchaseLine>,
+    onGetRemainingQuantities: suspend (String) -> Map<String, Int>,
+    onDismiss: () -> Unit,
+    onConfirm: (String, List<PurchaseReturnLineRequest>, String, String, String, String?, (Result<Unit>) -> Unit) -> Unit,
+    onSuccess: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    var selectedPurchaseId by remember(supplier.id, purchases) { mutableStateOf(purchases.firstOrNull()?.id) }
+    var purchaseMenuExpanded by remember { mutableStateOf(false) }
+    var lines by remember { mutableStateOf<List<PurchaseLine>>(emptyList()) }
+    var remaining by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+    var quantities by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+    var settlementMode by remember { mutableStateOf("PAYABLE") }
+    var selectedAccount by remember { mutableStateOf(financialAccounts.firstOrNull()?.id) }
+    var reason by remember { mutableStateOf("") }
+    var returnDate by remember { mutableStateOf(SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
+
+    LaunchedEffect(selectedPurchaseId) {
+        val id = selectedPurchaseId
+        if (id == null) {
+            lines = emptyList()
+            remaining = emptyMap()
+            quantities = emptyMap()
+        } else {
+            loading = true
+            runCatching {
+                val loadedLines = onGetPurchaseLines(id)
+                val remainingQuantities = onGetRemainingQuantities(id)
+                loadedLines to remainingQuantities
+            }.onSuccess { (loadedLines, remainingQuantities) ->
+                lines = loadedLines
+                remaining = remainingQuantities
+                quantities = emptyMap()
+                errorMessage = null
+            }.onFailure {
+                lines = emptyList()
+                remaining = emptyMap()
+                errorMessage = it.message ?: if (isArabic) "تعذر تحميل بنود الفاتورة." else "Could not load invoice lines."
             }
+            loading = false
         }
+    }
+
+    val selectedLines = lines.filter { (quantities[it.id] ?: 0) > 0 }
+    val total = selectedLines.sumOf { line -> line.unitCost * (quantities[line.id] ?: 0) }
+    val validDate = isValidSupplierDate(returnDate)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (isArabic) "مرتجع مشتريات — ${supplier.name}" else "Purchase return — ${supplier.name}") },
+        text = {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (purchases.isEmpty()) {
+                    Text(if (isArabic) "لا توجد فواتير شراء نشطة لهذا المورد." else "No active purchase invoices for this supplier.")
+                } else {
+                    Box {
+                        OutlinedButton(onClick = { purchaseMenuExpanded = true }, modifier = Modifier.fillMaxWidth()) {
+                            Text(purchases.firstOrNull { it.id == selectedPurchaseId }?.let { "${it.invoiceNumber} • ${it.purchaseDate}" }
+                                ?: if (isArabic) "اختر الفاتورة الأصلية" else "Choose original invoice")
+                        }
+                        DropdownMenu(expanded = purchaseMenuExpanded, onDismissRequest = { purchaseMenuExpanded = false }) {
+                            purchases.forEach { purchase ->
+                                DropdownMenuItem(
+                                    text = { Text("${purchase.invoiceNumber} • ${purchase.purchaseDate} • ${String.format(Locale.US, "%.2f", purchase.totalAmount)} ₪") },
+                                    onClick = { selectedPurchaseId = purchase.id; purchaseMenuExpanded = false }
+                                )
+                            }
+                        }
+                    }
+                    if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    LazyColumn(Modifier.heightIn(max = 230.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(lines, key = { it.id }) { line ->
+                            val available = remaining[line.id] ?: line.quantity
+                            val qty = quantities[line.id] ?: 0
+                            Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)) {
+                                Column(Modifier.fillMaxWidth().padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(line.productNameSnapshot, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        if (isArabic) "الأصل: ${line.quantity} • المرتجع المتاح: $available • التكلفة: ${String.format(Locale.US, "%.2f", line.unitCost)} ₪" else "Original: ${line.quantity} • Returnable: $available • Cost: ${String.format(Locale.US, "%.2f", line.unitCost)} ₪",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text(if (isArabic) "كمية الإرجاع" else "Return quantity", modifier = Modifier.weight(1f))
+                                        IconButton(onClick = { quantities = quantities + (line.id to (qty - 1).coerceAtLeast(0)) }, enabled = qty > 0) { Icon(Icons.Default.Remove, contentDescription = null) }
+                                        Text(qty.toString(), fontWeight = FontWeight.Bold)
+                                        IconButton(onClick = {
+                                            if (qty < available) quantities = quantities + (line.id to qty + 1)
+                                        }, enabled = qty < available) { Icon(Icons.Default.Add, contentDescription = null) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterChip(selected = settlementMode == "PAYABLE", onClick = { settlementMode = "PAYABLE" }, label = { Text(if (isArabic) "خصم من مستحقات المورد" else "Reduce supplier payable") })
+                        FilterChip(selected = settlementMode == "CASH_REFUND", onClick = { settlementMode = "CASH_REFUND" }, label = { Text(if (isArabic) "استرداد نقدي" else "Cash refund") })
+                    }
+                    if (settlementMode == "CASH_REFUND") {
+                        if (financialAccounts.isEmpty()) {
+                            Text(if (isArabic) "لا يوجد حساب مالي نشط لاستلام المبلغ." else "No active account to receive the refund.", color = MaterialTheme.colorScheme.error)
+                        } else {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                items(financialAccounts) { account ->
+                                    FilterChip(selected = selectedAccount == account.id, onClick = { selectedAccount = account.id }, label = { Text(account.name) })
+                                }
+                            }
+                        }
+                    }
+                    OutlinedTextField(value = returnDate, onValueChange = { returnDate = it }, label = { Text(if (isArabic) "تاريخ المرتجع (yyyy-MM-dd)" else "Return date (yyyy-MM-dd)") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                    OutlinedTextField(value = reason, onValueChange = { reason = it }, label = { Text(if (isArabic) "سبب المرتجع (مطلوب)" else "Return reason (required)") }, modifier = Modifier.fillMaxWidth())
+                    Text(if (isArabic) "إجمالي المرتجع: ${String.format(Locale.US, "%.2f", total)} ₪" else "Return total: ${String.format(Locale.US, "%.2f", total)} ₪", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                }
+                errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = purchases.isNotEmpty() && selectedPurchaseId != null && selectedLines.isNotEmpty() && reason.isNotBlank() && validDate && !loading && !saving && (settlementMode != "CASH_REFUND" || selectedAccount != null),
+                onClick = {
+                    val purchaseId = selectedPurchaseId ?: return@Button
+                    saving = true
+                    errorMessage = null
+                    val requests = selectedLines.map { PurchaseReturnLineRequest(it.id, quantities[it.id] ?: 0) }
+                    onConfirm(purchaseId, requests, reason.trim(), returnDate, settlementMode, if (settlementMode == "CASH_REFUND") selectedAccount else null) { result ->
+                        saving = false
+                        result.onSuccess {
+                            onSuccess()
+                            onDismiss()
+                        }.onFailure {
+                            errorMessage = it.message ?: if (isArabic) "فشل حفظ المرتجع." else "Failed to save return."
+                        }
+                    }
+                }
+            ) { Text(if (isArabic) "مراجعة المرتجع وتأكيده" else "Review and confirm return") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !saving) { Text(if (isArabic) "إلغاء" else "Cancel") } }
     )
 }
 
@@ -1179,10 +1445,14 @@ fun LinkOrCreateSupplierItemDialog(
     linkedProductIds: Set<String>,
     isArabic: Boolean,
     onDismiss: () -> Unit,
-    onLinkExisting: (ProductItem) -> Unit,
-    onCreateNew: (name: String, unit: String, cost: Double, category: String, isRawMaterial: Boolean) -> Unit
+    onLinkExisting: (List<ProductItem>) -> Unit,
+    onCreateNew: (name: String, unit: String, cost: Double, category: String, isRawMaterial: Boolean, onComplete: (Result<ProductItem>) -> Unit) -> Unit
 ) {
     var tabIndex by remember { mutableStateOf(0) }
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var newlyCreatedProduct by remember { mutableStateOf<ProductItem?>(null) }
+    var createError by remember { mutableStateOf<String?>(null) }
     var nameText by remember { mutableStateOf("") }
     var unitText by remember { mutableStateOf("وحدة") }
     var costText by remember { mutableStateOf("") }
@@ -1199,23 +1469,47 @@ fun LinkOrCreateSupplierItemDialog(
                 }
                 
                 if (tabIndex == 0) {
-                    val unlinked = allProducts.filter { it.id !in linkedProductIds }
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text(if (isArabic) "ابحث باسم الصنف أو رمزه..." else "Search item or code...") },
+                        trailingIcon = {
+                            Row {
+                                if (searchQuery.isNotBlank()) IconButton(onClick = { searchQuery = "" }) { Icon(Icons.Default.Clear, contentDescription = null) }
+                                IconButton(onClick = { searchQuery = "" }) { Icon(Icons.Default.KeyboardArrowDown, contentDescription = if (isArabic) "عرض الكل" else "Show all") }
+                            }
+                        },
+                        singleLine = true
+                    )
+                    val selectableProducts = (allProducts + listOfNotNull(newlyCreatedProduct)).distinctBy { it.id }
+                    val unlinked = selectableProducts.filter { product ->
+                        (product.id == newlyCreatedProduct?.id || product.id !in linkedProductIds) &&
+                            (searchQuery.isBlank() || product.name.contains(searchQuery, true) || product.category.contains(searchQuery, true))
+                    }
                     if (unlinked.isEmpty()) {
-                        Text(if (isArabic) "جميع الأصناف مربوطة مسبقاً بهذا المورد" else "All items are already linked")
+                        Text(if (isArabic) "لا توجد أصناف متاحة غير مربوطة تطابق البحث" else "No matching unlinked items")
                     } else {
-                        LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
-                            items(unlinked) { prod ->
+                        LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
+                            items(unlinked, key = { it.id }) { prod ->
                                 Row(
-                                    modifier = Modifier.fillMaxWidth().clickable { onLinkExisting(prod) }.padding(8.dp),
+                                    modifier = Modifier.fillMaxWidth().clickable {
+                                        selectedIds = if (prod.id in selectedIds) selectedIds - prod.id else selectedIds + prod.id
+                                    }.padding(8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(prod.name, modifier = Modifier.weight(1f))
-                                    Icon(Icons.Default.AddCircleOutline, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                    Checkbox(checked = prod.id in selectedIds, onCheckedChange = { checked -> selectedIds = if (checked) selectedIds + prod.id else selectedIds - prod.id })
+                                    Column(Modifier.weight(1f)) {
+                                        Text(prod.name)
+                                        Text(prod.category, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    if (prod.id in selectedIds) Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                                 }
                             }
                         }
                     }
                 } else {
+                    createError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     OutlinedTextField(
                         value = nameText,
                         onValueChange = { nameText = it },
@@ -1245,13 +1539,32 @@ fun LinkOrCreateSupplierItemDialog(
         confirmButton = {
             if (tabIndex == 1) {
                 Button(onClick = {
-                    val cost = costText.toDoubleOrNull() ?: 0.0
-                    if (nameText.isNotBlank()) onCreateNew(nameText, unitText, cost, if (isArabic) "مواد موردين" else "Supplier Items", isRawMaterial)
+                    val cost = costText.replace(',', '.').toDoubleOrNull()
+                    if (nameText.isBlank() || cost == null || !cost.isFinite() || cost < 0.0) {
+                        createError = if (isArabic) "أدخل اسمًا صحيحًا وتكلفة غير سالبة." else "Enter a name and a valid non-negative cost."
+                    } else {
+                        createError = null
+                        onCreateNew(nameText.trim(), unitText.trim(), cost, if (isArabic) "مواد موردين" else "Supplier Items", isRawMaterial) { result ->
+                            result.onSuccess { product ->
+                                newlyCreatedProduct = product
+                                selectedIds = selectedIds + product.id
+                                tabIndex = 0
+                                searchQuery = ""
+                                nameText = ""
+                                costText = ""
+                                createError = if (isArabic) "تم إنشاء الصنف وتحديده. اضغط «إضافة المحدد إلى المورد» للمتابعة." else "Item created and selected. Add the selected items to continue."
+                            }.onFailure { error ->
+                                createError = error.message ?: if (isArabic) "فشل حفظ الصنف." else "Failed to save item."
+                            }
+                        }
+                    }
                 }) {
-                    Text(if (isArabic) "حفظ" else "Save")
+                    Text(if (isArabic) "حفظ والعودة للاختيار" else "Save and return to selection")
                 }
             } else {
-                TextButton(onClick = onDismiss) { Text(if (isArabic) "إغلاق" else "Close") }
+                Button(onClick = { onLinkExisting((allProducts + listOfNotNull(newlyCreatedProduct)).distinctBy { it.id }.filter { it.id in selectedIds && (it.id !in linkedProductIds || it.id == newlyCreatedProduct?.id) }) }, enabled = selectedIds.isNotEmpty()) {
+                    Text(if (isArabic) "إضافة المحدد إلى المورد (${selectedIds.size})" else "Add selected (${selectedIds.size})")
+                }
             }
         }
     )

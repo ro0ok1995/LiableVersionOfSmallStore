@@ -18,6 +18,16 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.Button
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -40,8 +50,11 @@ fun CartLineItemRow(
     isArabic: Boolean,
     onIncrement: () -> Unit,
     onDecrement: () -> Unit,
+    onSetQuantity: (Int) -> Unit = {},
     onRemove: () -> Unit
 ) {
+    var showQuantityEditor by remember { mutableStateOf(false) }
+    var quantityText by remember(item.quantity) { mutableStateOf(item.quantity.toString()) }
     val lineTotal = item.product.price * item.quantity
     Row(
         modifier = Modifier
@@ -83,7 +96,7 @@ fun CartLineItemRow(
             Text(
                 text = "${item.quantity}",
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                modifier = Modifier.padding(horizontal = 8.dp)
+                modifier = Modifier.padding(horizontal = 8.dp).clickable { quantityText = item.quantity.toString(); showQuantityEditor = true }
             )
             Box(
                 modifier = Modifier
@@ -113,5 +126,30 @@ fun CartLineItemRow(
                 )
             }
         }
+    }
+    if (showQuantityEditor) {
+        AlertDialog(
+            onDismissRequest = { showQuantityEditor = false },
+            title = { Text(if (isArabic) "تعديل الكمية" else "Edit quantity") },
+            text = {
+                OutlinedTextField(
+                    value = quantityText,
+                    onValueChange = { quantityText = it },
+                    label = { Text(if (isArabic) "الكمية" else "Quantity") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val value = quantityText.toIntOrNull()
+                    if (value != null && value > 0) {
+                        onSetQuantity(value)
+                        showQuantityEditor = false
+                    }
+                }) { Text(if (isArabic) "حفظ" else "Save") }
+            },
+            dismissButton = { TextButton(onClick = { showQuantityEditor = false }) { Text(if (isArabic) "إلغاء" else "Cancel") } }
+        )
     }
 }
