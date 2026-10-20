@@ -102,8 +102,6 @@ fun UnifiedSettlementSheet(
     initialDebtAmount: String = "40",
     initialNotes: String = "",
     financialAccounts: List<FinancialAccount> = emptyList(),
-    isSubmitting: Boolean = false,
-    errorMessage: String? = null,
     onDismiss: () -> Unit = {},
     onComplete: (cash: Double, debt: Double, notes: String, financialAccountId: String?) -> Unit = { _, _, _, _ -> }
 ) {
@@ -113,7 +111,7 @@ fun UnifiedSettlementSheet(
 
     CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
         ModalBottomSheet(
-            onDismissRequest = { if (!isSubmitting) onDismiss() },
+            onDismissRequest = onDismiss,
             sheetState = sheetState,
             shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
             containerColor = MaterialTheme.colorScheme.surface,
@@ -140,8 +138,6 @@ fun UnifiedSettlementSheet(
                 initialDebtAmount = initialDebtAmount,
                 initialNotes = initialNotes,
                 financialAccounts = financialAccounts,
-                isSubmitting = isSubmitting,
-                errorMessage = errorMessage,
                 onComplete = onComplete
             )
         }
@@ -159,8 +155,6 @@ fun UnifiedSettlementSheetContent(
     initialDebtAmount: String = "40",
     initialNotes: String = "",
     financialAccounts: List<FinancialAccount> = emptyList(),
-    isSubmitting: Boolean = false,
-    errorMessage: String? = null,
     onComplete: (cash: Double, debt: Double, notes: String, financialAccountId: String?) -> Unit = { _, _, _, _ -> }
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
@@ -221,8 +215,7 @@ fun UnifiedSettlementSheetContent(
     // Validation
     val isRemainingZero = Math.abs(remainingBalance) <= 0.001
     val isTotalPaidValid = Math.abs(totalPaid - transactionTotal) <= 0.001 && transactionTotal > 0.0
-    val hasValidFinancialAccount = parsedCash <= 0.001 || activeAccounts.any { it.id == selectedAccountId }
-    val isValidAllocation = isRemainingZero && isTotalPaidValid && (parsedCash >= -0.001) && (parsedDebt >= -0.001) && hasValidFinancialAccount &&
+    val isValidAllocation = isRemainingZero && isTotalPaidValid && (parsedCash >= -0.001) && (parsedDebt >= -0.001) &&
         when (effectiveMode) {
             SettlementMode.FULL -> {
                 if (effectiveFullMethod == FullPaymentMethod.CASH) {
@@ -272,22 +265,6 @@ fun UnifiedSettlementSheetContent(
             color = MaterialTheme.colorScheme.outlineVariant,
             modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
         )
-        if (errorMessage != null) {
-            Text(
-                text = errorMessage,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp)
-            )
-        }
-        if (parsedCash > 0.001 && activeAccounts.none { it.id == selectedAccountId }) {
-            Text(
-                text = if (isArabic) "اختر حسابًا ماليًا نشطًا لاستلام/تسجيل المبلغ النقدي." else "Select an active financial account for the cash payment.",
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp)
-            )
-        }
 
         // 2. SCROLLABLE FORM BODY
         Column(
@@ -927,7 +904,7 @@ fun UnifiedSettlementSheetContent(
                         focusManager.clearFocus()
                         onComplete(parsedCash, parsedDebt, notesText.trim(), selectedAccountId)
                     },
-                    enabled = isValidAllocation && !isSubmitting,
+                    enabled = isValidAllocation,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -941,7 +918,7 @@ fun UnifiedSettlementSheetContent(
                         .testTag("settlement_complete_button")
                 ) {
                     Text(
-                        text = if (isSubmitting) (if (isArabic) "جارٍ حفظ الفاتورة..." else "Saving sale...") else (if (isArabic) StoreStrings.COMPLETE_ACTION_AR else StoreStrings.COMPLETE_ACTION_EN),
+                        text = if (isArabic) StoreStrings.COMPLETE_ACTION_AR else StoreStrings.COMPLETE_ACTION_EN,
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp

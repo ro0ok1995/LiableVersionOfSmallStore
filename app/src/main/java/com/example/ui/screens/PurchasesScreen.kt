@@ -129,7 +129,6 @@ fun PurchasesScreen(
     onRemoveFromCart: (productId: String) -> Unit = {},
     onToggleCartExpanded: () -> Unit = {},
     onSelectCustomer: (CustomerAccount) -> Unit = {},
-    onRestoreArchivedCustomer: (CustomerAccount, onSuccess: () -> Unit) -> Unit = { _, onSuccess -> onSuccess() },
     onClearCustomer: () -> Unit = {},
     onCompleteTransaction: () -> Unit = {},
     onCompleteTransactionWithItems: ((List<CartItem>) -> Unit)? = null,
@@ -422,10 +421,10 @@ fun PurchasesScreen(
                     if (!isCheckoutEnabled) {
                         val requirementNote = when {
                             customer == null && cart.isEmpty() -> {
-                                if (isArabic) "اختر عميلاً وأضف منتجات لتتمكن من إتمام المعاملة" else "Select a customer and add items to checkout"
+                                if (isArabic) "أضف منتجًا واحدًا على الأقل لتتمكن من إتمام المعاملة" else "Add at least one product to checkout"
                             }
                             customer == null -> {
-                                if (isArabic) "يرجى اختيار عميل من الأعلى للمتابعة" else "Please select a customer above to continue"
+                                if (isArabic) "يمكن إتمام البيع النقدي دون عميل؛ اختر عميلًا إذا كان البيع سيتضمن دينًا" else "Cash sales can be completed without a customer; select a customer for credit sales"
                             }
                             else -> {
                                 if (isArabic) "يرجى إضافة منتج واحد على الأقل إلى السلة" else "Please add at least one product to the cart"
@@ -603,8 +602,7 @@ fun PurchasesScreen(
             onSelectCustomer = {
                 onSelectCustomer(it)
                 showCustomerPicker = false
-            },
-            onRestoreArchivedCustomer = onRestoreArchivedCustomer
+            }
         )
     }
 }

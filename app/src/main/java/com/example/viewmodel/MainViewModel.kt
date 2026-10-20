@@ -77,8 +77,6 @@ data class MainUiState(
     val isDrawerOpen: Boolean = false,
     val showActionSheet: Boolean = false,
     val showSettlementSheet: Boolean = false,
-    val isSavingSettlement: Boolean = false,
-    val settlementError: String? = null,
     val settlementTotal: Double = 0.0,
     val settlementContext: SettlementContext = SettlementContext.RECORD_TRANSACTION,
 
@@ -1337,58 +1335,45 @@ class MainViewModel @JvmOverloads constructor(
     }
 
     fun openPurchasesSettlement(cartItems: List<CartItem> = _uiState.value.cart) {
-        if (_uiState.value.isSavingSettlement) return
         val total = cartItems.sumOf { it.product.price * it.quantity }
         _uiState.update {
             it.copy(
                 cart = cartItems,
                 settlementTotal = total,
                 settlementContext = SettlementContext.RECORD_TRANSACTION,
-                showSettlementSheet = true,
-                settlementError = null
+                showSettlementSheet = true
             )
         }
     }
 
     fun dismissSettlementSheet() {
-        _uiState.update { state ->
-            if (state.isSavingSettlement) state else state.copy(showSettlementSheet = false, settlementError = null)
-        }
+        _uiState.update { it.copy(showSettlementSheet = false) }
     }
 
     fun completeSettlement(cashAmount: Double, debtAmount: Double, notes: String, financialAccountId: String? = null) {
         val state = _uiState.value
-        if (state.isSavingSettlement) return
         val customer = state.purchasesCustomer
-        fun reject(message: String) {
-            _uiState.update { it.copy(settlementError = message) }
-        }
-        if (customer?.isArchived == true) { reject("العميل مؤرشف؛ أعد تفعيله قبل البيع."); return }
-        if (customer != null && state.customers.isNotEmpty() && state.customers.none { it.id == customer.id }) { reject("العميل المحدد غير نشط أو غير متاح."); return }
-        if (state.cart.isEmpty()) { reject("السلة فارغة."); return }
-        if (!cashAmount.isFinite() || !debtAmount.isFinite() || cashAmount < 0.0 || debtAmount < 0.0) { reject("مبالغ التسوية غير صالحة."); return }
+        if (customer?.isArchived == true) return
+        if (customer != null && state.customers.isNotEmpty() && state.customers.none { it.id == customer.id }) return
+        if (state.cart.isEmpty()) return
+        if (!cashAmount.isFinite() || !debtAmount.isFinite() || cashAmount < 0.0 || debtAmount < 0.0) return
 
         // Authoritative invoice total check
-        if (state.settlementTotal <= 0.0) { reject("إجمالي الفاتورة غير صالح."); return }
+        if (state.settlementTotal <= 0.0) return
 
         // Accounting Rule: The transaction must use state.settlementTotal as the authoritative invoice total
         // and reject an invalid allocation rather than silently accepting a different total.
-        if (Math.abs(state.settlementTotal - (cashAmount + debtAmount)) > 0.001) { reject("يجب أن يساوي مجموع المدفوع والدين إجمالي الفاتورة."); return }
+        if (Math.abs(state.settlementTotal - (cashAmount + debtAmount)) > 0.001) return
 
         // Anonymous Customer Rule:
         // If no customer is selected, only Full Cash is allowed (credit must be 0, cash must equal settlementTotal)
-        if (customer == null && (debtAmount > 0.001 || Math.abs(cashAmount - state.settlementTotal) > 0.001)) { reject("البيع دون عميل يجب أن يكون نقديًا بالكامل."); return }
+        if (customer == null && (debtAmount > 0.001 || Math.abs(cashAmount - state.settlementTotal) > 0.001)) return
 
         // Credit sale or Mixed sale with credit requires a customer
-        if (debtAmount > 0.001 && customer == null) { reject("اختر عميلًا قبل تسجيل أي دين."); return }
-        if (cashAmount > 0.001) {
-            val account = state.financialAccounts.firstOrNull { it.id == financialAccountId && it.isActive }
-            if (account == null) { reject("اختر حسابًا ماليًا نشطًا لتسجيل المبلغ المدفوع."); return }
-        }
-        _uiState.update { it.copy(isSavingSettlement = true, settlementError = null) }
+        if (debtAmount > 0.001 && customer == null) return
 
         val total = state.settlementTotal
-        val txId = "tx_${System.currentTimeMillis()}"
+        val txId = "tx_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(8)}"
 
         val saleType = when {
             debtAmount <= 0.001 -> SaleType.CASH
@@ -1425,7 +1410,6 @@ class MainViewModel @JvmOverloads constructor(
         )
 
         viewModelScope.launch {
-            try {
             val invoiceNumber = repository.salesRepository.getNextInvoiceNumber()
             val sale = Sale(
                 id = txId,
@@ -1440,7 +1424,7 @@ class MainViewModel @JvmOverloads constructor(
                 createdAt = System.currentTimeMillis(),
                 updatedAt = System.currentTimeMillis(),
                 status = "ACTIVE",
-                financialAccountId = if (cashAmount > 0.001) financialAccountId else null
+                financialAccountId = financialAccountId ?: "acc_cash"
             )
 
             val saleLines = cartSnapshot.mapIndexed { index, cartItem ->
@@ -1462,33 +1446,15 @@ class MainViewModel @JvmOverloads constructor(
                 customerNameSnapshot = customer?.customerName ?: "عميل نقدي",
                 notes = notes
             )
-            // Once the atomic sale transaction succeeds, clear the cart immediately so a later
-            // ancillary failure cannot cause the user to retry and create a duplicate sale.
+            if (updatedCustomer != null) repository.updateCustomer(updatedCustomer)
+            repository.addNotification(notif)
             _uiState.update {
                 it.copy(
                     cart = emptyList(),
                     showSettlementSheet = false,
-                    isSavingSettlement = false,
-                    settlementError = null,
                     currentDestination = NavDestination.HOME,
                     activeBottomNav = NavDestination.HOME
                 )
-            }
-            runCatching {
-                if (updatedCustomer != null) repository.updateCustomer(updatedCustomer)
-                repository.addNotification(notif)
-            }.onFailure { error ->
-                android.util.Log.e("MainViewModel", "Sale was saved, but a follow-up customer/notification update failed", error)
-            }
-            } catch (error: Exception) {
-                android.util.Log.e("MainViewModel", "Failed to save sale", error)
-                _uiState.update {
-                    it.copy(
-                        isSavingSettlement = false,
-                        settlementError = error.message?.takeIf { message -> message.isNotBlank() }
-                            ?: "تعذر حفظ الفاتورة. بقيت السلة كما هي."
-                    )
-                }
             }
         }
     }

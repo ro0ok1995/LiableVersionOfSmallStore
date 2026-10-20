@@ -594,7 +594,7 @@ fun SmallStoreApp(
                             NavDestination.PURCHASES -> {
                                 PurchasesScreen(
                                     customer = uiState.purchasesCustomer,
-                                    allCustomers = uiState.customers + uiState.archivedCustomers,
+                                    allCustomers = uiState.customers,
                                     products = uiState.products,
                                     cart = uiState.cart,
                                     searchQuery = uiState.purchasesSearchQuery,
@@ -615,9 +615,6 @@ fun SmallStoreApp(
                                     onRemoveFromCart = { mainViewModel.removeFromCart(it) },
                                     onToggleCartExpanded = { mainViewModel.toggleCartExpanded() },
                                     onSelectCustomer = { mainViewModel.setPurchasesCustomer(it) },
-                                    onRestoreArchivedCustomer = { archivedCustomer, onSuccess ->
-                                        mainViewModel.requestRestoreCustomer(archivedCustomer, onSuccess = onSuccess)
-                                    },
                                     onClearCustomer = { mainViewModel.setPurchasesCustomer(null) },
                                     onCompleteTransaction = { mainViewModel.openPurchasesSettlement() },
                                     onCompleteTransactionWithItems = { items -> mainViewModel.openPurchasesSettlement(items) },
@@ -848,7 +845,6 @@ fun SmallStoreApp(
                                     initialAction = supplierInitialAction,
                                     onGetSupplierBalance = { supplierId -> mainViewModel.getSupplierBalance(supplierId) },
                                     onGetPurchaseLines = { purchaseId -> mainViewModel.getPurchaseLines(purchaseId) },
-                                    onGetPurchaseReturnableQuantities = { purchaseId, onResult -> mainViewModel.getPurchaseReturnableQuantities(purchaseId, onResult) },
                                     onLinkItemToSupplier = { supplierId, productId, lastCost ->
                                         mainViewModel.linkProductToSupplier(supplierId, productId, lastCost)
                                     },
@@ -1051,8 +1047,6 @@ fun SmallStoreApp(
                     initialCashAmount = String.format(Locale.US, "%.0f", uiState.settlementTotal),
                     initialDebtAmount = "0",
                     financialAccounts = uiState.financialAccounts,
-                    isSubmitting = uiState.isSavingSettlement,
-                    errorMessage = uiState.settlementError,
                     onDismiss = {
                         focusManager.clearFocus()
                         mainViewModel.dismissSettlementSheet()
