@@ -49,6 +49,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -147,6 +149,8 @@ fun PurchasesScreen(
     var showCustomerPicker by remember { mutableStateOf(false) }
     var archivedCustomerToRestore by remember { mutableStateOf<CustomerAccount?>(null) }
     var activeSectionTab by remember { mutableIntStateOf(initialTab) }
+    var selectedProduct by remember { mutableStateOf<ProductItem?>(null) }
+    var isDropdownExpanded by remember { mutableStateOf(false) }
     LaunchedEffect(initialTab) {
         activeSectionTab = initialTab
     }
@@ -482,59 +486,243 @@ fun PurchasesScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // 2. SEARCH PRODUCTS FIELD
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = onSearchQueryChange,
-                placeholder = {
-                    Text(
-                        text = if (isArabic) StoreStrings.SEARCH_PRODUCTS_AR else StoreStrings.SEARCH_PRODUCTS_EN,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = if (isArabic) "بحث" else "Search",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = {
-                            onSearchQueryChange("")
-                            focusManager.clearFocus()
-                        }) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = if (isArabic) "مسح" else "Clear",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = GeoPrimary,
-                    unfocusedBorderColor = GeoOutlineVariant,
-                    focusedContainerColor = MaterialTheme.colorScheme.surface,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("purchases_search_field")
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // 3. PRODUCT GRID
+            // 2. SEARCH PRODUCTS FIELD WITH SUGGESTIONS
             val retailProducts = remember(products) {
                 products.filter { !it.isCatalogItem && !it.isRawMaterial }
             }
-            val filteredProducts = if (searchQuery.isBlank()) {
+
+            val suggestions = remember(retailProducts, searchQuery, selectedProduct) {
+                if (selectedProduct != null) {
+                    retailProducts.filter { it.id == selectedProduct?.id }
+                } else if (searchQuery.isBlank()) {
+                    retailProducts
+                } else {
+                    val q = searchQuery.trim().lowercase()
+                    retailProducts.filter {
+                        it.name.lowercase().contains(q) || it.category.lowercase().contains(q)
+                    }
+                }
+            }
+
+            Box(modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { newQuery ->
+                        if (selectedProduct != null && newQuery != selectedProduct?.name) {
+                            selectedProduct = null
+                        }
+                        onSearchQueryChange(newQuery)
+                        isDropdownExpanded = newQuery.isNotBlank()
+                    },
+                    placeholder = {
+                        Text(
+                            text = if (isArabic) StoreStrings.SEARCH_PRODUCTS_AR else StoreStrings.SEARCH_PRODUCTS_EN,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = if (selectedProduct != null) Icons.Default.CheckCircle else Icons.Default.Search,
+                            contentDescription = if (selectedProduct != null) (if (isArabic) "منتج محدد" else "Selected product") else (if (isArabic) "بحث" else "Search"),
+                            tint = if (selectedProduct != null) GeoPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
+                    trailingIcon = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            modifier = Modifier.padding(end = 4.dp)
+                        ) {
+                            if (searchQuery.isNotEmpty() || selectedProduct != null) {
+                                IconButton(
+                                    onClick = {
+                                        selectedProduct = null
+                                        onSearchQueryChange("")
+                                        isDropdownExpanded = false
+                                        focusManager.clearFocus()
+                                    },
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .testTag("purchases_search_clear_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = if (isArabic) "مسح" else "Clear",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                            IconButton(
+                                onClick = {
+                                    isDropdownExpanded = !isDropdownExpanded
+                                },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .testTag("purchases_search_toggle_dropdown")
+                            ) {
+                                Icon(
+                                    imageVector = if (isDropdownExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                    contentDescription = if (isDropdownExpanded) {
+                                        if (isArabic) "إغلاق قائمة الاقتراحات" else "Close suggestions"
+                                    } else {
+                                        if (isArabic) "عرض قائمة الاقتراحات" else "Show suggestions"
+                                    },
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = {
+                        focusManager.clearFocus()
+                        isDropdownExpanded = false
+                    }),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = GeoPrimary,
+                        unfocusedBorderColor = GeoOutlineVariant,
+                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("purchases_search_field")
+                )
+
+                DropdownMenu(
+                    expanded = isDropdownExpanded,
+                    onDismissRequest = { isDropdownExpanded = false },
+                    modifier = Modifier
+                        .fillMaxWidth(0.92f)
+                        .heightIn(max = 280.dp)
+                ) {
+                    if (suggestions.isEmpty()) {
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = if (isArabic) StoreStrings.NO_PRODUCTS_FOUND_AR else StoreStrings.NO_PRODUCTS_FOUND_EN,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            },
+                            onClick = { isDropdownExpanded = false }
+                        )
+                    } else {
+                        suggestions.take(15).forEach { item ->
+                            val isSelected = selectedProduct?.id == item.id
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = item.name,
+                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold
+                                                ),
+                                                color = if (isSelected) GeoPrimary else MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            if (item.category.isNotBlank()) {
+                                                Text(
+                                                    text = item.category,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = String.format(Locale.US, "%.2f %s", item.price, currency),
+                                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                            color = GeoPrimary
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    selectedProduct = item
+                                    onSearchQueryChange(item.name)
+                                    isDropdownExpanded = false
+                                    focusManager.clearFocus()
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = if (isSelected) Icons.Default.Check else Icons.Default.Inventory2,
+                                        contentDescription = null,
+                                        tint = if (isSelected) GeoPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (selectedProduct != null) {
+                Surface(
+                    color = GeoPrimary.copy(alpha = 0.08f),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = GeoPrimary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isArabic) "المنتج المحدد: ${selectedProduct?.name}" else "Selected: ${selectedProduct?.name}",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = GeoPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        TextButton(
+                            onClick = {
+                                selectedProduct = null
+                                onSearchQueryChange("")
+                            },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = if (isArabic) "إلغاء التصفية" else "Clear",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = StatusRed
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // 3. PRODUCT GRID
+            val filteredProducts = if (selectedProduct != null) {
+                retailProducts.filter { it.id == selectedProduct?.id }
+            } else if (searchQuery.isBlank()) {
                 retailProducts
             } else {
                 val q = searchQuery.trim().lowercase()

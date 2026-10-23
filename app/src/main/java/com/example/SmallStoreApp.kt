@@ -95,6 +95,9 @@ fun SmallStoreApp(
     var accountsInitialTab by remember { mutableIntStateOf(0) }
     var openCustomerAddFromAccounts by remember { mutableStateOf(false) }
     var openSupplierAddFromAccounts by remember { mutableStateOf(false) }
+    var supplierCatalogAddReturnPending by remember { mutableStateOf(false) }
+    var openSupplierCatalogAddDialog by remember { mutableStateOf(false) }
+    var supplierCatalogAddTab by remember { mutableIntStateOf(0) }
 
     // Sync drawer state with ViewModel
     LaunchedEffect(uiState.isDrawerOpen) {
@@ -853,17 +856,15 @@ fun SmallStoreApp(
                                     onLinkItemToSupplier = { supplierId, productId, lastCost ->
                                         mainViewModel.linkProductToSupplier(supplierId, productId, lastCost)
                                     },
-                                    onAddNewCatalogItemForSupplier = { supplierId, name, unit, costPrice, category, isRawMaterial, imageUri, onComplete ->
-                                        mainViewModel.addNewCatalogItemForSupplier(
-                                            supplierId = supplierId,
-                                            name = name,
-                                            unit = unit,
-                                            costPrice = costPrice,
-                                            category = category,
-                                            isRawMaterial = isRawMaterial,
-                                            imageUri = imageUri,
-                                            onComplete = onComplete
-                                        )
+                                    onUnlinkItemFromSupplier = { supplierId, productId, onComplete ->
+                                        mainViewModel.unlinkProductFromSupplier(supplierId, productId, onComplete)
+                                    },
+                                    onNavigateToAddCatalogItem = { isCatalogItem ->
+                                        supplierCatalogAddReturnPending = true
+                                        openSupplierCatalogAddDialog = true
+                                        supplierCatalogAddTab = if (isCatalogItem) 1 else 0
+                                        mainViewModel.navigateTo(NavDestination.DATA_CENTER)
+                                        mainViewModel.navigateTo(NavDestination.PRODUCT_MANAGEMENT)
                                     },
                                     onUpdateProductCost = { supplierId, productId, newCost ->
                                         mainViewModel.updateSupplierCatalogCost(supplierId, productId, newCost)
@@ -905,6 +906,12 @@ fun SmallStoreApp(
                                     },
                                     onAddProduct = { name, price, costPrice, category, unit, imageUri, isCatalogItem ->
                                         mainViewModel.addProduct(name, price, costPrice, category, unit, imageUri, isCatalogItem)
+                                        if (supplierCatalogAddReturnPending) {
+                                            supplierCatalogAddReturnPending = false
+                                            openSupplierCatalogAddDialog = false
+                                            mainViewModel.navigateBack()
+                                            mainViewModel.navigateBack()
+                                        }
                                     },
                                     onUpdateProduct = { updated ->
                                         mainViewModel.updateProduct(updated)
@@ -918,7 +925,10 @@ fun SmallStoreApp(
                                     productStockMap = uiState.productStockMap,
                                     onRecordStockAdjustment = { productId, delta, reason ->
                                         mainViewModel.recordInventoryAdjustment(productId, delta, reason)
-                                    }
+                                    },
+                                    initialCatalogTab = if (openSupplierCatalogAddDialog) supplierCatalogAddTab else 0,
+                                    autoOpenAddDialog = openSupplierCatalogAddDialog,
+                                    onAddDialogDismissed = { if (supplierCatalogAddReturnPending) { openSupplierCatalogAddDialog = false; supplierCatalogAddReturnPending = false } }
                                 )
                             }
 

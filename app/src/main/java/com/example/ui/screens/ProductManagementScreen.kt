@@ -117,6 +117,9 @@ fun ProductManagementScreen(
     onUnarchiveProduct: (String) -> Unit,
     productStockMap: Map<String, ProductStockSummary> = emptyMap(),
     onRecordStockAdjustment: ((productId: String, delta: Int, reason: String) -> Unit)? = null,
+    initialCatalogTab: Int = 0,
+    autoOpenAddDialog: Boolean = false,
+    onAddDialogDismissed: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
@@ -124,9 +127,9 @@ fun ProductManagementScreen(
     var searchQuery by remember { mutableStateOf("") }
     var selectedTab by remember { mutableStateOf(ProductTabFilter.ALL) }
     var selectedCategoryFilter by remember { mutableStateOf<String?>(null) }
-    var selectedCatalogTab by remember { mutableIntStateOf(0) }
+    var selectedCatalogTab by remember(initialCatalogTab) { mutableIntStateOf(initialCatalogTab.coerceIn(0, 1)) }
 
-    var showAddDialog by remember { mutableStateOf(false) }
+    var showAddDialog by remember(autoOpenAddDialog) { mutableStateOf(autoOpenAddDialog) }
     var productToEdit by remember { mutableStateOf<ProductItem?>(null) }
     var productToArchive by remember { mutableStateOf<ProductItem?>(null) }
     var productToAdjust by remember { mutableStateOf<ProductItem?>(null) }
@@ -490,7 +493,7 @@ fun ProductManagementScreen(
         AddEditProductDialog(
             product = null,
             isArabic = isArabic,
-            onDismiss = { showAddDialog = false },
+            onDismiss = { showAddDialog = false; onAddDialogDismissed() },
             onSave = { name, price, costPrice, category, unit, imageUri ->
                 onAddProduct(name, price, costPrice, category, unit, imageUri, selectedCatalogTab == 1)
                 showAddDialog = false
