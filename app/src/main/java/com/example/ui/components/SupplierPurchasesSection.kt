@@ -1012,17 +1012,34 @@ fun SupplierPurchasesSection(
                                             style = MaterialTheme.typography.labelSmall
                                         )
                                     }
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                         IconButton(onClick = {
                                             returnQuantities = returnQuantities + (line.id to (selected - 1).coerceAtLeast(0))
                                             returnError = null
-                                        }) { Text("−") }
-                                        Text(selected.toString(), modifier = Modifier.width(32.dp), textAlign = TextAlign.Center)
+                                        }, enabled = selected > 0) { Text("−") }
+                                        OutlinedTextField(
+                                            value = if (selected == 0) "" else selected.toString(),
+                                            onValueChange = { raw ->
+                                                val parsed = raw.filter { it.isDigit() }.take(9).toIntOrNull() ?: 0
+                                                returnQuantities = returnQuantities + (line.id to parsed.coerceIn(0, remaining))
+                                                returnError = if (parsed > remaining) {
+                                                    if (isArabic) "الكمية تتجاوز المتاح للإرجاع ($remaining)." else "Quantity exceeds the returnable amount ($remaining)."
+                                                } else null
+                                            },
+                                            modifier = Modifier.width(86.dp),
+                                            singleLine = true,
+                                            label = { Text(if (isArabic) "الكمية" else "Qty") },
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                        )
                                         IconButton(onClick = {
                                             returnQuantities = returnQuantities + (line.id to (selected + 1).coerceAtMost(remaining))
                                             returnError = null
-                                        }) { Text("+") }
+                                        }, enabled = selected < remaining) { Text("+") }
                                     }
+                                    TextButton(onClick = {
+                                        returnQuantities = returnQuantities + (line.id to remaining)
+                                        returnError = null
+                                    }) { Text(if (isArabic) "إرجاع الكمية كاملة" else "Return all") }
                                 }
                             }
                         }
@@ -1053,6 +1070,7 @@ fun SupplierPurchasesSection(
             },
             confirmButton = {
                 Button(
+                    enabled = returnError == null,
                     onClick = {
                         val selectedLines = returnQuantities.filterValues { it > 0 }
                             .map { (id, quantity) -> PurchaseReturnLineRequest(id, quantity) }

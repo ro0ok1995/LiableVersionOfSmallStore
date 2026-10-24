@@ -232,11 +232,53 @@ object SupplierLedgerCalculator {
         rawEntries.sortWith(compareBy<RawLedgerItem> { it.date }.thenBy { it.createdAt })
 
         var runningBalance = 0.0
-        return rawEntries.map { item ->
+        val ledger = mutableListOf<SupplierLedgerEntry>()
+        for (item in rawEntries) {
+            // A supplier payment remains one real cash movement in the source data,
+            // but its supplier-ledger effect is shown as two explicit entries when
+            // it settles a payable and also creates an advance to the supplier.
+            if (item.type == SupplierLedgerEntryType.SUPPLIER_PAYMENT &&
+                item.status == OperationStatus.ACTIVE && item.debit > EPSILON &&
+                runningBalance > EPSILON
+            ) {
+                val settlement = minOf(item.debit, runningBalance)
+                val advance = (item.debit - settlement).coerceAtLeast(0.0)
+                if (settlement > EPSILON) {
+                    runningBalance -= settlement
+                    ledger += SupplierLedgerEntry(
+                        id = "${item.id}_settlement",
+                        supplierId = supplierId,
+                        date = item.date,
+                        entryType = item.type,
+                        debit = settlement,
+                        credit = 0.0,
+                        runningBalance = runningBalance,
+                        referenceId = item.referenceId,
+                        description = "تسوية مستحقات المورد — ${item.description}",
+                        operationStatus = item.status
+                    )
+                }
+                if (advance > EPSILON) {
+                    runningBalance -= advance
+                    ledger += SupplierLedgerEntry(
+                        id = "${item.id}_advance",
+                        supplierId = supplierId,
+                        date = item.date,
+                        entryType = item.type,
+                        debit = advance,
+                        credit = 0.0,
+                        runningBalance = runningBalance,
+                        referenceId = item.referenceId,
+                        description = "دفعة زائدة / رصيد مدفوع مقدمًا للمورد — ${item.description}",
+                        operationStatus = item.status
+                    )
+                }
+                continue
+            }
             if (item.status == OperationStatus.ACTIVE) {
                 runningBalance += (item.credit - item.debit)
             }
-            SupplierLedgerEntry(
+            ledger += SupplierLedgerEntry(
                 id = item.id,
                 supplierId = supplierId,
                 date = item.date,
@@ -249,6 +291,7 @@ object SupplierLedgerCalculator {
                 operationStatus = item.status
             )
         }
+        return ledger
     }
 
     private data class RawLedgerItem(

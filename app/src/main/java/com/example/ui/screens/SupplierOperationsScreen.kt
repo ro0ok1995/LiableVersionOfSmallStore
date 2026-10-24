@@ -1388,13 +1388,38 @@ private fun SupplierPurchaseReturnDialog(
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         Text(if (isArabic) "كمية الإرجاع" else "Return quantity", modifier = Modifier.weight(1f))
-                                        IconButton(onClick = { quantities = quantities + (line.id to (qty - 1).coerceAtLeast(0)) }, enabled = qty > 0) { Icon(Icons.Default.Remove, contentDescription = null) }
-                                        Text(qty.toString(), fontWeight = FontWeight.Bold)
-                                        IconButton(onClick = {
-                                            if (qty < available) quantities = quantities + (line.id to qty + 1)
-                                        }, enabled = qty < available) { Icon(Icons.Default.Add, contentDescription = null) }
+                                        IconButton(
+                                            onClick = { quantities = quantities + (line.id to (qty - 1).coerceAtLeast(0)) },
+                                            enabled = qty > 0
+                                        ) { Icon(Icons.Default.Remove, contentDescription = if (isArabic) "تقليل الكمية" else "Decrease quantity") }
+                                        OutlinedTextField(
+                                            value = if (qty == 0) "" else qty.toString(),
+                                            onValueChange = { raw ->
+                                                val digits = raw.filter { it.isDigit() }.take(9)
+                                                val parsed = digits.toIntOrNull() ?: 0
+                                                quantities = quantities + (line.id to parsed.coerceIn(0, available))
+                                                errorMessage = if (parsed > available) {
+                                                    if (isArabic) "الكمية تتجاوز المتاح للإرجاع ($available)." else "Quantity exceeds the returnable amount ($available)."
+                                                } else null
+                                            },
+                                            modifier = Modifier.width(100.dp),
+                                            singleLine = true,
+                                            label = { Text(if (isArabic) "الكمية" else "Qty") },
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                            isError = qty > available
+                                        )
+                                        IconButton(
+                                            onClick = { if (qty < available) quantities = quantities + (line.id to qty + 1) },
+                                            enabled = qty < available
+                                        ) { Icon(Icons.Default.Add, contentDescription = if (isArabic) "زيادة الكمية" else "Increase quantity") }
+                                    }
+                                    if (available > 0) {
+                                        TextButton(
+                                            onClick = { quantities = quantities + (line.id to available); errorMessage = null },
+                                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                                        ) { Text(if (isArabic) "إرجاع كامل المتاح ($available)" else "Return all available ($available)") }
                                     }
                                 }
                             }
@@ -1448,7 +1473,12 @@ private fun SupplierPurchaseReturnDialog(
         },
         confirmButton = {
             Button(
-                enabled = purchases.isNotEmpty() && selectedPurchaseId != null && selectedLines.isNotEmpty() && selectedLines.all { line -> reasonsByLine[line.id].orEmpty().isNotBlank() && (reasonsByLine[line.id] != "سبب آخر" || notesByLine[line.id].orEmpty().isNotBlank()) } && validDate && !loading && !saving && (settlementMode != "CASH_REFUND" || selectedAccount != null),
+                enabled = purchases.isNotEmpty() && selectedPurchaseId != null && selectedLines.isNotEmpty() && selectedLines.all { line ->
+                    val qty = quantities[line.id] ?: 0
+                    qty in 1..(remaining[line.id] ?: line.quantity) &&
+                        reasonsByLine[line.id].orEmpty().isNotBlank() &&
+                        (reasonsByLine[line.id] != "سبب آخر" || notesByLine[line.id].orEmpty().isNotBlank())
+                } && validDate && !loading && !saving && errorMessage == null && (settlementMode != "CASH_REFUND" || selectedAccount != null),
                 onClick = { showReturnReview = true }
             ) { Text(if (isArabic) "مراجعة المرتجع وتأكيده" else "Review and confirm return") }
         },
