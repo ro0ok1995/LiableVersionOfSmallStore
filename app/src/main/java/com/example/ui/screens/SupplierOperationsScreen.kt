@@ -1480,7 +1480,19 @@ private fun SupplierPurchaseReturnDialog(
             confirmButton = { Button(enabled = !saving, onClick = {
                 val purchaseId = selectedPurchaseId ?: return@Button
                 saving = true; errorMessage = null
-                val requests = selectedLines.map { PurchaseReturnLineRequest(it.id, quantities[it.id] ?: 0) }
+                val requests = selectedLines.map { line ->
+                    val selectedReason = reasonsByLine[line.id].orEmpty().trim()
+                    val notes = notesByLine[line.id].orEmpty().trim()
+                    require(selectedReason.isNotBlank()) { "يجب اختيار سبب لكل صنف مرتجع" }
+                    require(selectedReason != "سبب آخر" || notes.isNotBlank()) { "يجب توضيح سبب الإرجاع عند اختيار سبب آخر" }
+                    PurchaseReturnLineRequest(
+                        purchaseLineId = line.id,
+                        quantity = quantities[line.id] ?: 0,
+                        reasonCode = selectedReason,
+                        reasonLabel = selectedReason,
+                        reasonNotes = notes
+                    )
+                }
                 val reasonSummary = selectedLines.joinToString("\n") { line ->
                     val reasonTitle = reasonsByLine[line.id].orEmpty()
                     val note = notesByLine[line.id].orEmpty().trim()

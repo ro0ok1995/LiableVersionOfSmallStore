@@ -1,5 +1,6 @@
 package com.example.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -33,6 +34,9 @@ data class PurchaseReturnLine(
     val quantity: Int,
     val unitCost: Double,
     val subtotal: Double,
+    @ColumnInfo(defaultValue = "'legacy'") val reasonCode: String = "legacy",
+    @ColumnInfo(defaultValue = "''") val reasonLabelSnapshot: String = "",
+    @ColumnInfo(defaultValue = "''") val reasonNotes: String = "",
     val createdAt: Long = System.currentTimeMillis()
 ) {
     init {

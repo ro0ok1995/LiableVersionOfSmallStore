@@ -20,5 +20,8 @@ data class PurchaseResult(
 
 data class PurchaseReturnLineRequest(
     val purchaseLineId: String,
-    val quantity: Int
+    val quantity: Int,
+    val reasonCode: String = "legacy",
+    val reasonLabel: String = "",
+    val reasonNotes: String = ""
 )

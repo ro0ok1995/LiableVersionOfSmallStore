@@ -1189,10 +1189,19 @@ class StoreRepository private constructor(
             )
         }
         if (excessAmount > 0.001) {
-            val excessReason = "زيادة تحصيل من المورد — رصيد مستحق للمورد على المحل"
+            // Supplier-ledger convention: balance > 0 means the shop owes the supplier;
+            // balance < 0 means the supplier owes the shop. Once the existing balance is
+            // settled, the excess direction depends on which side was settled: if the shop
+            // initially owed the supplier (or there was no balance), extra cash received
+            // creates a debit/negative supplier balance. If the supplier initially owed the
+            // shop, the extra amount becomes a supplier credit payable by the shop.
+            val excessDirection = if (currentBalance < -0.001) "CREDIT" else "DEBIT"
+            val excessReason = if (excessDirection == "DEBIT")
+                "زيادة تحصيل من المورد — رصيد مدين للمورد لصالح المحل"
+            else "زيادة تحصيل من المورد — رصيد دائن مستحق للمورد على المحل"
             created += Adjustment(
                 id = "adj_${UUID.randomUUID()}", entityType = "SUPPLIER", entityId = supplierId,
-                amount = excessAmount, direction = "CREDIT", date = receiptDate,
+                amount = excessAmount, direction = excessDirection, date = receiptDate,
                 reason = if (notes.isNullOrBlank()) excessReason else "$excessReason — $notes",
                 reference = referenceId
             )

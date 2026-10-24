@@ -38,7 +38,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         StockMovementEntity::class,
         SupplierCatalogItemEntity::class
     ],
-    version = 24,
+    version = 25,
     exportSchema = false
 )
 abstract class SmallStoreDatabase : RoomDatabase() {
@@ -136,6 +136,20 @@ abstract class SmallStoreDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_24_25 = object : Migration(24, 25) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE purchase_return_lines ADD COLUMN reasonCode TEXT NOT NULL DEFAULT 'legacy'")
+                db.execSQL("ALTER TABLE purchase_return_lines ADD COLUMN reasonLabelSnapshot TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE purchase_return_lines ADD COLUMN reasonNotes TEXT NOT NULL DEFAULT ''")
+                // Preserve old return-level reasons as the historical line-level label where possible.
+                db.execSQL("""
+                    UPDATE purchase_return_lines
+                    SET reasonLabelSnapshot = COALESCE((SELECT reason FROM purchase_returns WHERE purchase_returns.id = purchase_return_lines.purchaseReturnId), '')
+                    WHERE reasonLabelSnapshot = ''
+                """)
+            }
+        }
+
         @Volatile
         private var DEMO_INSTANCE: SmallStoreDatabase? = null
 
@@ -182,7 +196,8 @@ abstract class SmallStoreDatabase : RoomDatabase() {
                     MIGRATION_20_21,
                     MIGRATION_21_22,
                     MIGRATION_22_23,
-                    MIGRATION_23_24
+                    MIGRATION_23_24,
+                    MIGRATION_24_25
                 )
                 .build()
         }

@@ -221,7 +221,7 @@ object SupplierLedgerCalculator {
                     type = SupplierLedgerEntryType.ADJUSTMENT,
                     debit = debit,
                     credit = credit,
-                    referenceId = adj.id,
+                    referenceId = adj.reference?.takeIf { it.isNotBlank() } ?: adj.id,
                     description = adj.reason,
                     status = status
                 )

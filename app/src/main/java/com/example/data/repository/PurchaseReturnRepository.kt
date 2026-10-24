@@ -111,7 +111,10 @@ class PurchaseReturnRepository(
                 productNameSnapshot = original.productNameSnapshot,
                 quantity = request.quantity,
                 unitCost = original.unitCost,
-                subtotal = com.example.accounting.AccountingDecimal.multiplyToMoney(original.unitCost, request.quantity.toDouble())
+                subtotal = com.example.accounting.AccountingDecimal.multiplyToMoney(original.unitCost, request.quantity.toDouble()),
+                reasonCode = request.reasonCode.ifBlank { "legacy" },
+                reasonLabelSnapshot = request.reasonLabel.ifBlank { reason.trim() },
+                reasonNotes = request.reasonNotes.trim()
             )
         }
 
