@@ -765,7 +765,6 @@ fun SmallStoreApp(
                                             }
                                         )
                                     },
-                                    onResetData = { mainViewModel.resetData() }
                                 )
                             }
 

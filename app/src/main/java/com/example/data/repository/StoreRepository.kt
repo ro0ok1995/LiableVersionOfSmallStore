@@ -52,7 +52,6 @@ import com.example.model.PurchaseResult
 import com.example.model.RefundRequest
 import com.example.model.SaleReturnLineRequest
 import com.example.model.SaleReturnResult
-import com.example.model.SampleData
 import com.example.model.StoreInfo
 import com.example.model.TransactionItem
 import com.example.model.TransactionType
@@ -268,98 +267,13 @@ class StoreRepository private constructor(
         storeInfoRepository.saveStoreInfo(info, markAsSaved)
     }
 
+    /**
+     * Intentionally does not seed demo/sample records.
+     * Fresh installations start with an empty business database. Store information
+     * is created only when the user saves it from the Store Information screen.
+     */
     suspend fun seedIfEmpty(context: Context? = null) {
-        if (com.example.data.demo.DemoConfig.isDemoMode(context)) {
-            com.example.data.demo.DemoDataSeeder.seedDemoDataIfEmpty(this, database)
-            return
-        }
-
-        if (customerDao.getCustomerCount() == 0) {
-            database.withTransaction {
-                customerDao.insertCustomers(SampleData.sampleCustomers.map { it.toEntity() })
-                productDao.insertProducts(SampleData.sampleProducts.map { it.toEntity() })
-                transactionDao.insertTransactions(SampleData.sampleTransactions.map { it.toEntity() })
-                notificationDao.insertNotifications(SampleData.sampleNotifications.map { it.toEntity() })
-                if (storeInfoDao.getStoreInfoSync() == null) {
-                    storeInfoDao.insertOrUpdate(StoreInfo().toEntity(isSaved = false))
-                }
-                if (financialAccountDao.getAccountCount() == 0) {
-                    financialAccountDao.insertAccount(
-                        FinancialAccount(
-                            id = "acc_cash",
-                            name = "Cash",
-                            type = "CASH",
-                            isActive = true
-                        )
-                    )
-                    paymentMethodDao.insertPaymentMethod(
-                        PaymentMethod(
-                            id = "pm_cash",
-                            name = "Cash",
-                            type = "CASH",
-                            isActive = true
-                        )
-                    )
-                }
-            }
-        } else if (financialAccountDao.getAccountCount() == 0) {
-            database.withTransaction {
-                financialAccountDao.insertAccount(
-                    FinancialAccount(
-                        id = "acc_cash",
-                        name = "Cash",
-                        type = "CASH",
-                        isActive = true
-                    )
-                )
-                paymentMethodDao.insertPaymentMethod(
-                    PaymentMethod(
-                        id = "pm_cash",
-                        name = "Cash",
-                        type = "CASH",
-                        isActive = true
-                    )
-                )
-            }
-        }
-    }
-
-    suspend fun resetDatabaseToSampleData() {
-        database.withTransaction {
-            openingBalanceDao.deleteAllOpeningBalances()
-            customerPaymentDao.deleteAllPayments()
-            paymentMethodDao.deleteAllPaymentMethods()
-            financialAccountDao.deleteAllAccounts()
-            saleDao.deleteAllSaleLines()
-            saleDao.deleteAllSales()
-            transactionItemLineDao.deleteAllLines()
-            transactionDao.deleteAllTransactions()
-            customerDao.deleteAllCustomers()
-            productDao.deleteAllProducts()
-            notificationDao.deleteAllNotifications()
-
-            customerDao.insertCustomers(SampleData.sampleCustomers.map { it.toEntity() })
-            productDao.insertProducts(SampleData.sampleProducts.map { it.toEntity() })
-            transactionDao.insertTransactions(SampleData.sampleTransactions.map { it.toEntity() })
-            notificationDao.insertNotifications(SampleData.sampleNotifications.map { it.toEntity() })
-
-            financialAccountDao.insertAccount(
-                FinancialAccount(
-                    id = "acc_cash",
-                    name = "Cash",
-                    type = "CASH",
-                    isActive = true
-                )
-            )
-            paymentMethodDao.insertPaymentMethod(
-                PaymentMethod(
-                    id = "pm_cash",
-                    name = "Cash",
-                    type = "CASH",
-                    isActive = true
-                )
-            )
-        }
+        // No-op by design: never insert customers, products, transactions or accounts automatically.
     }
 
     suspend fun addCustomer(customer: CustomerAccount) {

@@ -21,8 +21,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
-import androidx.compose.material.icons.filled.DeleteForever
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -52,7 +50,6 @@ import com.example.model.LanguageMode
 import com.example.model.StoreStrings
 import com.example.ui.theme.GeoOutlineVariant
 import com.example.ui.theme.GeoPrimary
-import com.example.ui.theme.StatusRed
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -64,11 +61,9 @@ fun BackupRestoreScreen(
     onBackClick: () -> Unit,
     onExportBackup: ((android.net.Uri) -> Unit)? = null,
     onImportBackup: ((android.net.Uri) -> Unit)? = null,
-    onResetData: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
-    var showConfirmReset by remember { mutableStateOf(false) }
 
     val createDocLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
@@ -221,99 +216,8 @@ fun BackupRestoreScreen(
                 }
             }
 
-            // Danger Zone
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, StatusRed.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.DeleteForever, contentDescription = null, tint = StatusRed)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (isArabic) "منطقة الخطر: إعادة ضبط المصنع للبيانات" else "Danger Zone: Reset Application Data",
-                            fontWeight = FontWeight.Bold,
-                            color = StatusRed,
-                            fontSize = 15.sp
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = if (isArabic) {
-                            "تحذير: سيؤدي هذا الإجراء إلى حذف جميع المعاملات والحسابات والعملاء وإعادة تعيين بيانات التطبيق الافتراضية. لا يمكن التراجع عن هذه العملية."
-                        } else {
-                            "Warning: This will permanently erase all transactions, customer accounts, and records and restore default demo data. This action cannot be undone."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        lineHeight = 20.sp
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Button(
-                        onClick = { showConfirmReset = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = StatusRed),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.testTag("reset_data_button")
-                    ) {
-                        Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (isArabic) "مسح وإعادة ضبط البيانات" else "Reset All Data",
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
+
         }
     }
 
-    if (showConfirmReset) {
-        AlertDialog(
-            onDismissRequest = { showConfirmReset = false },
-            icon = {
-                Icon(
-                    imageVector = Icons.Default.Warning,
-                    contentDescription = null,
-                    tint = StatusRed,
-                    modifier = Modifier.size(36.dp)
-                )
-            },
-            title = {
-                Text(
-                    text = if (isArabic) "⚠️ تأكيد شديد لإعادة ضبط البيانات" else "⚠️ Strong Warning: Confirm Data Reset",
-                    fontWeight = FontWeight.Bold,
-                    color = StatusRed
-                )
-            },
-            text = {
-                Text(
-                    text = if (isArabic) {
-                        "أنت على وشك حذف جميع سجلات العملاء، المعاملات، الحسابات، والفواتير المسجلة نهائياً.\n\nلن تتمكن من استعادة هذه البيانات إلا إذا كنت تمتلك نسخة احتياطية سابقة.\n\nهل أنت متأكد تماماً من رغبتك في المتابعة ومسح كافة البيانات؟"
-                    } else {
-                        "You are about to permanently delete all customer accounts, transaction records, and ledger history.\n\nYou will not be able to recover this data unless you have an existing backup file.\n\nAre you absolutely sure you want to proceed and reset all data?"
-                    },
-                    lineHeight = 22.sp
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        onResetData?.invoke()
-                        showConfirmReset = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = StatusRed)
-                ) {
-                    Text(text = if (isArabic) "نعم، مسح كافة البيانات" else "Yes, Delete Everything")
-                }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = { showConfirmReset = false }) {
-                    Text(text = if (isArabic) "إلغاء وتراجع" else "Cancel")
-                }
-            }
-        )
-    }
 }

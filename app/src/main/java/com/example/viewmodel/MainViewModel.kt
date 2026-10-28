@@ -47,7 +47,6 @@ import com.example.model.PurchaseResult
 import com.example.model.RefundRequest
 import com.example.model.SaleReturnLineRequest
 import com.example.model.SaleReturnResult
-import com.example.model.SampleData
 import com.example.model.SettlementType
 import com.example.model.StoreInfo
 import com.example.model.ArchiveConflict
@@ -1609,18 +1608,6 @@ class MainViewModel @JvmOverloads constructor(
         }
     }
 
-    fun resetData() {
-        _uiState.update {
-            it.copy(
-                cart = emptyList(),
-                homeSelectedCustomer = null,
-                purchasesCustomer = null
-            )
-        }
-        viewModelScope.launch {
-            repository.resetDatabaseToSampleData()
-        }
-    }
 
     // BACKUP & RESTORE
     fun exportBackup(context: Context, uri: Uri, onResult: (Boolean) -> Unit) {

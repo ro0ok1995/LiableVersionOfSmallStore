@@ -136,73 +136,14 @@ fun ArchiveScreen(
 
     var selectedTabIndex by remember { mutableIntStateOf(ArchiveTab.CUSTOMERS.index) }
     var searchQuery by remember { mutableStateOf("") }
-    var showSampleDataPreview by remember { mutableStateOf(false) }
 
     // Dialog state
     var pendingDeleteTarget by remember { mutableStateOf<PendingDeleteTarget?>(null) }
     var pendingRestoreTarget by remember { mutableStateOf<PendingRestoreTarget?>(null) }
 
-    // Built-in sample records for visual testing and demonstration when actual archives are empty
-    val sampleArchivedCustomers = remember {
-        listOf(
-            CustomerAccount(
-                id = "arch_sample_c1",
-                customerName = if (isArabic) "خالد ناصر الدوسري" else "Khalid Nasser",
-                phone = "0501112233",
-                balance = 125.50,
-                totalDebt = 125.50,
-                lastTransactionDate = "2026-09-01"
-            ),
-            CustomerAccount(
-                id = "arch_sample_c2",
-                customerName = if (isArabic) "مؤسسة الوفاء للتجارة" else "Al-Wafa Corp",
-                phone = "0559988776",
-                balance = 0.0,
-                totalDebt = 0.0,
-                lastTransactionDate = "2026-08-25"
-            )
-        )
-    }
-
-    val sampleArchivedProducts = remember {
-        listOf(
-            ProductItem(
-                id = "arch_sample_p1",
-                name = if (isArabic) "حليب بودرة مجفف 900 جم" else "Powder Milk 900g",
-                price = 38.00,
-                costPrice = 30.00,
-                category = if (isArabic) "ألبان" else "Dairy",
-                unit = if (isArabic) "علبة" else "Can",
-                imageUri = null
-            ),
-            ProductItem(
-                id = "arch_sample_p2",
-                name = if (isArabic) "زيت دوار الشمس 5 لتر" else "Sunflower Oil 5L",
-                price = 45.50,
-                costPrice = 36.00,
-                category = if (isArabic) "زيوت" else "Oils",
-                unit = if (isArabic) "حبة" else "Piece",
-                imageUri = null
-            )
-        )
-    }
-
-    // Determine displayed records based on actual data or sample preview
-    val effectiveCustomers = if (archivedCustomers.isNotEmpty()) {
-        archivedCustomers
-    } else if (showSampleDataPreview) {
-        sampleArchivedCustomers
-    } else {
-        emptyList()
-    }
-
-    val effectiveProducts = if (archivedProducts.isNotEmpty()) {
-        archivedProducts
-    } else if (showSampleDataPreview) {
-        sampleArchivedProducts
-    } else {
-        emptyList()
-    }
+    // Show only records actually stored in the database. No synthetic preview records.
+    val effectiveCustomers = archivedCustomers
+    val effectiveProducts = archivedProducts
 
     // Filter by search query
     val filteredCustomers = remember(effectiveCustomers, searchQuery) {
@@ -409,53 +350,6 @@ fun ArchiveScreen(
             )
         }
 
-        // Preview notice banner when sample demonstration mode is toggled
-        if (showSampleDataPreview) {
-            Surface(
-                color = GeoPrimary.copy(alpha = 0.08f),
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
-                    .border(1.dp, GeoPrimary.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = null,
-                        tint = GeoPrimary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (isArabic) {
-                            "معاينة تفاعلية: يتم عرض سجلات نموذجية لاختبار الواجهة والحوارات دون المساس بقاعدة البيانات."
-                        } else {
-                            "Interactive preview: Displaying sample records to inspect layouts and dialogs without touching database."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    TextButton(
-                        onClick = { showSampleDataPreview = false },
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = if (isArabic) "إخفاء" else "Hide",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = GeoPrimary
-                        )
-                    }
-                }
-            }
-        }
-
         // Content Area per Tab
         Box(modifier = Modifier.weight(1f)) {
             when (selectedTabIndex) {
@@ -470,8 +364,6 @@ fun ArchiveScreen(
                                 "When a customer account is archived from Customer Management, it will appear here safely for restore or permanent deletion."
                             },
                             isArabic = isArabic,
-                            showSamplePreviewButton = !showSampleDataPreview,
-                            onToggleSamplePreview = { showSampleDataPreview = true },
                             modifier = Modifier.testTag("archive_empty_customers")
                         )
                     } else {
@@ -507,8 +399,6 @@ fun ArchiveScreen(
                                 "When a product is archived from Product Management, it will be retained here away from active sales."
                             },
                             isArabic = isArabic,
-                            showSamplePreviewButton = !showSampleDataPreview,
-                            onToggleSamplePreview = { showSampleDataPreview = true },
                             modifier = Modifier.testTag("archive_empty_products")
                         )
                     } else {
@@ -539,8 +429,6 @@ fun ArchiveScreen(
                             title = if (isArabic) "لا يوجد موردون في الأرشيف" else "No Archived Suppliers",
                             description = if (isArabic) "الموردون المؤرشفون يظهرون هنا دون حذف فواتيرهم أو مدفوعاتهم أو سجلهم المالي." else "Archived suppliers remain here with their invoices, payments, and financial history intact.",
                             isArabic = isArabic,
-                            showSamplePreviewButton = false,
-                            onToggleSamplePreview = {},
                             modifier = Modifier.testTag("archive_empty_suppliers")
                         )
                     } else {
@@ -842,8 +730,6 @@ private fun ArchiveEmptyState(
     title: String,
     description: String,
     isArabic: Boolean,
-    showSamplePreviewButton: Boolean,
-    onToggleSamplePreview: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -887,28 +773,6 @@ private fun ArchiveEmptyState(
             modifier = Modifier.padding(horizontal = 16.dp)
         )
 
-        if (showSamplePreviewButton) {
-            Spacer(modifier = Modifier.height(24.dp))
-            OutlinedButton(
-                onClick = onToggleSamplePreview,
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = GeoPrimary
-                ),
-                modifier = Modifier.testTag("archive_preview_sample_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Archive,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = if (isArabic) "معاينة نماذج تجريبية للأرشيف" else "Preview Sample Archived Records",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
+
     }
 }

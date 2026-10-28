@@ -166,19 +166,11 @@ abstract class SmallStoreDatabase : RoomDatabase() {
             }
         }
 
-        @Volatile
-        private var DEMO_INSTANCE: SmallStoreDatabase? = null
+        const val DATABASE_NAME = "smallstore_database"
 
-        fun getDatabase(context: Context, databaseName: String = if (com.example.data.demo.DemoConfig.isDemoMode(context)) com.example.data.demo.DemoConfig.DEMO_DATABASE_NAME else com.example.data.demo.DemoConfig.PRODUCTION_DATABASE_NAME): SmallStoreDatabase {
-            val isDemo = databaseName == com.example.data.demo.DemoConfig.DEMO_DATABASE_NAME
-            if (isDemo) {
-                return DEMO_INSTANCE ?: synchronized(this) {
-                    DEMO_INSTANCE ?: buildDatabase(context, databaseName).also { DEMO_INSTANCE = it }
-                }
-            } else {
-                return INSTANCE ?: synchronized(this) {
-                    INSTANCE ?: buildDatabase(context, databaseName).also { INSTANCE = it }
-                }
+        fun getDatabase(context: Context, databaseName: String = DATABASE_NAME): SmallStoreDatabase {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: buildDatabase(context, databaseName).also { INSTANCE = it }
             }
         }
 
