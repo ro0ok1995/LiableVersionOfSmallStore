@@ -37,8 +37,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -720,8 +720,16 @@ private fun KpiMetricCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(text = title, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 if (warning) Icon(Icons.Default.Warning, contentDescription = if (title.any { it in '\u0600'..'\u06FF' }) "بيانات ناقصة" else "Missing data", tint = StatusRed, modifier = Modifier.size(16.dp))
-                IconButton(onClick = { showMetricInfo = true }, modifier = Modifier.size(24.dp)) {
-                    Text("!", color = StatusAmber, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
+                IconButton(
+                    onClick = { showMetricInfo = true },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = if (title.any { it in '\u0600'..'\u06FF' }) "شرح المؤشر" else "Metric explanation",
+                        tint = GeoPrimary,
+                        modifier = Modifier.size(22.dp)
+                    )
                 }
             }
             Spacer(modifier = Modifier.height(4.dp))
@@ -739,9 +747,25 @@ private fun KpiMetricCard(
 }
 
 private fun metricExplanation(title: String, isArabic: Boolean): String = when {
-    title.contains("الربح") || title.contains("Profit", true) -> if (isArabic) "يُحسب الربح من صافي المبيعات بعد خصم تكلفة البضاعة المباعة والمصاريف ذات الصلة. إذا ظهر مثلث تحذير، فهناك تكاليف غير موثقة بالكامل ولا ينبغي اعتماد الربح كنهائي." else "Profit is calculated from net sales less cost of goods sold and relevant expenses. If a warning triangle appears, some costs are unverified and the result is not final."
-    title.contains("المدفوعات") || title.contains("Payments", true) || title.contains("السدادات") -> if (isArabic) "هذا إجمالي المدفوعات/التحصيلات المسجلة ضمن الفترة المحددة، وليس الرصيد الحالي." else "This is the total payments recorded in the selected period, not the current balance."
-    title.contains("كاش") || title.contains("Cash", true) -> if (isArabic) "إجمالي المبيعات النقدية ضمن الفترة المحددة." else "Total cash sales in the selected period."
-    title.contains("ديون") || title.contains("Debt", true) || title.contains("مستحقات") -> if (isArabic) "هذا المؤشر يعرض حركة الفترة المحددة، وليس بالضرورة الرصيد الحالي. راجع اسم البطاقة والفترة المختارة." else "This metric describes movement in the selected period and may differ from the current balance."
-    else -> if (isArabic) "القيمة محسوبة من العمليات الفعالة ضمن الفترة المحددة، ولا تشمل السجلات المعكوسة إذا جرى تصنيفها كمعكوسة في المصدر." else "This value is calculated from active operations in the selected period and excludes entries classified as reversed in the source."
+    title.contains("صافي المبيعات") || title.contains("Net Sales", true) -> if (isArabic)
+        "صافي المبيعات = إجمالي المبيعات النشطة − مرتجعات المبيعات النشطة خلال الفترة.\n\nمثال: 1,000 − 100 = 900.\n\nلا تدخل العمليات الملغاة أو المعكوسة في الحساب. هذا المؤشر يخص الفترة المحددة فقط، وليس إجمالي المبيعات التاريخي أو الرصيد الحالي."
+    else "Net sales = active sales − active sales returns during the selected period.\n\nExample: 1,000 − 100 = 900.\n\nCancelled or reversed operations are excluded. This metric covers the selected period only, not all-time sales or the current balance."
+    title.contains("المبيعات") || title.contains("Sales", true) -> if (isArabic)
+        "تعرض هذه البطاقة قيمة المبيعات المسجلة ضمن الفترة المحددة. تُستبعد العمليات الملغاة أو المعكوسة. إذا كانت البطاقة لصافي المبيعات، فيُخصم منها إجمالي مرتجعات المبيعات النشطة.\n\nمثال: مبيعات 1,000 − مرتجعات 100 = صافي مبيعات 900."
+    else "This card shows sales recorded in the selected period, excluding cancelled or reversed operations. For net sales, active sales returns are deducted.\n\nExample: 1,000 sales − 100 returns = 900 net sales."
+    title.contains("الربح") || title.contains("Profit", true) -> if (isArabic)
+        "الربح الإجمالي = صافي المبيعات − تكلفة البضاعة المباعة. الربح الصافي يخصم أيضًا المصاريف الداخلة في الحساب.\n\nإذا ظهر مثلث تحذير، فهذا يعني أن تكلفة بعض المبيعات غير مكتملة أو غير مؤكدة؛ لذلك لا تعتمد قيمة الربح كرقم نهائي قبل مراجعة التفاصيل وتصحيح بيانات التكلفة من مصدر موثوق. لا تُخمّن التكلفة التاريخية."
+    else "Gross profit = net sales − cost of goods sold. Net profit also deducts expenses included in the calculation.\n\nA warning triangle means some sale costs are incomplete or unverified. Do not treat profit as final until the cost details are reviewed and corrected using reliable records. Do not guess historical costs."
+    title.contains("المدفوعات") || title.contains("Payments", true) || title.contains("السدادات") || title.contains("تحصيل") || title.contains("Collection", true) -> if (isArabic)
+        "هذا إجمالي الدفعات أو التحصيلات المسجلة خلال الفترة المحددة بعد استبعاد العمليات الملغاة أو المعكوسة.\n\nمثال: دفعتان بقيمة 100 و50 = إجمالي 150. لا تجمع سجل الدفعة مع سجل آخر يمثل الدفعة نفسها مرة ثانية. هذا الرقم حركة فترة وليس الرصيد الحالي."
+    else "This is the total payments or collections recorded during the selected period, excluding cancelled or reversed operations.\n\nExample: two payments of 100 and 50 total 150. Do not count a payment and another record mirroring the same payment twice. This is period activity, not the current balance."
+    title.contains("كاش") || title.contains("نقدي") || title.contains("Cash", true) -> if (isArabic)
+        "إجمالي قيمة المبيعات النقدية المسجلة ضمن الفترة المحددة. لا يعني هذا المبلغ إجمالي التحصيلات من العملاء، ولا يشمل المبيعات الآجلة. تُستبعد العمليات الملغاة أو المعكوسة."
+    else "Total cash sales recorded in the selected period. This is not the same as total customer collections and does not include credit sales. Cancelled or reversed operations are excluded."
+    title.contains("ديون") || title.contains("Debt", true) || title.contains("مستحقات") || title.contains("رصيد") || title.contains("Balance", true) -> if (isArabic)
+        "يعرض هذا المؤشر حركة أو قيمة الديون وفق تعريف البطاقة وخلال الفترة المختارة؛ وقد يختلف عن الرصيد الحالي للعميل أو المورد. راجع عنوان البطاقة والفترة المحددة قبل المقارنة، ولا تخلط بين حركة الفترة والرصيد المتراكم."
+    else "This metric shows debt activity or value according to the card definition and selected period. It may differ from the customer or supplier's current balance. Check the card title and period, and do not confuse period movement with the accumulated balance."
+    else -> if (isArabic)
+        "تُحسب القيمة من العمليات الفعالة ضمن الفترة المحددة، مع استبعاد العمليات الملغاة أو المعكوسة.\n\nمثال: إذا سُجلت عمليتان بقيمة 100 و50، فالإجمالي 150. قد تختلف هذه الحركة عن الرصيد الحالي؛ استخدم تفاصيل التقرير للتحقق من مكونات القيمة."
+    else "This value is calculated from active operations in the selected period, excluding cancelled or reversed operations.\n\nExample: two operations of 100 and 50 total 150. This period activity may differ from the current balance; use the report details to verify the components."
 }
