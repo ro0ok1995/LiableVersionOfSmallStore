@@ -267,15 +267,6 @@ class StoreRepository private constructor(
         storeInfoRepository.saveStoreInfo(info, markAsSaved)
     }
 
-    /**
-     * Intentionally does not seed demo/sample records.
-     * Fresh installations start with an empty business database. Store information
-     * is created only when the user saves it from the Store Information screen.
-     */
-    suspend fun seedIfEmpty(context: Context? = null) {
-        // No-op by design: never insert customers, products, transactions or accounts automatically.
-    }
-
     suspend fun addCustomer(customer: CustomerAccount) {
         customerRepository.addCustomer(customer)
     }
