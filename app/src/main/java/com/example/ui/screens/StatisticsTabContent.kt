@@ -134,18 +134,25 @@ internal fun StatisticsTabContent(
     val netBalance = totalDebtSales - totalPaymentsReceived
 
     // Donut percentages calculation matching HomeScreen.kt
-    val totalVolume = totalDebtSales + totalCashSales + fullSettlementAmount + partialSettlementAmount
-    val debtPercent = if (totalVolume > 0) ((totalDebtSales / totalVolume) * 100).roundToInt() else 0
-    val cashPercent = if (totalVolume > 0) ((totalCashSales / totalVolume) * 100).roundToInt() else 0
-    val fullPercent = if (totalVolume > 0) ((fullSettlementAmount / totalVolume) * 100).roundToInt() else 0
-    val partialPercent = if (totalVolume > 0) (100 - debtPercent - cashPercent - fullPercent).coerceAtLeast(0) else 0
+    val totalReturns = statisticsBreakdown.saleReturns
+    // Include returns in the chart volume so the graph responds to returns as well as sales/collections.
+    val totalVolume = totalDebtSales + totalCashSales + fullSettlementAmount + partialSettlementAmount + totalReturns
+    val chartPercentages = remember(totalDebtSales, totalCashSales, fullSettlementAmount, partialSettlementAmount, totalReturns) {
+        calculateChartPercentages(listOf(totalDebtSales, totalCashSales, fullSettlementAmount, partialSettlementAmount, totalReturns))
+    }
+    val debtPercent = chartPercentages[0]
+    val cashPercent = chartPercentages[1]
+    val fullPercent = chartPercentages[2]
+    val partialPercent = chartPercentages[3]
+    val returnsPercent = chartPercentages[4]
 
     val ringSegments = remember(debtPercent, cashPercent, fullPercent, partialPercent) {
         listOf(
             DonutSegment(debtPercent.toFloat(), StatusRed),
             DonutSegment(cashPercent.toFloat(), StatusBlue),
             DonutSegment(fullPercent.toFloat(), StatusGreen),
-            DonutSegment(partialPercent.toFloat(), StatusAmber)
+            DonutSegment(partialPercent.toFloat(), StatusAmber),
+            DonutSegment(returnsPercent.toFloat(), StatusRed.copy(alpha = 0.55f))
         )
     }
 
@@ -171,8 +178,8 @@ internal fun StatisticsTabContent(
     }
 
     val breakdownChartItems = remember(
-        totalDebtSales, totalCashSales, fullSettlementAmount, partialSettlementAmount,
-        debtPercent, cashPercent, fullPercent, partialPercent
+        totalDebtSales, totalCashSales, fullSettlementAmount, partialSettlementAmount, totalReturns,
+        debtPercent, cashPercent, fullPercent, partialPercent, returnsPercent
     ) {
         listOf(
             BreakdownChartItem(
@@ -202,6 +209,13 @@ internal fun StatisticsTabContent(
                 amount = partialSettlementAmount,
                 percentage = partialPercent,
                 color = StatusAmber
+            ),
+            BreakdownChartItem(
+                labelAr = "المرتجعات",
+                labelEn = "Returns",
+                amount = totalReturns,
+                percentage = returnsPercent,
+                color = StatusRed.copy(alpha = 0.55f)
             )
         )
     }
@@ -487,6 +501,14 @@ internal fun StatisticsTabContent(
                                     currency = currency,
                                     testTag = "stat_legend_partial"
                                 )
+                                StatisticsLegendRow(
+                                    dotColor = StatusRed.copy(alpha = 0.55f),
+                                    label = if (isArabic) "المرتجعات" else "Returns",
+                                    amount = totalReturns,
+                                    percentage = returnsPercent,
+                                    currency = currency,
+                                    testTag = "stat_legend_returns"
+                                )
                             }
                         }
                     }
@@ -768,4 +790,25 @@ private fun metricExplanation(title: String, isArabic: Boolean): String = when {
     else -> if (isArabic)
         "تُحسب القيمة من العمليات الفعالة ضمن الفترة المحددة، مع استبعاد العمليات الملغاة أو المعكوسة.\n\nمثال: إذا سُجلت عمليتان بقيمة 100 و50، فالإجمالي 150. قد تختلف هذه الحركة عن الرصيد الحالي؛ استخدم تفاصيل التقرير للتحقق من مكونات القيمة."
     else "This value is calculated from active operations in the selected period, excluding cancelled or reversed operations.\n\nExample: two operations of 100 and 50 total 150. This period activity may differ from the current balance; use the report details to verify the components."
+}
+
+
+/** Calculates whole-number shares using the largest-remainder method; non-zero datasets sum to 100%. */
+internal fun calculateChartPercentages(values: List<Double>): List<Int> {
+    if (values.isEmpty()) return emptyList()
+    val safe = values.map { if (it.isFinite() && it > 0.0) it else 0.0 }
+    val total = safe.sum()
+    if (total <= 0.0) return List(values.size) { 0 }
+    val exact = safe.map { it / total * 100.0 }
+    val base = exact.map { kotlin.math.floor(it).toInt() }
+    var remaining = 100 - base.sum()
+    val order = exact.indices.sortedByDescending { exact[it] - base[it] }
+    val result = base.toMutableList()
+    var i = 0
+    while (remaining > 0 && order.isNotEmpty()) {
+        result[order[i % order.size]] += 1
+        remaining--
+        i++
+    }
+    return result
 }

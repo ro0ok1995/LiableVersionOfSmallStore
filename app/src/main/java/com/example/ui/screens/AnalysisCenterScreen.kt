@@ -77,6 +77,8 @@ import com.example.util.ReportExporter
 import com.example.util.ReportPreviewRow
 import com.example.util.PdfChartItem
 import java.util.Locale
+import java.time.LocalDate
+import kotlin.math.roundToInt
 import com.example.data.db.TransactionItemLineEntity
 import com.example.model.AppCurrency
 import com.example.model.CustomerAccount
@@ -89,6 +91,7 @@ import com.example.accounting.SupplierLedgerEntry
 import com.example.accounting.SupplierLedgerCalculator
 import com.example.model.LanguageMode
 import com.example.model.ProductItem
+import com.example.model.PeriodFilter
 import com.example.model.StoreInfo
 import com.example.model.StoreStrings
 import com.example.model.TransactionItem
@@ -309,7 +312,7 @@ fun AnalysisCenterScreen(
             when (uiState.currentTab) {
                 AnalysisTab.STATISTICS -> {
                     if (analysisEntityMode == 1) {
-                        SupplierStatisticsContent(supplier = selectedSupplier, suppliers = suppliers.filter { !it.isArchived }, purchases = supplierPurchases, payments = supplierPayments, returns = supplierReturns, startDate = activeStartDate?.toString(), endDate = activeEndDate?.toString(), onGetSupplierBalance = onGetSupplierBalance, isArabic = isArabic, currency = currency, chartType = supplierChartType, onChartTypeSelected = { supplierChartType = it }, context = context, storeName = storeInfo.storeName)
+                        SupplierStatisticsContent(supplier = selectedSupplier, suppliers = suppliers.filter { !it.isArchived }, purchases = supplierPurchases, payments = supplierPayments, returns = supplierReturns, period = activePeriod, customStartDate = activeStartDate, customEndDate = activeEndDate, startDate = activeStartDate?.toString(), endDate = activeEndDate?.toString(), onGetSupplierBalance = onGetSupplierBalance, isArabic = isArabic, currency = currency, chartType = supplierChartType, onChartTypeSelected = { supplierChartType = it }, context = context, storeName = storeInfo.storeName)
                     } else StatisticsTabContent(
                         transactions = transactions,
                         selectedCustomer = uiState.selectedCustomer,
@@ -423,7 +426,7 @@ private fun SupplierSearchSelector(
 @Composable
 private fun SupplierStatisticsContent(
     supplier: Supplier?, suppliers: List<Supplier>, purchases: List<Purchase>, payments: List<SupplierPayment>, returns: List<PurchaseReturn>,
-    startDate: String?, endDate: String?, onGetSupplierBalance: (suspend (String) -> com.example.accounting.SupplierBalanceSummary)?, isArabic: Boolean, currency: String,
+    startDate: String?, endDate: String?, period: PeriodFilter, customStartDate: LocalDate?, customEndDate: LocalDate?, onGetSupplierBalance: (suspend (String) -> com.example.accounting.SupplierBalanceSummary)?, isArabic: Boolean, currency: String,
     chartType: BreakdownChartType, onChartTypeSelected: (BreakdownChartType) -> Unit, context: android.content.Context, storeName: String
 ) {
     var authoritativeBalances by remember { mutableStateOf<Map<String, com.example.accounting.SupplierBalanceSummary>>(emptyMap()) }
@@ -433,9 +436,10 @@ private fun SupplierStatisticsContent(
             sup.id to (result ?: SupplierLedgerCalculator.calculateSupplierBalance(sup.id, purchases, payments, returns))
         }
     }
-    val activePurchases = remember(purchases, startDate, endDate) { purchases.filter { (startDate == null || it.purchaseDate >= startDate) && (endDate == null || it.purchaseDate <= endDate) && it.status != "REVERSED" } }
-    val activePayments = remember(payments, startDate, endDate) { payments.filter { (startDate == null || it.paymentDate >= startDate) && (endDate == null || it.paymentDate <= endDate) && it.status != "REVERSED" } }
-    val activeReturns = remember(returns, startDate, endDate) { returns.filter { (startDate == null || it.returnDate >= startDate) && (endDate == null || it.returnDate <= endDate) && it.status != "REVERSED" } }
+    // Apply the same selected period semantics as customer statistics (TODAY/MONTH/ALL/CUSTOM).
+    val activePurchases = remember(purchases, period, customStartDate, customEndDate) { purchases.filter { it.status != "REVERSED" && DateFilterUtils.isDateInPeriod(it.purchaseDate, period, customStartDate, customEndDate) } }
+    val activePayments = remember(payments, period, customStartDate, customEndDate) { payments.filter { it.status != "REVERSED" && DateFilterUtils.isDateInPeriod(it.paymentDate, period, customStartDate, customEndDate) } }
+    val activeReturns = remember(returns, period, customStartDate, customEndDate) { returns.filter { it.status != "REVERSED" && DateFilterUtils.isDateInPeriod(it.returnDate, period, customStartDate, customEndDate) } }
     val summary = supplier?.let { authoritativeBalances[it.id] ?: SupplierLedgerCalculator.calculateSupplierBalance(it.id, purchases, payments, returns) }
     val scopedPurchases = activePurchases.filter { supplier == null || it.supplierId == supplier.id }
     val scopedPayments = activePayments.filter { supplier == null || it.supplierId == supplier.id }
@@ -454,7 +458,7 @@ private fun SupplierStatisticsContent(
     // Cash refunds are reported separately and must not reduce payables a second time.
     val netPayableMovement = periodCreditPurchases - periodPayments - periodPayableReductionReturns
     val totalVolume = (periodCreditPurchases + periodCashPurchases + periodPayments + periodReturns).coerceAtLeast(0.0)
-    fun percent(v: Double) = if (totalVolume > 0.0) ((v / totalVolume) * 100).toInt().coerceIn(0, 100) else 0
+    fun percent(v: Double) = if (totalVolume > 0.0) ((v / totalVolume) * 100).roundToInt().coerceIn(0, 100) else 0
     val chartItems = remember(periodCreditPurchases, periodCashPurchases, periodPayments, periodReturns, totalVolume, isArabic) {
         listOf(
             BreakdownChartItem(if (isArabic) "مشتريات آجلة" else "Credit Purchases", "Credit Purchases", periodCreditPurchases, percent(periodCreditPurchases), StatusRed),
@@ -505,7 +509,7 @@ private fun SupplierStatisticsContent(
                 }
                 Text(if (isArabic) "يحتوي تقرير PDF على ملخص المؤشرات المالية؛ الرسم البياني ظاهر على الشاشة فقط." else "The PDF contains the financial summary; the chart is currently displayed on screen only.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 when (chartType) {
-                    BreakdownChartType.DONUT -> SupplierBreakdownDonut(items = chartItems, totalPercent = percent(periodCreditPurchases), isArabic = isArabic, currency = currency)
+                    BreakdownChartType.DONUT -> SupplierBreakdownDonut(items = chartItems, totalAmount = totalVolume, isArabic = isArabic, currency = currency)
                     BreakdownChartType.COLUMN -> BreakdownColumnChart(items = chartItems, currency = currency, isArabic = isArabic)
                     BreakdownChartType.COMBO -> BreakdownComboChart(items = chartItems, currency = currency, isArabic = isArabic)
                 }
@@ -586,7 +590,7 @@ private fun SupplierKpiCard(title: String, value: String, color: Color, modifier
 }
 
 @Composable
-private fun SupplierBreakdownDonut(items: List<BreakdownChartItem>, totalPercent: Int, isArabic: Boolean, currency: String) {
+private fun SupplierBreakdownDonut(items: List<BreakdownChartItem>, totalAmount: Double, isArabic: Boolean, currency: String) {
     val total = items.sumOf { it.amount }.coerceAtLeast(0.0)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
         Box(Modifier.size(136.dp), contentAlignment = Alignment.Center) {
@@ -600,8 +604,8 @@ private fun SupplierBreakdownDonut(items: List<BreakdownChartItem>, totalPercent
                 }
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("$totalPercent%", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold))
-                Text(if (isArabic) "مشتريات آجلة" else "Credit purchases", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(String.format(Locale.US, "%,.0f", totalAmount), style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold, fontSize = 17.sp), maxLines = 1)
+                Text(if (isArabic) "إجمالي الحركة" else "Total activity", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         Column(Modifier.weight(1f).padding(start = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
