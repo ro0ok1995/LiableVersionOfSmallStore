@@ -42,6 +42,8 @@ data class ReportPreviewRow(
     val col4: String
 )
 
+data class PdfChartItem(val label: String, val value: Double, val color: Int)
+
 /**
  * Shared presentation models, row construction, and classification utilities for reports.
  */
@@ -315,7 +317,10 @@ object ReportPresentationUtils {
         headers: List<String>,
         rows: List<ReportPreviewRow>,
         outputStream: OutputStream,
-        isArabic: Boolean = true
+        isArabic: Boolean = true,
+        chartItems: List<PdfChartItem> = emptyList(),
+        chartTitle: String = "",
+        chartType: String = "COLUMN"
     ) {
         val pdfDocument = PdfDocument()
         val pageWidth = 595 // A4 portrait width in points
@@ -385,7 +390,7 @@ object ReportPresentationUtils {
             }
         }
 
-        val rowsPerPageFirst = 22
+        val rowsPerPageFirst = if (chartItems.isNotEmpty()) 17 else 22
         val rowsPerPageSubsequent = 28
         val totalRows = rows.size
         val totalPages = if (totalRows <= rowsPerPageFirst) 1 else 1 + Math.ceil((totalRows - rowsPerPageFirst).toDouble() / rowsPerPageSubsequent).toInt()
@@ -493,6 +498,73 @@ object ReportPresentationUtils {
                         }
                     }
                     currentY += cardHeight + 14f
+                }
+                if (chartItems.isNotEmpty()) {
+                    paint.color = darkTextColor
+                    paint.textSize = 10f
+                    paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                    paint.textAlign = if (isArabic) Paint.Align.RIGHT else Paint.Align.LEFT
+                    canvas.drawText(chartTitle.ifBlank { if (isArabic) "الرسم البياني" else "Chart" }, if (isArabic) margin + contentWidth else margin, currentY + 10f, paint)
+                    currentY += 18f
+                    val chartTop = currentY
+                    val chartBottom = currentY + 76f
+                    val maxValue = chartItems.maxOfOrNull { it.value }?.coerceAtLeast(0.0001) ?: 1.0
+                    when (chartType.uppercase(Locale.ROOT)) {
+                        "DONUT", "CIRCULAR" -> {
+                            val cx = if (isArabic) margin + contentWidth - 54f else margin + 54f
+                            val cy = chartTop + 36f
+                            val radius = 30f
+                            var startAngle = -90f
+                            val total = chartItems.sumOf { it.value }.coerceAtLeast(0.0001)
+                            chartItems.forEach { item ->
+                                paint.color = item.color
+                                paint.style = Paint.Style.FILL
+                                val sweep = (item.value / total * 360.0).toFloat()
+                                canvas.drawArc(cx - radius, cy - radius, cx + radius, cy + radius, startAngle, sweep, true, paint)
+                                startAngle += sweep
+                            }
+                            var legendY = chartTop + 10f
+                            chartItems.forEach { item ->
+                                paint.color = item.color
+                                canvas.drawRect(if (isArabic) margin + 16f else margin + contentWidth - 112f, legendY - 7f, if (isArabic) margin + 26f else margin + contentWidth - 102f, legendY + 3f, paint)
+                                paint.color = darkTextColor
+                                paint.textSize = 8.5f
+                                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+                                paint.textAlign = if (isArabic) Paint.Align.LEFT else Paint.Align.RIGHT
+                                canvas.drawText("${item.label}: ${String.format(Locale.US, "%.2f", item.value)}", if (isArabic) margin + 32f else margin + contentWidth - 32f, legendY + 1f, paint)
+                                legendY += 16f
+                            }
+                        }
+                        else -> {
+                            val n = chartItems.size.coerceAtLeast(1)
+                            val slot = contentWidth / n
+                            val points = mutableListOf<Pair<Float, Float>>()
+                            chartItems.forEachIndexed { index, item ->
+                                val barWidth = (slot * 0.48f).coerceAtLeast(8f)
+                                val x = margin + index * slot + (slot - barWidth) / 2f
+                                val h = (item.value.coerceAtLeast(0.0) / maxValue * 48.0).toFloat()
+                                val y = chartBottom - h - 18f
+                                paint.color = item.color
+                                paint.style = Paint.Style.FILL
+                                canvas.drawRoundRect(x, y, x + barWidth, chartBottom - 18f, 3f, 3f, paint)
+                                points.add((x + barWidth / 2f) to y)
+                                paint.color = darkTextColor
+                                paint.textSize = 7.5f
+                                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+                                paint.textAlign = Paint.Align.CENTER
+                                val label = if (item.label.length > 11) item.label.take(10) + "…" else item.label
+                                canvas.drawText(label, x + barWidth / 2f, chartBottom - 5f, paint)
+                            }
+                            if (chartType.uppercase(Locale.ROOT) == "COMBO") {
+                                paint.color = primaryColor
+                                paint.style = Paint.Style.STROKE
+                                paint.strokeWidth = 1.8f
+                                for (i in 0 until points.size - 1) canvas.drawLine(points[i].first, points[i].second - 2f, points[i + 1].first, points[i + 1].second - 2f, paint)
+                                paint.style = Paint.Style.FILL
+                            }
+                        }
+                    }
+                    currentY = chartBottom + 8f
                 }
             } else {
                 paint.color = primaryColor

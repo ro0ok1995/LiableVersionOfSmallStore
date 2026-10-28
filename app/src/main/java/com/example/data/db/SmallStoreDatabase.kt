@@ -38,7 +38,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         StockMovementEntity::class,
         SupplierCatalogItemEntity::class
     ],
-    version = 25,
+    version = 26,
     exportSchema = false
 )
 abstract class SmallStoreDatabase : RoomDatabase() {
@@ -150,6 +150,22 @@ abstract class SmallStoreDatabase : RoomDatabase() {
             }
         }
 
+        /** Marks historical zero costs as unknown while preserving positive historical costs.
+         * Explicit zero entered after this migration is stored as known by the UI/save path.
+         */
+        val MIGRATION_25_26 = object : Migration(25, 26) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE products ADD COLUMN costPriceKnown INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("UPDATE products SET costPriceKnown = CASE WHEN costPrice > 0 THEN 1 ELSE 0 END")
+                db.execSQL("ALTER TABLE transaction_item_lines ADD COLUMN costPriceKnown INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("UPDATE transaction_item_lines SET costPriceKnown = CASE WHEN costPrice > 0 THEN 1 ELSE 0 END")
+                db.execSQL("ALTER TABLE sale_lines ADD COLUMN costPriceKnown INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("UPDATE sale_lines SET costPriceKnown = CASE WHEN costPriceAtSale > 0 THEN 1 ELSE 0 END")
+                db.execSQL("ALTER TABLE sale_return_lines ADD COLUMN costPriceKnown INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("UPDATE sale_return_lines SET costPriceKnown = CASE WHEN costPriceAtReturn > 0 THEN 1 ELSE 0 END")
+            }
+        }
+
         @Volatile
         private var DEMO_INSTANCE: SmallStoreDatabase? = null
 
@@ -197,7 +213,8 @@ abstract class SmallStoreDatabase : RoomDatabase() {
                     MIGRATION_21_22,
                     MIGRATION_22_23,
                     MIGRATION_23_24,
-                    MIGRATION_24_25
+                    MIGRATION_24_25,
+                    MIGRATION_25_26
                 )
                 .build()
         }

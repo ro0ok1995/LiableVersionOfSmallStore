@@ -128,7 +128,10 @@ object ReportExporter {
         headers: List<String>,
         rows: List<ReportPreviewRow>,
         outputStream: OutputStream,
-        isArabic: Boolean = true
+        isArabic: Boolean = true,
+        chartItems: List<PdfChartItem> = emptyList(),
+        chartTitle: String = "",
+        chartType: String = "COLUMN"
     ) {
         ReportPresentationUtils.generatePdfReport(
             title = title,
@@ -138,7 +141,10 @@ object ReportExporter {
             headers = headers,
             rows = rows,
             outputStream = outputStream,
-            isArabic = isArabic
+            isArabic = isArabic,
+            chartItems = chartItems,
+            chartTitle = chartTitle,
+            chartType = chartType
         )
     }
 
@@ -180,7 +186,10 @@ object ReportExporter {
         kpis: List<Pair<String, String>>,
         headers: List<String>,
         rows: List<ReportPreviewRow>,
-        isArabic: Boolean = true
+        isArabic: Boolean = true,
+        chartItems: List<PdfChartItem> = emptyList(),
+        chartTitle: String = "",
+        chartType: String = "COLUMN"
     ): File = ReportFileHelper.createCachedPdf(context, fileName) { fos ->
         ReportPresentationUtils.generatePdfReport(
             title = title,
@@ -190,7 +199,10 @@ object ReportExporter {
             headers = headers,
             rows = rows,
             outputStream = fos,
-            isArabic = isArabic
+            isArabic = isArabic,
+            chartItems = chartItems,
+            chartTitle = chartTitle,
+            chartType = chartType
         )
     }
 

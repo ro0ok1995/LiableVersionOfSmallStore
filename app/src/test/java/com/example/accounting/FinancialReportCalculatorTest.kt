@@ -6,6 +6,7 @@ import com.example.data.db.SaleReturn
 import com.example.data.db.SaleReturnLine
 import com.example.data.db.Expense
 import com.example.data.db.Refund
+import com.example.data.db.TransactionItemLineEntity
 import com.example.model.OperationStatus
 import com.example.model.SaleType
 import com.example.model.TransactionItem
@@ -1445,6 +1446,50 @@ class FinancialReportCalculatorTest {
         assertFalse(totals.costDataComplete)
         assertEquals(0.0, totals.grossProfit, 0.0001)
         assertEquals(0.0, totals.netProfit, 0.0001)
+    }
+
+    @Test
+    fun simulation_overSixThousandOperations_reconcilesSalesAndCounts() {
+        val operationCount = 6_250
+        val operations = (1..operationCount).map { index ->
+            TransactionItem(
+                id = "sim_sale_$index",
+                amount = 10.0,
+                isCredit = false,
+                date = "2026-10-01",
+                relativeTime = "simulation",
+                activityType = "شراء نقدي",
+                transactionType = TransactionType.SALE,
+                saleType = SaleType.CASH,
+                paidAmount = 10.0,
+                creditAmount = 0.0,
+                operationStatus = OperationStatus.ACTIVE
+            )
+        }
+        val totals = FinancialReportCalculator.calculate(operations)
+        assertEquals(operationCount, totals.activeTransactionCount)
+        assertEquals(operationCount * 10.0, totals.totalSales, 0.001)
+        assertEquals(operationCount * 10.0, totals.cashSales, 0.001)
+        assertEquals(0.0, totals.creditSales, 0.001)
+        assertFalse("No line costs were supplied, so profit cost data must be incomplete", totals.costDataComplete)
+    }
+
+    @Test
+    fun knownZeroCostIsDistinctFromUnknownZeroCost() {
+        val sale = TransactionItem(
+            id = "zero_cost_sale", amount = 100.0, isCredit = false,
+            date = "2026-10-01", relativeTime = "test", activityType = "شراء نقدي",
+            transactionType = TransactionType.SALE, saleType = SaleType.CASH,
+            paidAmount = 100.0, creditAmount = 0.0, operationStatus = OperationStatus.ACTIVE
+        )
+        val knownZero = TransactionItemLineEntity(
+            transactionId = sale.id, productNameSnapshot = "خدمة/تكلفة صفرية موثقة",
+            quantity = 1, unitPrice = 100.0, costPrice = 0.0, subtotal = 100.0,
+            costPriceKnown = true
+        )
+        val unknownZero = knownZero.copy(id = 0, costPriceKnown = false)
+        assertTrue(FinancialReportCalculator.calculate(listOf(sale), listOf(knownZero)).costDataComplete)
+        assertFalse(FinancialReportCalculator.calculate(listOf(sale), listOf(unknownZero)).costDataComplete)
     }
 
 }

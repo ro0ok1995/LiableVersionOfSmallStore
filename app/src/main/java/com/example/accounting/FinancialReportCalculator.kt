@@ -521,11 +521,16 @@ object FinancialReportCalculator {
             .map { it.id }
             .toSet()
 
-        val salesCogs = transactionLines
+        // Only lines belonging to the transaction set being calculated may contribute.
+        // This prevents costs from other customers or outside the selected period leaking in.
+        val scopedTransactionIds = transactions.map { it.id }.toSet()
+        val scopedLines = transactionLines.filter { it.transactionId in scopedTransactionIds }
+
+        val salesCogs = scopedLines
             .filter { it.transactionId !in reversedTxIds && it.transactionId !in returnTxIds }
             .sumOf { it.quantity * it.costPrice }
 
-        val returnsCogs = transactionLines
+        val returnsCogs = scopedLines
             .filter { it.transactionId !in reversedTxIds && it.transactionId in returnTxIds }
             .sumOf { it.quantity * it.costPrice }
 
@@ -602,7 +607,7 @@ object FinancialReportCalculator {
             netProfit = netProfit,
             costDataComplete = transactions.filter {
                 !decomposeTransaction(it).isReversed && decomposeTransaction(it).transactionType == TransactionType.SALE && decomposeTransaction(it).totalAmount > 0.0
-            }.all { tx -> transactionLines.any { it.transactionId == tx.id } && transactionLines.filter { it.transactionId == tx.id }.all { it.costPrice.isFinite() && it.costPrice >= 0.0 } }
+            }.all { tx -> transactionLines.any { it.transactionId == tx.id } && transactionLines.filter { it.transactionId == tx.id }.all { it.costPrice.isFinite() && it.costPriceKnown && it.quantity > 0 } }
         )
     }
 
@@ -657,7 +662,8 @@ object FinancialReportCalculator {
             expenses = totalExpenses,
             netProfit = netProfit,
             costDataComplete = sales.filter { it.status != "REVERSED" && it.status != "CANCELLED" }
-                .all { sale -> saleLines.any { it.saleId == sale.id } && saleLines.filter { it.saleId == sale.id }.all { it.costPriceAtSale.isFinite() && it.costPriceAtSale >= 0.0 } }
+                .all { sale -> saleLines.any { it.saleId == sale.id } && saleLines.filter { it.saleId == sale.id }.all { it.costPriceAtSale.isFinite() && it.costPriceKnown && it.quantity > 0 } } &&
+                activeReturns.all { ret -> saleReturnLines.any { it.saleReturnId == ret.id } && saleReturnLines.filter { it.saleReturnId == ret.id }.all { it.costPriceAtReturn.isFinite() && it.costPriceKnown && it.quantity > 0 } }
         )
     }
 

@@ -512,6 +512,7 @@ fun ProductManagementScreen(
                         name = name,
                         price = price,
                         costPrice = costPrice,
+                        costPriceKnown = true,
                         category = category,
                         unit = unit,
                         imageUri = imageUri

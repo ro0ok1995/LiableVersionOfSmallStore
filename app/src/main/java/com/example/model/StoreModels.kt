@@ -232,7 +232,9 @@ data class ProductItem(
     val isArchived: Boolean = false,
     val archivedDate: String? = null,
     val isCatalogItem: Boolean = false,
-    val isRawMaterial: Boolean = false
+    val isRawMaterial: Boolean = false,
+    /** True only when the cost was explicitly entered/verified; zero may be a valid known cost. */
+    val costPriceKnown: Boolean = costPrice > 0.0
 )
 
 sealed class ArchiveConflict {

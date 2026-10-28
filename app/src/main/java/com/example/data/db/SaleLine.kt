@@ -1,5 +1,6 @@
 package com.example.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -39,7 +40,8 @@ data class SaleLine(
     val unitPrice: Double,
     val costPriceAtSale: Double,
     val subtotal: Double,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "0") val costPriceKnown: Boolean = costPriceAtSale > 0.0
 ) {
     init {
         require(quantity > 0) { "quantity ($quantity) must be greater than zero" }

@@ -1,5 +1,6 @@
 package com.example.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -40,7 +41,8 @@ data class ProductEntity(
     val isArchived: Boolean = false,
     val archivedDate: String? = null,
     val isCatalogItem: Boolean = false,
-    val isRawMaterial: Boolean = false
+    val isRawMaterial: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val costPriceKnown: Boolean = costPrice > 0.0
 )
 
 @Entity(
@@ -179,7 +181,8 @@ data class TransactionItemLineEntity(
     val quantity: Int,
     val unitPrice: Double,
     val costPrice: Double = 0.0,
-    val subtotal: Double
+    val subtotal: Double,
+    @ColumnInfo(defaultValue = "0") val costPriceKnown: Boolean = costPrice > 0.0
 )
 
 @Entity(tableName = "notifications")
@@ -238,6 +241,7 @@ fun ProductEntity.toModel(): ProductItem = ProductItem(
     category = category,
     unit = unit,
     costPrice = costPrice,
+    costPriceKnown = costPriceKnown,
     imageUri = imageUri,
     isArchived = isArchived,
     archivedDate = archivedDate,
@@ -252,6 +256,7 @@ fun ProductItem.toEntity(): ProductEntity = ProductEntity(
     category = category,
     unit = unit,
     costPrice = costPrice,
+    costPriceKnown = costPriceKnown,
     imageUri = imageUri,
     isArchived = isArchived,
     archivedDate = archivedDate,

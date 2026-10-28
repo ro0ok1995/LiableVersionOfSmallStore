@@ -127,7 +127,8 @@ class SalesRepository(
                 quantity = sl.quantity,
                 unitPrice = sl.unitPrice,
                 costPrice = sl.costPriceAtSale,
-                subtotal = sl.subtotal
+                subtotal = sl.subtotal,
+                costPriceKnown = sl.costPriceKnown
             )
         }
         if (legacyLines.isNotEmpty()) {

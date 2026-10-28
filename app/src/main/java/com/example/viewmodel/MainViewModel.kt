@@ -1476,7 +1476,8 @@ class MainViewModel @JvmOverloads constructor(
                     quantity = cartItem.quantity,
                     unitPrice = cartItem.product.price,
                     costPriceAtSale = cartItem.product.costPrice,
-                    subtotal = cartItem.product.price * cartItem.quantity
+                    subtotal = cartItem.product.price * cartItem.quantity,
+                    costPriceKnown = cartItem.product.costPriceKnown
                 )
             }
 

@@ -146,7 +146,8 @@ class SaleReturnRepository(
                     quantity = req.quantity,
                     unitPrice = originalLine.unitPrice,
                     costPriceAtReturn = originalLine.costPriceAtSale,
-                    subtotal = lineSubtotal
+                    subtotal = lineSubtotal,
+                    costPriceKnown = originalLine.costPriceKnown
                 )
             )
         }
@@ -231,7 +232,8 @@ class SaleReturnRepository(
                     quantity = rl.quantity,
                     unitPrice = rl.unitPrice,
                     costPrice = rl.costPriceAtReturn,
-                    subtotal = rl.subtotal
+                    subtotal = rl.subtotal,
+                    costPriceKnown = rl.costPriceKnown
                 )
             }
             transactionItemLineDao.insertLines(txLines)

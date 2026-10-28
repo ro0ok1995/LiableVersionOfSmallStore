@@ -32,6 +32,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
@@ -72,6 +75,7 @@ import com.example.ui.theme.StatusRed
 import com.example.ui.theme.StatusRedBg
 import com.example.util.ReportExporter
 import com.example.util.ReportPreviewRow
+import com.example.util.PdfChartItem
 import java.util.Locale
 import com.example.data.db.TransactionItemLineEntity
 import com.example.model.AppCurrency
@@ -440,11 +444,15 @@ private fun SupplierStatisticsContent(
     val periodPurchases = scopedPurchases.sumOf { it.totalAmount }
     val periodPayments = scopedPayments.sumOf { it.amount }
     val periodReturns = scopedReturns.sumOf { it.amount }
+    val periodPayableReductionReturns = scopedReturns.sumOf { it.payableReductionAmount }
+    val periodCashRefunds = scopedReturns.sumOf { it.cashRefundAmount }
     val periodCreditPurchases = scopedPurchases.sumOf { it.creditAmount }
     val periodCashPurchases = scopedPurchases.sumOf { it.paidAmount }
     // Payable changes only by the unpaid purchase portion, not the full invoice total.
     // Cash purchases are already settled and must not inflate Accounts Payable.
-    val netPayableMovement = periodCreditPurchases - periodPayments - periodReturns
+    // Only the portion that reduces the supplier payable changes the debt balance.
+    // Cash refunds are reported separately and must not reduce payables a second time.
+    val netPayableMovement = periodCreditPurchases - periodPayments - periodPayableReductionReturns
     val totalVolume = (periodCreditPurchases + periodCashPurchases + periodPayments + periodReturns).coerceAtLeast(0.0)
     fun percent(v: Double) = if (totalVolume > 0.0) ((v / totalVolume) * 100).toInt().coerceIn(0, 100) else 0
     val chartItems = remember(periodCreditPurchases, periodCashPurchases, periodPayments, periodReturns, totalVolume, isArabic) {
@@ -460,7 +468,9 @@ private fun SupplierStatisticsContent(
         ReportPreviewRow(if (isArabic) "إجمالي المستحقات الحالية" else "Current payables", String.format(Locale.US, "%,.2f", totalPayables), currency, ""),
         ReportPreviewRow(if (isArabic) "المشتريات خلال الفترة" else "Purchases in period", String.format(Locale.US, "%,.2f", periodPurchases), currency, ""),
         ReportPreviewRow(if (isArabic) "المدفوعات خلال الفترة" else "Payments in period", String.format(Locale.US, "%,.2f", periodPayments), currency, ""),
-        ReportPreviewRow(if (isArabic) "المرتجعات خلال الفترة" else "Returns in period", String.format(Locale.US, "%,.2f", periodReturns), currency, ""),
+        ReportPreviewRow(if (isArabic) "إجمالي المرتجعات خلال الفترة" else "Total returns in period", String.format(Locale.US, "%,.2f", periodReturns), currency, ""),
+        ReportPreviewRow(if (isArabic) "تخفيض دين المورد بالمرتجعات" else "Payable reduction from returns", String.format(Locale.US, "%,.2f", periodPayableReductionReturns), currency, ""),
+        ReportPreviewRow(if (isArabic) "المبالغ المستردة نقدًا" else "Cash refunds received", String.format(Locale.US, "%,.2f", periodCashRefunds), currency, ""),
         ReportPreviewRow(if (isArabic) "صافي تغير المستحقات" else "Net payable change", String.format(Locale.US, "%,.2f", netPayableMovement), currency, "")
     )
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp).testTag("supplier_statistics_content"), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -493,7 +503,7 @@ private fun SupplierStatisticsContent(
                     BreakdownChartTabButton(if (isArabic) "عمودي" else "Column", chartType == BreakdownChartType.COLUMN, { onChartTypeSelected(BreakdownChartType.COLUMN) }, Modifier.weight(1f).testTag("supplier_chart_tab_column"))
                     BreakdownChartTabButton(if (isArabic) "مركب" else "Combo", chartType == BreakdownChartType.COMBO, { onChartTypeSelected(BreakdownChartType.COMBO) }, Modifier.weight(1f).testTag("supplier_chart_tab_combo"))
                 }
-                Text(if (isArabic) "💡 الرسم المحدد سيظهر ضمن تقرير PDF." else "💡 The selected chart will be included in the PDF report.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (isArabic) "يحتوي تقرير PDF على ملخص المؤشرات المالية؛ الرسم البياني ظاهر على الشاشة فقط." else "The PDF contains the financial summary; the chart is currently displayed on screen only.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 when (chartType) {
                     BreakdownChartType.DONUT -> SupplierBreakdownDonut(items = chartItems, totalPercent = percent(periodCreditPurchases), isArabic = isArabic, currency = currency)
                     BreakdownChartType.COLUMN -> BreakdownColumnChart(items = chartItems, currency = currency, isArabic = isArabic)
@@ -522,7 +532,10 @@ private fun SupplierStatisticsContent(
                             kpis = kpis,
                             headers = headers,
                             rows = reportRows.drop(1),
-                            isArabic = isArabic
+                            isArabic = isArabic,
+                            chartItems = chartItems.map { item -> PdfChartItem(item.labelAr.takeIf { isArabic } ?: item.labelEn, item.amount, when (item.color) { StatusRed -> android.graphics.Color.rgb(229, 57, 53); StatusBlue -> android.graphics.Color.rgb(30, 136, 229); StatusGreen -> android.graphics.Color.rgb(67, 160, 71); else -> android.graphics.Color.rgb(251, 140, 0) }) },
+                            chartTitle = if (isArabic) "توزيع المشتريات والمدفوعات والمرتجعات" else "Purchases, Payments & Returns",
+                            chartType = when (chartType) { BreakdownChartType.DONUT -> "DONUT"; BreakdownChartType.COLUMN -> "COLUMN"; BreakdownChartType.COMBO -> "COMBO" }
                         )
                         ReportExporter.shareFile(context, file, "application/pdf", if (isArabic) "تقرير إحصائيات الموردين" else "Supplier Analytics Report")
                         Toast.makeText(context, if (isArabic) "تم تجهيز تقرير PDF" else "PDF report ready", Toast.LENGTH_SHORT).show()
@@ -546,11 +559,29 @@ private fun SupplierStatisticsContent(
 
 @Composable
 private fun SupplierKpiCard(title: String, value: String, color: Color, modifier: Modifier = Modifier, tag: String) {
+    var showMetricInfo by remember(title, value) { mutableStateOf(false) }
+    val isArabicTitle = title.any { it in '\u0600'..'\u06FF' }
     Card(shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, color.copy(alpha = .28f)), modifier = modifier.testTag(tag)) {
-        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(title, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+                IconButton(onClick = { showMetricInfo = true }, modifier = Modifier.size(24.dp)) { Text("!", color = StatusAmber, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp) }
+            }
             Text(value, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold, fontSize = 16.sp), color = color, maxLines = 1)
         }
+    }
+    if (showMetricInfo) {
+        AlertDialog(
+            onDismissRequest = { showMetricInfo = false },
+            title = { Text(title) },
+            text = { Text(when {
+                title.contains("المستحقات") || title.contains("Payable", true) -> if (isArabicTitle) "الرصيد الحالي يعتمد على دفتر المورد. الاتجاه مهم: موجب يعني أن المحل مستحق عليه للمورد، وسالب يعني أن المورد مستحق للمحل. حركة الفترة منفصلة عن الرصيد الحالي." else "Current balance comes from the supplier ledger. Sign matters: positive means the shop owes the supplier; negative means the supplier owes the shop. Period movement is separate from current balance."
+                title.contains("المرتجعات") || title.contains("Returns", true) -> if (isArabicTitle) "إجمالي قيمة المرتجعات يختلف عن الجزء الذي يخفض دين المورد؛ المبلغ المسترد نقدًا يعرض منفصلًا ولا يخصم من الدين مرة ثانية." else "Total returns differ from the portion that reduces supplier payable; cash refunds are separate and must not reduce payable twice."
+                title.contains("المشتريات") || title.contains("Purchases", true) -> if (isArabicTitle) "يعرض إجمالي المشتريات المسجلة ضمن الفترة المحددة. المشتريات الآجلة فقط تؤثر على دين المورد، بينما النقدية مدفوعة." else "Shows purchases recorded in the selected period. Only credit purchases increase supplier payable; cash purchases are already paid."
+                else -> if (isArabicTitle) "هذا إجمالي العمليات الفعالة ضمن الفترة المحددة. لا تخلط حركة الفترة مع الرصيد الحالي، وتُستبعد العمليات المعكوسة من الحركة." else "This is the total active operations in the selected period. Do not confuse period movement with current balance; reversed operations are excluded."
+            }) },
+            confirmButton = { TextButton(onClick = { showMetricInfo = false }) { Text(if (isArabicTitle) "حسنًا" else "OK") } }
+        )
     }
 }
 

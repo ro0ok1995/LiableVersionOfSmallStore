@@ -23,6 +23,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -88,6 +93,7 @@ internal fun StatisticsTabContent(
     context: Context,
     storeInfo: StoreInfo
 ) {
+    var showCostDetails by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     val filteredTransactions = remember(transactions, selectedCustomer, activePeriod, customStartDate, customEndDate) {
         var list = if (selectedCustomer != null) {
             transactions.filter { it.customerId == selectedCustomer.id }
@@ -104,8 +110,18 @@ internal fun StatisticsTabContent(
         }
     }
 
-    val statisticsBreakdown = remember(filteredTransactions, transactionLines) {
-        FinancialReportCalculator.calculate(filteredTransactions, transactionLines)
+    val filteredTransactionIds = remember(filteredTransactions) { filteredTransactions.map { it.id }.toSet() }
+    val scopedTransactionLines = remember(transactionLines, filteredTransactionIds) {
+        transactionLines.filter { it.transactionId in filteredTransactionIds }
+    }
+    val statisticsBreakdown = remember(filteredTransactions, scopedTransactionLines) {
+        FinancialReportCalculator.calculate(filteredTransactions, scopedTransactionLines)
+    }
+    val transactionsWithMissingCost = remember(filteredTransactions, scopedTransactionLines) {
+        filteredTransactions.filter { tx ->
+            val isSale = FinancialReportCalculator.decomposeTransaction(tx).transactionType == com.example.model.TransactionType.SALE
+            isSale && (scopedTransactionLines.none { it.transactionId == tx.id } || scopedTransactionLines.filter { it.transactionId == tx.id }.any { !it.costPriceKnown || !it.costPrice.isFinite() || it.quantity <= 0 })
+        }
     }
     val totalCashSales = statisticsBreakdown.cashSales
     val totalDebtSales = statisticsBreakdown.creditSales
@@ -246,26 +262,53 @@ internal fun StatisticsTabContent(
                 value = String.format(Locale.US, "%,.2f %s", statisticsBreakdown.grossProfit, currency),
                 color = if (statisticsBreakdown.grossProfit >= 0.0) StatusGreen else StatusRed,
                 testTag = "kpi_gross_profit",
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                warning = !statisticsBreakdown.costDataComplete
             )
             KpiMetricCard(
                 title = if (isArabic) StoreStrings.STAT_NET_PROFIT_AR else StoreStrings.STAT_NET_PROFIT_EN,
                 value = String.format(Locale.US, "%,.2f %s", statisticsBreakdown.netProfit, currency),
                 color = if (statisticsBreakdown.netProfit >= 0.0) StatusGreen else StatusRed,
                 testTag = "kpi_net_profit",
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                warning = !statisticsBreakdown.costDataComplete
             )
         }
 
         if (!statisticsBreakdown.costDataComplete) {
-            Text(
-                text = if (isArabic)
-                    "تنبيه محاسبي: تكلفة بعض المبيعات غير متوفرة؛ الربح المعروض غير مكتمل ولا يُعتمد كربح نهائي."
-                else
-                    "Accounting warning: cost is missing for some sales; profit is incomplete and must not be treated as final.",
-                color = StatusRed,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(androidx.compose.material.icons.Icons.Default.Warning, contentDescription = null, tint = StatusRed, modifier = Modifier.size(18.dp))
+                Text(
+                    text = if (isArabic) "تكلفة بعض المبيعات غير مكتملة؛ اضغط لمعرفة التفاصيل والإجراء المطلوب." else "Some sale costs are incomplete; tap for details and corrective steps.",
+                    color = StatusRed,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = { showCostDetails = true }) {
+                    Icon(Icons.Default.Info, contentDescription = if (isArabic) "تفاصيل نقص التكلفة" else "Cost details", tint = StatusRed)
+                }
+            }
+        }
+        if (showCostDetails) {
+            AlertDialog(
+                onDismissRequest = { showCostDetails = false },
+                title = { Text(if (isArabic) "تفاصيل اكتمال تكلفة المبيعات" else "Sales cost completeness") },
+                text = {
+                    Text(if (isArabic) {
+                        "عدد عمليات البيع المتأثرة: ${transactionsWithMissingCost.size}. " +
+                            (if (transactionsWithMissingCost.isEmpty()) "لم يُحدد اسم عملية بعينها؛ راجع بنود التكلفة ضمن الفترة." else "أمثلة: " + transactionsWithMissingCost.take(5).joinToString("، ") { it.title.ifBlank { it.id } } + if (transactionsWithMissingCost.size > 5) "، وغيرها" else "") +
+                            "\n\nالسبب: بند تكلفة غير موجود أو غير موثّق، أو تكلفة صفرية قديمة لا يوجد ما يثبت أنها صفر حقيقي. الأثر: لا يُعتمد الربح كرقم نهائي. الحل: راجع تكلفة المنتج وبنود البيع التاريخية من مستندات موثوقة. لا تُخمن تكلفة تاريخية؛ بعد الترحيل تُعد التكلفة الصفرية معروفة فقط إذا أُدخلت أو تحققت صراحةً."
+                    } else {
+                        "Affected sales: ${transactionsWithMissingCost.size}. " +
+                            (if (transactionsWithMissingCost.isEmpty()) "No specific sale name was identified; review cost lines in the selected period." else "Examples: " + transactionsWithMissingCost.take(5).joinToString(", ") { it.title.ifBlank { it.id } } + if (transactionsWithMissingCost.size > 5) ", and others" else "") +
+                            "\n\nCause: missing or unverified cost lines, or a historical zero cost with no evidence that it is genuinely zero. Impact: profit is not final. Review product costs and historical sale lines using reliable source documents. Do not guess historical costs; a zero is known only when explicitly entered or verified after migration."
+                    })
+                },
+                confirmButton = { TextButton(onClick = { showCostDetails = false }) { Text(if (isArabic) "فهمت" else "Understood") } }
             )
         }
 
@@ -661,37 +704,42 @@ private fun KpiMetricCard(
     value: String,
     color: Color,
     testTag: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    warning: Boolean = false
 ) {
+    var showMetricInfo by androidx.compose.runtime.remember(title, value) { androidx.compose.runtime.mutableStateOf(false) }
     Card(
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, GeoOutlineVariant),
         modifier = modifier.testTag(testTag)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp)
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 16.sp
-                ),
-                color = color,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+        Column(modifier = Modifier.fillMaxWidth().padding(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(text = title, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                if (warning) Icon(Icons.Default.Warning, contentDescription = if (title.any { it in '\u0600'..'\u06FF' }) "بيانات ناقصة" else "Missing data", tint = StatusRed, modifier = Modifier.size(16.dp))
+                IconButton(onClick = { showMetricInfo = true }, modifier = Modifier.size(24.dp)) {
+                    Text("!", color = StatusAmber, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
+                }
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(text = value, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold, fontSize = 16.sp), color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
+    if (showMetricInfo) {
+        AlertDialog(
+            onDismissRequest = { showMetricInfo = false },
+            title = { Text(title) },
+            text = { Text(metricExplanation(title, title.any { it in '\u0600'..'\u06FF' })) },
+            confirmButton = { TextButton(onClick = { showMetricInfo = false }) { Text(if (title.any { it in '\u0600'..'\u06FF' }) "حسنًا" else "OK") } }
+        )
+    }
+}
+
+private fun metricExplanation(title: String, isArabic: Boolean): String = when {
+    title.contains("الربح") || title.contains("Profit", true) -> if (isArabic) "يُحسب الربح من صافي المبيعات بعد خصم تكلفة البضاعة المباعة والمصاريف ذات الصلة. إذا ظهر مثلث تحذير، فهناك تكاليف غير موثقة بالكامل ولا ينبغي اعتماد الربح كنهائي." else "Profit is calculated from net sales less cost of goods sold and relevant expenses. If a warning triangle appears, some costs are unverified and the result is not final."
+    title.contains("المدفوعات") || title.contains("Payments", true) || title.contains("السدادات") -> if (isArabic) "هذا إجمالي المدفوعات/التحصيلات المسجلة ضمن الفترة المحددة، وليس الرصيد الحالي." else "This is the total payments recorded in the selected period, not the current balance."
+    title.contains("كاش") || title.contains("Cash", true) -> if (isArabic) "إجمالي المبيعات النقدية ضمن الفترة المحددة." else "Total cash sales in the selected period."
+    title.contains("ديون") || title.contains("Debt", true) || title.contains("مستحقات") -> if (isArabic) "هذا المؤشر يعرض حركة الفترة المحددة، وليس بالضرورة الرصيد الحالي. راجع اسم البطاقة والفترة المختارة." else "This metric describes movement in the selected period and may differ from the current balance."
+    else -> if (isArabic) "القيمة محسوبة من العمليات الفعالة ضمن الفترة المحددة، ولا تشمل السجلات المعكوسة إذا جرى تصنيفها كمعكوسة في المصدر." else "This value is calculated from active operations in the selected period and excludes entries classified as reversed in the source."
 }

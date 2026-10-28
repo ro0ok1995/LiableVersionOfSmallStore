@@ -141,6 +141,7 @@ class InventoryViewModel @JvmOverloads constructor(
                 name = name,
                 price = price,
                 costPrice = costPrice,
+                costPriceKnown = true,
                 category = category,
                 unit = unit,
                 imageUri = imageUri,

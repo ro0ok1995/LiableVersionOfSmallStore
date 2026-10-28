@@ -1,5 +1,6 @@
 package com.example.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -47,7 +48,8 @@ data class SaleReturnLine(
     val unitPrice: Double,
     val costPriceAtReturn: Double,
     val subtotal: Double,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "0") val costPriceKnown: Boolean = costPriceAtReturn > 0.0
 ) {
     init {
         require(id.isNotBlank()) { "Sale return line ID cannot be blank" }

@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -76,7 +77,7 @@ fun AddEditProductDialog(
 
     var name by remember { mutableStateOf(product?.name ?: "") }
     var priceStr by remember { mutableStateOf(product?.let { if (it.price > 0) it.price.toString() else "" } ?: "") }
-    var costPriceStr by remember { mutableStateOf(product?.let { if (it.costPrice > 0) it.costPrice.toString() else "" } ?: "") }
+    var costPriceStr by remember { mutableStateOf(product?.let { if (it.costPriceKnown) it.costPrice.toString() else "" } ?: "") }
     var category by remember { mutableStateOf(product?.category ?: (if (isArabic) "عام" else "General")) }
     var unit by remember { mutableStateOf(product?.unit ?: (if (isArabic) "حبة" else "Piece")) }
     var currentImageUri by remember { mutableStateOf(product?.imageUri) }
@@ -285,7 +286,7 @@ fun AddEditProductDialog(
                     OutlinedTextField(
                         value = costPriceStr,
                         onValueChange = { costPriceStr = it },
-                        label = { Text(if (isArabic) "سعر التكلفة" else "Cost Price") },
+                        label = { Text(if (isArabic) "سعر التكلفة *" else "Cost Price *") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
                         shape = RoundedCornerShape(10.dp),
@@ -350,7 +351,7 @@ fun AddEditProductDialog(
                 onClick = {
                     val cleanName = name.trim()
                     val parsedPrice = priceStr.toDoubleOrNull()
-                    val parsedCost = costPriceStr.toDoubleOrNull() ?: 0.0
+                    val parsedCost = costPriceStr.toDoubleOrNull()
 
                     if (cleanName.isBlank()) {
                         nameError = true
@@ -358,6 +359,12 @@ fun AddEditProductDialog(
                     }
                     if (parsedPrice == null || parsedPrice <= 0.0) {
                         priceError = true
+                        return@Button
+                    }
+                    // Do not silently convert an empty/invalid cost to zero. Zero is accepted only
+                    // when the user explicitly enters it; blank input must be corrected.
+                    if (parsedCost == null || !parsedCost.isFinite() || parsedCost < 0.0) {
+                        Toast.makeText(context, if (isArabic) "أدخل تكلفة صحيحة؛ لا تتركها فارغة" else "Enter a valid cost; it cannot be blank", Toast.LENGTH_SHORT).show()
                         return@Button
                     }
 

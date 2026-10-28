@@ -1082,6 +1082,7 @@ class StoreRepository private constructor(
             name = name,
             price = costPrice,
             costPrice = costPrice,
+            costPriceKnown = true,
             category = category.ifBlank { "عام" },
             unit = unit.ifBlank { "قطعة" },
             imageUri = imageUri,

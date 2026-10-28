@@ -184,11 +184,9 @@ object AnalyticsExportDataPreparer {
 
         val totalPaymentsReceived = breakdown.customerPayments
         val totalSales = breakdown.totalSales
-        val netBalance = if (selectedCustomer != null) {
-            selectedCustomer.balance
-        } else {
-            allCustomers.sumOf { it.balance }
-        }
+        // This metric is the net movement within the selected period, not the current balance.
+        // Current customer balance is exported separately via selectedCustomer.currentBalance.
+        val netBalance = totalDebtSales - totalPaymentsReceived
 
         // Volume & percentages matching HomeScreen.kt and StatisticsTabContent
         val totalVolume = totalDebtSales + totalCashSales + fullSettlementAmount + partialSettlementAmount
