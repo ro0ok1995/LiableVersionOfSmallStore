@@ -32,6 +32,11 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.accounting.CustomerLedgerCalculator
 import com.example.data.db.toTransactionItem
+import com.example.data.db.FinancialAccount
+import com.example.ui.screens.ExpenseCategoriesManagementScreen
+import com.example.ui.screens.FinancialAccountsManagementScreen
+import com.example.ui.screens.OpeningBalanceSetupScreen
+import com.example.ui.screens.CapitalManagementScreen
 import com.example.model.AccountFilter
 import com.example.model.AppThemeMode
 import com.example.model.CustomerAccount
@@ -91,6 +96,7 @@ fun SmallStoreApp(
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val coroutineScope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
+    val rootContext = LocalContext.current
     var supplierInitialAction by remember { mutableStateOf(SupplierInitialAction.NONE) }
     var accountsInitialTab by remember { mutableIntStateOf(0) }
     var openCustomerAddFromAccounts by remember { mutableStateOf(false) }
@@ -729,10 +735,66 @@ fun SmallStoreApp(
                                     onReversedTransactionsClick = {
                                         focusManager.clearFocus()
                                         mainViewModel.navigateTo(NavDestination.REVERSED_TRANSACTIONS)
-                                    }
+                                    },
+                                    onExpenseCategoriesClick = { mainViewModel.navigateTo(NavDestination.EXPENSE_CATEGORIES) },
+                                    onFinancialAccountsClick = { mainViewModel.navigateTo(NavDestination.FINANCIAL_ACCOUNTS) },
+                                    onOpeningBalanceClick = { mainViewModel.navigateTo(NavDestination.OPENING_BALANCE_SETUP) },
+                                    onCapitalClick = { mainViewModel.navigateTo(NavDestination.CAPITAL_MANAGEMENT) }
                                 )
                             }
 
+                            NavDestination.EXPENSE_CATEGORIES -> {
+                                ExpenseCategoriesManagementScreen(
+                                    languageMode = uiState.languageMode,
+                                    categories = uiState.expenseCategories,
+                                    onBack = { mainViewModel.navigateBack() },
+                                    onAdd = { name, description ->
+                                        mainViewModel.addExpenseCategory(name, description) { result ->
+                                            result.onFailure { Toast.makeText(rootContext, it.message ?: "تعذر حفظ الفئة", Toast.LENGTH_LONG).show() }
+                                        }
+                                    }
+                                )
+                            }
+                            NavDestination.FINANCIAL_ACCOUNTS -> {
+                                FinancialAccountsManagementScreen(
+                                    languageMode = uiState.languageMode,
+                                    accounts = uiState.financialAccounts,
+                                    onBack = { mainViewModel.navigateBack() },
+                                    onAdd = { name, type ->
+                                        coroutineScope.launch {
+                                            runCatching {
+                                                mainViewModel.createFinancialAccount(
+                                                    FinancialAccount(
+                                                        id = "acc_${java.util.UUID.randomUUID().toString().replace("-", "").take(12)}",
+                                                        name = name,
+                                                        type = type
+                                                    )
+                                                )
+                                            }.onFailure { Toast.makeText(rootContext, it.message ?: "تعذر حفظ الحساب", Toast.LENGTH_LONG).show() }
+                                        }
+                                    }
+                                )
+                            }
+                            NavDestination.OPENING_BALANCE_SETUP -> {
+                                OpeningBalanceSetupScreen(
+                                    languageMode = uiState.languageMode,
+                                    accounts = uiState.financialAccounts,
+                                    onBack = { mainViewModel.navigateBack() },
+                                    onSave = { accountId, amount, direction ->
+                                        mainViewModel.recordOpeningBalance("FINANCIAL_ACCOUNT", accountId, amount, direction) { result ->
+                                            result.onSuccess { Toast.makeText(rootContext, if (isArabic) "تم تسجيل الرصيد الافتتاحي" else "Opening balance recorded", Toast.LENGTH_LONG).show() }
+                                                .onFailure { Toast.makeText(rootContext, it.message ?: "تعذر حفظ الرصيد", Toast.LENGTH_LONG).show() }
+                                        }
+                                    }
+                                )
+                            }
+                            NavDestination.CAPITAL_MANAGEMENT -> {
+                                CapitalManagementScreen(
+                                    languageMode = uiState.languageMode,
+                                    accounts = uiState.financialAccounts,
+                                    onBack = { mainViewModel.navigateBack() }
+                                )
+                            }
                             NavDestination.BACKUP_RESTORE -> {
                                 val context = LocalContext.current
                                 BackupRestoreScreen(

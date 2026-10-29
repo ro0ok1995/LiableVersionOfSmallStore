@@ -64,6 +64,10 @@ fun DataCenterScreen(
     onBackupRestoreClick: (() -> Unit)? = null,
     onArchiveClick: (() -> Unit)? = null,
     onReversedTransactionsClick: (() -> Unit)? = null,
+    onExpenseCategoriesClick: (() -> Unit)? = null,
+    onFinancialAccountsClick: (() -> Unit)? = null,
+    onOpeningBalanceClick: (() -> Unit)? = null,
+    onCapitalClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
@@ -276,28 +280,32 @@ fun DataCenterScreen(
                 icon = Icons.Default.Category,
                 title = if (isArabic) "فئات المصروفات" else "Expense Categories",
                 description = if (isArabic) "تصنيف المصروفات التشغيلية. لا تُعامل كرأس مال أو رصيد افتتاحي." else "Classify operating expenses. They are not capital or opening balance.",
-                testTag = "data_center_item_expense_categories"
+                testTag = "data_center_item_expense_categories",
+                onClick = onExpenseCategoriesClick
             )
 
             DataCenterInfoCard(
                 icon = Icons.Default.AccountBalance,
                 title = if (isArabic) "الحسابات المالية" else "Financial Accounts",
                 description = if (isArabic) "الحسابات النقدية والمالية المستخدمة في العمليات." else "Financial and cash accounts used by store operations.",
-                testTag = "data_center_item_financial_accounts"
+                testTag = "data_center_item_financial_accounts",
+                onClick = onFinancialAccountsClick
             )
 
             DataCenterInfoCard(
                 icon = Icons.Default.SettingsSuggest,
                 title = if (isArabic) "الرصيد الافتتاحي والإعداد الأولي" else "Opening Balance / Initial Setup",
                 description = if (isArabic) "الرصيد الافتتاحي يُسجل كرصيد تأسيسي وليس كمصروف." else "Opening balance is initial financial state, not an expense.",
-                testTag = "data_center_item_opening_balance"
+                testTag = "data_center_item_opening_balance",
+                onClick = onOpeningBalanceClick
             )
 
             DataCenterInfoCard(
                 icon = Icons.Default.AccountBalance,
                 title = if (isArabic) "رأس المال" else "Capital",
                 description = if (isArabic) "رأس المال عنصر تمويلي مستقل، ولا يُصنف كمصروف تشغيلي." else "Capital is a separate funding element and is not an operating expense.",
-                testTag = "data_center_item_capital"
+                testTag = "data_center_item_capital",
+                onClick = onCapitalClick
             )
 
             // 4. Reversed financial transactions
@@ -380,9 +388,12 @@ private fun DataCenterInfoCard(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
     description: String,
-    testTag: String
+    testTag: String,
+    onClick: (() -> Unit)? = null
 ) {
     Card(
+        onClick = { onClick?.invoke() },
+        enabled = onClick != null,
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
         modifier = Modifier.fillMaxWidth().border(1.dp, GeoOutlineVariant, RoundedCornerShape(14.dp)).testTag(testTag)
