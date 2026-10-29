@@ -167,6 +167,12 @@ class MainViewModel @JvmOverloads constructor(
     private var hasCheckedFirstLaunch = false
 
     init {
+        // Ensure default accounts and matching payment methods exist before monetary operations.
+        // This is master-data initialization only; it does not create demo customers/products/transactions.
+        viewModelScope.launch {
+            runCatching { repository.ensureDefaultFinancialConfiguration() }
+        }
+
         viewModelScope.launch {
             val saved = repository.isStoreInfoSaved()
             if (!saved && !hasCheckedFirstLaunch) {
