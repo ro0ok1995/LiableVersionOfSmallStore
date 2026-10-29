@@ -970,6 +970,10 @@ class MainViewModel @JvmOverloads constructor(
         return repository.getFinancialAccountBalance(accountId)
     }
 
+    suspend fun createFinancialAccount(account: FinancialAccount) {
+        repository.createFinancialAccount(account)
+    }
+
     suspend fun getAllExpenseCategories(): List<ExpenseCategory> {
         return expenseViewModel.getAllExpenseCategories()
     }

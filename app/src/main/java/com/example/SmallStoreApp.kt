@@ -230,6 +230,10 @@ fun SmallStoreApp(
                     NavDestination.CONTACT_SUPPORT -> if (isArabic) StoreStrings.CONTACT_SUPPORT_AR else StoreStrings.CONTACT_SUPPORT_EN
                     NavDestination.BACKUP_RESTORE -> if (isArabic) StoreStrings.SECTION_BACKUP_AR else StoreStrings.SECTION_BACKUP_EN
                     NavDestination.SUPPLIER_OPERATIONS -> if (isArabic) "عمليات الموردين" else "Supplier Operations"
+                    NavDestination.EXPENSE_CATEGORIES -> if (isArabic) "فئات المصروفات" else "Expense Categories"
+                    NavDestination.FINANCIAL_ACCOUNTS -> if (isArabic) "الحسابات المالية" else "Financial Accounts"
+                    NavDestination.OPENING_BALANCE_SETUP -> if (isArabic) "الأرصدة الافتتاحية" else "Opening Balances"
+                    NavDestination.CAPITAL_MANAGEMENT -> if (isArabic) "إدارة رأس المال" else "Capital Management"
                 }
 
                 val unreadNotifs = uiState.notifications.count { !it.isRead }
