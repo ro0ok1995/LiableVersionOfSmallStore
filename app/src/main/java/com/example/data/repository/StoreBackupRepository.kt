@@ -81,19 +81,37 @@ class StoreBackupRepository(
 
     suspend fun restoreDataFromBackup(payload: BackupPayload, replaceStoreInfo: Boolean) {
         val hasModernSnapshot = payload.sales.isNotEmpty() ||
+            payload.saleLines.isNotEmpty() ||
             payload.financialAccounts.isNotEmpty() ||
+            payload.paymentMethods.isNotEmpty() ||
             payload.suppliers.isNotEmpty() ||
             payload.purchases.isNotEmpty() ||
+            payload.purchaseLines.isNotEmpty() ||
             payload.customerPayments.isNotEmpty() ||
+            payload.openingBalances.isNotEmpty() ||
+            payload.adjustments.isNotEmpty() ||
+            payload.reversals.isNotEmpty() ||
+            payload.saleReturns.isNotEmpty() ||
+            payload.saleReturnLines.isNotEmpty() ||
+            payload.refunds.isNotEmpty() ||
+            payload.supplierPayments.isNotEmpty() ||
+            payload.purchaseReturns.isNotEmpty() ||
+            payload.purchaseReturnLines.isNotEmpty() ||
+            payload.expenseCategories.isNotEmpty() ||
             payload.expenses.isNotEmpty() ||
             payload.stockMovements.isNotEmpty() ||
-            payload.customerEntities.isNotEmpty()
+            payload.customerEntities.isNotEmpty() ||
+            payload.customerIdentityConflicts.isNotEmpty()
 
         val expectedSnapshot = if (hasModernSnapshot) {
             buildAccountingSnapshot(
                 customers = if (payload.customerEntities.isNotEmpty()) payload.customerEntities else payload.customers.map { it.toEntity() },
                 suppliers = payload.suppliers,
-                accounts = payload.financialAccounts,
+                accounts = if (payload.financialAccounts.isNotEmpty()) {
+                    payload.financialAccounts
+                } else {
+                    PaymentMethodRepository.CANONICAL_ACCOUNTS
+                },
                 sales = payload.sales,
                 saleLines = payload.saleLines,
                 customerPayments = payload.customerPayments,
@@ -148,6 +166,12 @@ class StoreBackupRepository(
                 if (payload.suppliers.isNotEmpty()) supplierDao.insertSuppliers(payload.suppliers)
                 if (payload.financialAccounts.isNotEmpty()) accountDao.insertAccounts(payload.financialAccounts)
                 if (payload.paymentMethods.isNotEmpty()) paymentMethodDao.insertPaymentMethods(payload.paymentMethods)
+                PaymentMethodRepository.ensurePaymentMethods(database)
+                // Modern backups can contain operational data without an account list.
+                // Ensure the five supported default accounts only when the backup omitted them.
+                if (payload.financialAccounts.isEmpty()) {
+                    PaymentMethodRepository.ensureDefaultConfiguration(database)
+                }
                 if (payload.expenseCategories.isNotEmpty()) expenseCategoryDao.insertCategories(payload.expenseCategories)
 
                 if (payload.sales.isNotEmpty()) saleDao.insertSales(payload.sales)
@@ -177,6 +201,7 @@ class StoreBackupRepository(
                 if (payload.products.isNotEmpty()) productDao.insertProducts(payload.products.map { it.toEntity() })
                 if (payload.transactions.isNotEmpty()) transactionDao.insertTransactions(payload.transactions.map { it.toEntity() })
                 if (payload.transactionItemLines.isNotEmpty()) transactionItemLineDao.insertLines(payload.transactionItemLines)
+                PaymentMethodRepository.ensureDefaultConfiguration(database)
             }
 
             if (payload.notifications.isNotEmpty()) {

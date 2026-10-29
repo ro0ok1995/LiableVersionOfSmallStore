@@ -59,15 +59,20 @@ class SupplierPaymentRepository(
         val supplier = supplierDao.getSupplierById(supplierId)
             ?: throw IllegalArgumentException("Supplier with ID $supplierId not found")
 
-        val methodId = paymentMethodId ?: "pm_cash"
-        val method = database.paymentMethodDao().getPaymentMethodById(methodId)
-            ?: throw IllegalArgumentException("Payment method not found: $methodId")
-        require(method.isActive) { "Payment method is inactive: $methodId" }
-
         val accId = financialAccountId ?: "acc_cash"
-        val account = financialAccountDao.getAccountById(accId)
-            ?: throw IllegalArgumentException("Financial account not found: $accId")
+        var account = financialAccountDao.getAccountById(accId)
+        if (account == null) {
+            PaymentMethodRepository.ensureDefaultConfiguration(database)
+            account = financialAccountDao.getAccountById(accId)
+                ?: throw IllegalArgumentException("Financial account not found: $accId")
+        }
         require(account.isActive) { "Financial account is inactive: $accId" }
+
+        val method = PaymentMethodRepository.resolvePaymentMethodForOperation(
+            database = database,
+            explicitPaymentMethodId = paymentMethodId,
+            financialAccount = account
+        )
 
         val dateToUse = paymentDate?.takeIf { it.isNotBlank() }
             ?: SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
@@ -81,8 +86,8 @@ class SupplierPaymentRepository(
             supplierId = supplierId,
             amount = amount,
             paymentDate = dateToUse,
-            paymentMethodId = methodId,
-            financialAccountId = accId,
+            paymentMethodId = method.id,
+            financialAccountId = account.id,
             referenceNumber = refNum,
             notes = notes,
             status = "ACTIVE"

@@ -109,20 +109,25 @@ class PurchasesRepository(
         val invNum = invoiceNumber?.takeIf { it.isNotBlank() }
             ?: generateNextPurchaseInvoiceNumber()
 
-        val effectiveFinancialAccountId = if (paidAmount > 0.0) {
+        val (effectiveFinancialAccountId, effectivePaymentMethodId) = if (paidAmount > 0.0) {
             val accId = financialAccountId ?: "acc_cash"
-            val account = financialAccountDao.getAccountById(accId)
-                ?: throw IllegalArgumentException("Financial account not found: $accId")
+            var account = financialAccountDao.getAccountById(accId)
+            if (account == null) {
+                PaymentMethodRepository.ensureDefaultConfiguration(database)
+                account = financialAccountDao.getAccountById(accId)
+                    ?: throw IllegalArgumentException("Financial account not found: $accId")
+            }
             require(account.isActive) { "Financial account is inactive: $accId" }
-            accId
-        } else null
-        val effectivePaymentMethodId = if (paidAmount > 0.0) {
-            val methodId = paymentMethodId ?: "pm_cash"
-            val method = database.paymentMethodDao().getPaymentMethodById(methodId)
-                ?: throw IllegalArgumentException("Payment method not found: $methodId")
-            require(method.isActive) { "Payment method is inactive: $methodId" }
-            methodId
-        } else null
+
+            val method = PaymentMethodRepository.resolvePaymentMethodForOperation(
+                database = database,
+                explicitPaymentMethodId = paymentMethodId,
+                financialAccount = account
+            )
+            Pair(account.id, method.id)
+        } else {
+            Pair(null, null)
+        }
 
         val purchase = Purchase(
             id = purchaseId,

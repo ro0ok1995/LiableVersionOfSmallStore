@@ -119,6 +119,7 @@ class SupplierPurchaseViewModel @JvmOverloads constructor(
         financialAccountId: String? = null,
         notes: String? = null,
         purchaseDate: String = getCurrentDateString(),
+        paymentMethodId: String? = null,
         onComplete: (Result<PurchaseResult>) -> Unit = {}
     ) {
         viewModelScope.launch {
@@ -128,6 +129,7 @@ class SupplierPurchaseViewModel @JvmOverloads constructor(
                     lines = lines,
                     purchaseDate = purchaseDate,
                     paidAmount = paidAmount,
+                    paymentMethodId = paymentMethodId,
                     financialAccountId = financialAccountId,
                     notes = notes
                 )
@@ -144,6 +146,7 @@ class SupplierPurchaseViewModel @JvmOverloads constructor(
         paymentDate: String = getCurrentDateString(),
         financialAccountId: String? = null,
         notes: String? = null,
+        paymentMethodId: String? = null,
         onComplete: (Result<SupplierPayment>) -> Unit = {}
     ) {
         viewModelScope.launch {
@@ -152,6 +155,7 @@ class SupplierPurchaseViewModel @JvmOverloads constructor(
                     supplierId = supplierId,
                     amount = amount,
                     paymentDate = paymentDate,
+                    paymentMethodId = paymentMethodId,
                     financialAccountId = financialAccountId,
                     notes = notes
                 )

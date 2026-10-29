@@ -14,6 +14,7 @@ import com.example.data.db.SmallStoreDatabase
 import com.example.data.db.Supplier
 import com.example.data.db.SupplierPayment
 import com.example.data.repository.StoreRepository
+import com.example.data.repository.PaymentMethodRepository
 import com.example.model.PurchaseLineRequest
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -589,4 +590,202 @@ class SupplierPurchasesPhase9Test {
         assertEquals(100.0, summary.totalPayments, 0.0001)
         assertEquals(50.0, summary.totalReturns, 0.0001)
     }
+
+    @Test
+    fun savePurchase_withCash_succeeds_andPreservesDistinctAccountAndMethodIds() = runBlocking {
+        val lines = listOf(
+            PurchaseLineRequest(
+                productId = testProductId,
+                productNameSnapshot = "زيت زيتون 1 لتر",
+                quantity = 5,
+                unitCost = 20.0
+            )
+        )
+        // Record purchase with partial cash payment
+        val result = repository.recordPurchase(
+            supplierId = testSupplierId,
+            lines = lines,
+            paidAmount = 60.0,
+            financialAccountId = "acc_cash"
+        )
+
+        assertNotNull(result.purchase)
+        assertEquals(100.0, result.purchase.totalAmount, 0.0001)
+        assertEquals(60.0, result.purchase.paidAmount, 0.0001)
+        assertEquals(40.0, result.purchase.creditAmount, 0.0001)
+        // IDs must be distinct and correctly associated
+        assertEquals("acc_cash", result.purchase.financialAccountId)
+        assertEquals("pm_cash", result.purchase.paymentMethodId)
+        assertTrue(result.purchase.financialAccountId != result.purchase.paymentMethodId)
+    }
+
+    @Test
+    fun saveSupplierPayment_withCash_succeeds_andPreservesDistinctAccountAndMethodIds() = runBlocking {
+        val payment = repository.recordSupplierPayment(
+            supplierId = testSupplierId,
+            amount = 40.0,
+            financialAccountId = "acc_cash"
+        )
+
+        assertNotNull(payment)
+        assertEquals(40.0, payment.amount, 0.0001)
+        assertEquals("acc_cash", payment.financialAccountId)
+        assertEquals("pm_cash", payment.paymentMethodId)
+        assertTrue(payment.financialAccountId != payment.paymentMethodId)
+    }
+
+    @Test
+    fun savePurchase_withBank_succeeds_andMapsToBankPaymentMethod() = runBlocking {
+        repository.createFinancialAccount(
+            FinancialAccount(
+                id = "acc_bank_palestine",
+                name = "بنك فلسطين",
+                type = "BANK",
+                isActive = true
+            )
+        )
+        repository.createPaymentMethod(
+            PaymentMethod(
+                id = "pm_bank_palestine",
+                name = "بنك فلسطين",
+                type = "BANK",
+                isActive = true
+            )
+        )
+
+        val lines = listOf(
+            PurchaseLineRequest(
+                productId = testProductId,
+                productNameSnapshot = "زيت زيتون 1 لتر",
+                quantity = 10,
+                unitCost = 25.0
+            )
+        )
+        val result = repository.recordPurchase(
+            supplierId = testSupplierId,
+            lines = lines,
+            paidAmount = 250.0,
+            financialAccountId = "acc_bank_palestine"
+        )
+
+        assertEquals("acc_bank_palestine", result.purchase.financialAccountId)
+        assertEquals("pm_bank_palestine", result.purchase.paymentMethodId)
+        assertEquals(250.0, result.purchase.paidAmount, 0.0001)
+    }
+
+    @Test
+    fun saveSupplierPayment_withBank_succeeds_andMapsToBankPaymentMethod() = runBlocking {
+        repository.createFinancialAccount(
+            FinancialAccount(
+                id = "acc_bank_palestine",
+                name = "بنك فلسطين",
+                type = "BANK",
+                isActive = true
+            )
+        )
+        repository.createPaymentMethod(
+            PaymentMethod(
+                id = "pm_bank_palestine",
+                name = "بنك فلسطين",
+                type = "BANK",
+                isActive = true
+            )
+        )
+
+        val payment = repository.recordSupplierPayment(
+            supplierId = testSupplierId,
+            amount = 150.0,
+            financialAccountId = "acc_bank_palestine"
+        )
+
+        assertEquals(150.0, payment.amount, 0.0001)
+        assertEquals("acc_bank_palestine", payment.financialAccountId)
+        assertEquals("pm_bank_palestine", payment.paymentMethodId)
+    }
+
+    @Test
+    fun savePurchaseAndPayment_whenPaymentMethodsTableCleared_safelyEnsuresMethodsAndSucceeds() = runBlocking {
+        // Simulate database state after a restore that had no payment methods
+        db.paymentMethodDao().deleteAllPaymentMethods()
+        assertEquals(0, db.paymentMethodDao().getPaymentMethodCount())
+
+        val lines = listOf(
+            PurchaseLineRequest(
+                productId = testProductId,
+                productNameSnapshot = "زيت زيتون 1 لتر",
+                quantity = 2,
+                unitCost = 30.0
+            )
+        )
+
+        // Must succeed without throwing "Payment method not found"
+        val purchaseResult = repository.recordPurchase(
+            supplierId = testSupplierId,
+            lines = lines,
+            paidAmount = 60.0,
+            financialAccountId = "acc_cash"
+        )
+        assertEquals("pm_cash", purchaseResult.purchase.paymentMethodId)
+        assertEquals("acc_cash", purchaseResult.purchase.financialAccountId)
+
+        val payment = repository.recordSupplierPayment(
+            supplierId = testSupplierId,
+            amount = 30.0,
+            financialAccountId = "acc_cash"
+        )
+        assertEquals("pm_cash", payment.paymentMethodId)
+        assertEquals("acc_cash", payment.financialAccountId)
+    }
+    @Test
+    fun paymentMethodResolution_keepsSelectedFinancialAccountPairExact() = runBlocking {
+        val bankAccount = FinancialAccount(
+            id = "acc_bank_palestine",
+            name = "بنك فلسطين",
+            type = "BANK",
+            isActive = true
+        )
+        db.financialAccountDao().insertAccount(bankAccount)
+
+        // Even if another BANK method exists, it must not replace the method paired to this account.
+        repository.createPaymentMethod(
+            PaymentMethod(id = "pm_bank", name = "بنك عام", type = "BANK", isActive = true)
+        )
+        val resolved = PaymentMethodRepository.resolvePaymentMethodForOperation(
+            database = db,
+            explicitPaymentMethodId = null,
+            financialAccount = bankAccount
+        )
+        assertEquals("pm_bank_palestine", resolved.id)
+
+        try {
+            PaymentMethodRepository.resolvePaymentMethodForOperation(
+                database = db,
+                explicitPaymentMethodId = "pm_bank",
+                financialAccount = bankAccount
+            )
+            fail("A payment method belonging to another account must not be accepted")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message.orEmpty().contains("does not match financial account"))
+        }
+    }
+
+    @Test
+    fun ensureDefaultConfiguration_addsOnlyTheFiveRequestedDefaultAccounts() = runBlocking {
+        val emptyDb = Room.inMemoryDatabaseBuilder(context, SmallStoreDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            PaymentMethodRepository.ensureDefaultConfiguration(emptyDb)
+            val accountIds = emptyDb.financialAccountDao().getAllAccountsSync().map { it.id }.toSet()
+            assertEquals(setOf("acc_cash", "acc_bank_palestine", "acc_palpay", "acc_jawwalpay", "acc_maltachat"), accountIds)
+            val methodIds = emptyDb.paymentMethodDao().getAllPaymentMethodsSync().map { it.id }.toSet()
+            assertTrue(methodIds.containsAll(setOf("pm_cash", "pm_bank_palestine", "pm_palpay", "pm_jawwalpay", "pm_maltachat")))
+            assertTrue(!accountIds.contains("acc_bank"))
+            assertTrue(!accountIds.contains("acc_card"))
+            assertTrue(!accountIds.contains("acc_wallet"))
+        } finally {
+            emptyDb.close()
+        }
+    }
+
 }

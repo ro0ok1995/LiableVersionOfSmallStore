@@ -749,6 +749,7 @@ class MainViewModel @JvmOverloads constructor(
         financialAccountId: String? = null,
         notes: String? = null,
         purchaseDate: String = getCurrentDateString(),
+        paymentMethodId: String? = null,
         onComplete: (Result<PurchaseResult>) -> Unit = {}
     ) {
         supplierPurchaseViewModel.recordPurchase(
@@ -758,6 +759,7 @@ class MainViewModel @JvmOverloads constructor(
             financialAccountId = financialAccountId,
             notes = notes,
             purchaseDate = purchaseDate,
+            paymentMethodId = paymentMethodId,
             onComplete = onComplete
         )
     }
@@ -768,6 +770,7 @@ class MainViewModel @JvmOverloads constructor(
         paymentDate: String = getCurrentDateString(),
         financialAccountId: String? = null,
         notes: String? = null,
+        paymentMethodId: String? = null,
         onComplete: (Result<SupplierPayment>) -> Unit = {}
     ) {
         supplierPurchaseViewModel.recordSupplierPayment(
@@ -776,6 +779,7 @@ class MainViewModel @JvmOverloads constructor(
             paymentDate = paymentDate,
             financialAccountId = financialAccountId,
             notes = notes,
+            paymentMethodId = paymentMethodId,
             onComplete = onComplete
         )
     }

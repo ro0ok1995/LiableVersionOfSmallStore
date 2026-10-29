@@ -459,26 +459,7 @@ class StoreRepository private constructor(
      * Cash is the stable default used by existing accounting flows (acc_cash / pm_cash).
      */
     suspend fun ensureDefaultFinancialConfiguration() = database.withTransaction {
-        val now = System.currentTimeMillis()
-        val existingAccounts = financialAccountDao.getAllAccountsSync().associateBy { it.id }
-        val requiredAccounts = listOf(
-            FinancialAccount("acc_cash", "نقدي كاش", "CASH", createdAt = now, updatedAt = now),
-            FinancialAccount("acc_bank_palestine", "بنك فلسطين", "BANK", createdAt = now, updatedAt = now),
-            FinancialAccount("acc_palpay", "محفظة بال باي", "E_WALLET", createdAt = now, updatedAt = now),
-            FinancialAccount("acc_jawwalpay", "محفظة جوال باي", "E_WALLET", createdAt = now, updatedAt = now),
-            FinancialAccount("acc_maltachat", "حساب مالتشات", "E_WALLET", createdAt = now, updatedAt = now)
-        ).filterNot { existingAccounts.containsKey(it.id) }
-        if (requiredAccounts.isNotEmpty()) financialAccountDao.insertAccounts(requiredAccounts)
-
-        val existingMethods = paymentMethodDao.getAllPaymentMethodsSync().associateBy { it.id }
-        val requiredMethods = listOf(
-            PaymentMethod("pm_cash", "نقدي كاش", "CASH", createdAt = now),
-            PaymentMethod("pm_bank_palestine", "بنك فلسطين", "BANK", createdAt = now),
-            PaymentMethod("pm_palpay", "محفظة بال باي", "E_WALLET", createdAt = now),
-            PaymentMethod("pm_jawwalpay", "محفظة جوال باي", "E_WALLET", createdAt = now),
-            PaymentMethod("pm_maltachat", "حساب مالتشات", "E_WALLET", createdAt = now)
-        ).filterNot { existingMethods.containsKey(it.id) }
-        if (requiredMethods.isNotEmpty()) paymentMethodDao.insertPaymentMethods(requiredMethods)
+        PaymentMethodRepository.ensureDefaultConfiguration(database)
     }
 
     suspend fun getPaymentMethodById(id: String): PaymentMethod? {
