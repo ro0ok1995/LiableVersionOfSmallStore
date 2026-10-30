@@ -666,8 +666,17 @@ fun SupplierOperationsScreen(
                 refreshTrigger++
             },
             onUnlinkExisting = { productId ->
-                onUnlinkItemFromSupplier(selectedSupplier!!.id, productId) { result ->
-                    if (result.isFailure) operationErrorMessage = result.exceptionOrNull()?.message ?: if (isArabic) "تعذر إزالة الصنف من المورد." else "Could not unlink item from supplier."
+                val supplierId = selectedSupplier!!.id
+                onUnlinkItemFromSupplier(supplierId, productId) { result ->
+                    if (result.isSuccess) {
+                        // A catalog unlink invalidates any uncommitted quantity for this supplier/product.
+                        supplierCart = supplierCart.filterNot { it.itemId == productId }
+                        SupplierOperationsDraftState.cart = SupplierOperationsDraftState.cart
+                            .filterNot { it.itemId == productId }
+                    } else {
+                        operationErrorMessage = result.exceptionOrNull()?.message
+                            ?: if (isArabic) "تعذر إزالة الصنف من المورد." else "Could not unlink item from supplier."
+                    }
                     refreshTrigger++
                 }
             },

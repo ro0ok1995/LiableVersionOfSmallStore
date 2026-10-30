@@ -37,15 +37,16 @@ class PurchasesRepository(
     val allPurchases: Flow<List<Purchase>> = purchaseDao.getAllPurchases()
 
     suspend fun generateNextPurchaseInvoiceNumber(): String {
-        val lastInvoice = purchaseDao.getLastPurchaseInvoiceNumber()
-        if (lastInvoice.isNullOrBlank()) return "PUR-000001"
-        val prefix = "PUR-"
-        val num = if (lastInvoice.startsWith(prefix)) {
-            lastInvoice.removePrefix(prefix).toIntOrNull() ?: 0
-        } else {
-            0
+        // Never parse arbitrary PUR-* values (for example PUR-FIX-<id>) as sequence numbers.
+        // Determine the maximum only from the exact legacy numeric format.
+        val existingNumbers = purchaseDao.getAllPurchaseInvoiceNumbers()
+        var candidateNumber = nextNumericSequence(existingNumbers)
+        while (candidateNumber <= Int.MAX_VALUE.toLong()) {
+            val candidate = String.format(Locale.US, "PUR-%06d", candidateNumber)
+            if (candidate !in existingNumbers) return candidate
+            candidateNumber++
         }
-        return String.format(Locale.US, "PUR-%06d", num + 1)
+        throw IllegalStateException("Purchase invoice number sequence is exhausted")
     }
 
     suspend fun getPurchaseById(id: String): Purchase? = purchaseDao.getPurchaseById(id)
@@ -106,8 +107,6 @@ class PurchasesRepository(
             ?: SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
 
         val purchaseId = "pur_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}"
-        val invNum = invoiceNumber?.takeIf { it.isNotBlank() }
-            ?: generateNextPurchaseInvoiceNumber()
 
         val (effectiveFinancialAccountId, effectivePaymentMethodId) = if (paidAmount > 0.0) {
             val accId = financialAccountId ?: "acc_cash"
@@ -129,21 +128,6 @@ class PurchasesRepository(
             Pair(null, null)
         }
 
-        val purchase = Purchase(
-            id = purchaseId,
-            invoiceNumber = invNum,
-            supplierId = supplierId,
-            purchaseDate = dateToUse,
-            totalAmount = totalAmount,
-            paidAmount = postedPaidAmount,
-            creditAmount = creditAmount,
-            paymentStatus = paymentStatus,
-            paymentMethodId = effectivePaymentMethodId,
-            financialAccountId = effectiveFinancialAccountId,
-            notes = notes,
-            status = "ACTIVE"
-        )
-
         val purchaseLines = lines.map { req ->
             PurchaseLine(
                 id = "pur_line_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}",
@@ -156,8 +140,27 @@ class PurchasesRepository(
             )
         }
 
-        // Atomicity requirement: All financial effects commit together or rollback together
-        database.withTransaction {
+        // Invoice allocation and insert share the same SQLite transaction, preventing concurrent duplicate numbers.
+        val purchase = database.withTransaction {
+            val invNum = invoiceNumber?.trim()?.takeIf { it.isNotBlank() }
+                ?: generateNextPurchaseInvoiceNumber()
+            require(!purchaseDao.purchaseInvoiceNumberExists(invNum)) {
+                "Purchase invoice number already exists: $invNum"
+            }
+            val purchase = Purchase(
+                id = purchaseId,
+                invoiceNumber = invNum,
+                supplierId = supplierId,
+                purchaseDate = dateToUse,
+                totalAmount = totalAmount,
+                paidAmount = postedPaidAmount,
+                creditAmount = creditAmount,
+                paymentStatus = paymentStatus,
+                paymentMethodId = effectivePaymentMethodId,
+                financialAccountId = effectiveFinancialAccountId,
+                notes = notes,
+                status = "ACTIVE"
+            )
             if (paidAmount > 0.0) {
                 val accId = effectiveFinancialAccountId ?: error("financial account missing for paid purchase")
                 financialAccountDao.getAccountById(accId)
@@ -218,6 +221,7 @@ class PurchasesRepository(
                 customerName = supplier.name
             ).toEntity()
             transactionDao.insertTransaction(txEntity)
+            purchase
         }
 
         return PurchaseResult(
@@ -228,4 +232,15 @@ class PurchasesRepository(
             financialAccountDeduction = paidAmount
         )
     }
+
+    companion object {
+        /** Ignores migration repair IDs and custom invoice labels; only exact PUR-numeric IDs advance the sequence. */
+        fun nextNumericSequence(existingNumbers: List<String>): Long {
+            val maxNumber = existingNumbers.mapNotNull { value ->
+                Regex("^PUR-(\\d{6,})$").matchEntire(value)?.groupValues?.get(1)?.toLongOrNull()
+            }.maxOrNull() ?: 0L
+            return maxNumber + 1L
+        }
+    }
+
 }
