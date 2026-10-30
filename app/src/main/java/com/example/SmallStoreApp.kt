@@ -47,6 +47,7 @@ import com.example.model.StoreInfo
 import com.example.model.StoreStrings
 import com.example.model.ThemeDisplayMode
 import com.example.model.typedOperationStatus
+import com.example.model.typedTransactionType
 import com.example.ui.components.GlobalBottomBar
 import com.example.ui.components.GlobalDrawerContent
 import com.example.ui.components.GlobalTopBar

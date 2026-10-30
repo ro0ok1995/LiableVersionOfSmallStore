@@ -102,6 +102,7 @@ import com.example.data.db.SaleReturn
 import com.example.data.db.CustomerPayment
 import com.example.data.db.Refund
 import com.example.data.db.Expense
+import com.example.data.db.toTransactionItem
 import com.example.accounting.SupplierBalanceSummary
 import com.example.accounting.CustomerLedgerCalculator
 import com.example.ui.components.RecordSaleReturnDialog
@@ -1552,7 +1553,7 @@ fun HomeScreen(
                 LazyColumn(modifier = Modifier.heightIn(max = 480.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     item { DetailLine(if (isArabic) "الاسم / الجهة" else "Name / Counterparty", tx.customerNameSnapshot.ifBlank { tx.customerName }.ifBlank { tx.title }) }
                     item { DetailLine(if (isArabic) "نوع المعاملة" else "Transaction type", tx.activityType) }
-                    item { DetailLine(if (isArabic) "التاريخ والوقت" else "Date and time", formatActivityTimestamp(tx.createdAtMillis ?: tx.date)) }
+                    item { DetailLine(if (isArabic) "التاريخ والوقت" else "Date and time", tx.createdAtMillis?.let { formatActivityTimestamp(it) } ?: formatActivityTimestamp(tx.date)) }
                     item { DetailLine(if (isArabic) "المبلغ الإجمالي" else "Total amount", String.format(Locale.US, "%,.2f %s", tx.amount, currency)) }
                     if (tx.typedTransactionType == TransactionType.SALE || tx.typedTransactionType == TransactionType.PURCHASE) {
                         item { DetailLine(if (isArabic) "المدفوع" else "Paid", String.format(Locale.US, "%,.2f %s", tx.paidAmount, currency)) }
@@ -2037,7 +2038,7 @@ private fun ActivityRowCard(
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = formatActivityTimestamp(transaction.createdAtMillis ?: transaction.date),
+                    text = transaction.createdAtMillis?.let { formatActivityTimestamp(it) } ?: formatActivityTimestamp(transaction.date),
                     fontSize = 10.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1
