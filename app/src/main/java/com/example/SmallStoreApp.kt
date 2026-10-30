@@ -1197,6 +1197,7 @@ fun SmallStoreApp(
                     initialCashAmount = String.format(Locale.US, "%.0f", uiState.settlementTotal),
                     initialDebtAmount = "0",
                     financialAccounts = uiState.financialAccounts,
+                    errorMessage = uiState.settlementErrorMessage,
                     onDismiss = {
                         focusManager.clearFocus()
                         mainViewModel.dismissSettlementSheet()

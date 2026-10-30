@@ -290,6 +290,82 @@ class SaleEnginePhase3Test {
     // --- End-to-End Database & Repository Integration Tests ---
 
     @Test
+    fun salesRepository_rejectsUnknownCustomerBeforeWritingAnySaleRecords() = runBlocking {
+        val sale = Sale(
+            id = "sale_missing_customer",
+            invoiceNumber = "INV-MISSING-CUSTOMER",
+            customerId = "customer_does_not_exist",
+            saleType = "CREDIT",
+            totalAmount = 10.0,
+            paidAmount = 0.0,
+            creditAmount = 10.0,
+            paymentStatus = "UNPAID",
+            transactionDate = "2026-10-30"
+        )
+        val line = SaleLine(
+            id = "sale_missing_customer_line",
+            saleId = sale.id,
+            productId = null,
+            productNameSnapshot = "صنف اختبار",
+            quantity = 1,
+            unitPrice = 10.0,
+            costPriceAtSale = 0.0,
+            subtotal = 10.0
+        )
+
+        try {
+            repository.salesRepository.createSale(sale, listOf(line))
+            fail("A sale for a customer absent from the database must be rejected")
+        } catch (error: IllegalArgumentException) {
+            assertTrue(error.message?.contains("Customer not found") == true)
+        }
+
+        assertTrue(repository.salesRepository.getAllSalesSync().isEmpty())
+        assertTrue(db.transactionDao().getAllTransactionsSync().isEmpty())
+    }
+
+    @Test
+    fun completeSettlement_preservesCartAndShowsErrorWhenCustomerSaleCannotBeSaved() = runBlocking {
+        repository.ensureDefaultFinancialConfiguration()
+        val customer = CustomerEntity(
+            id = "cust_sale_error_test",
+            customerName = "عميل اختبار",
+            balance = 0.0,
+            totalDebt = 0.0,
+            phone = "0500000000",
+            lastTransactionDate = "2026-10-30",
+            hasRecentActivity = false
+        )
+        db.customerDao().insertCustomer(customer)
+
+        val missingProduct = ProductItem(
+            id = "product_missing_from_database",
+            name = "صنف غير مسجل للاختبار",
+            price = 10.0,
+            costPrice = 5.0,
+            category = "اختبار",
+            unit = "حبة"
+        )
+        val viewModel = MainViewModel(
+            application = ApplicationProvider.getApplicationContext(),
+            repository = repository
+        )
+        ShadowLooper.idleMainLooper()
+        viewModel.setPurchasesCustomer(customer.toModel())
+        viewModel.openPurchasesSettlement(listOf(CartItem(missingProduct, 1)))
+
+        viewModel.completeSettlement(cashAmount = 10.0, debtAmount = 0.0, notes = "اختبار معالجة الخطأ")
+        waitForCondition { viewModel.uiState.value.settlementErrorMessage != null }
+
+        val stateAfterFailure = viewModel.uiState.value
+        assertTrue(stateAfterFailure.showSettlementSheet)
+        assertEquals(1, stateAfterFailure.cart.size)
+        assertTrue(stateAfterFailure.settlementErrorMessage?.isNotBlank() == true)
+        assertTrue(repository.salesRepository.getAllSalesSync().isEmpty())
+        assertTrue(db.transactionDao().getAllTransactionsSync().isEmpty())
+    }
+
+    @Test
     fun test1_and_test2_completeSettlementCreatesSaleAndSaleLinesInDatabase() = runBlocking {
         // Setup customer and product in database
         val customer = CustomerEntity(

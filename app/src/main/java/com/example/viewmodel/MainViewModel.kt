@@ -58,6 +58,7 @@ import com.example.model.PaymentStatus
 import com.example.model.LegacyAccountingBridge
 import com.example.ui.components.SettlementContext
 import com.example.util.ProductImageHelper
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -76,6 +77,7 @@ data class MainUiState(
     val isDrawerOpen: Boolean = false,
     val showActionSheet: Boolean = false,
     val showSettlementSheet: Boolean = false,
+    val settlementErrorMessage: String? = null,
     val settlementTotal: Double = 0.0,
     val settlementContext: SettlementContext = SettlementContext.RECORD_TRANSACTION,
 
@@ -1350,7 +1352,7 @@ class MainViewModel @JvmOverloads constructor(
     // PURCHASES / CART
     fun setPurchasesCustomer(customer: CustomerAccount?) {
         if (customer?.isArchived == true) return
-        _uiState.update { it.copy(purchasesCustomer = customer) }
+        _uiState.update { it.copy(purchasesCustomer = customer, settlementErrorMessage = null) }
     }
 
     fun setPurchasesSearchQuery(query: String) {
@@ -1432,13 +1434,14 @@ class MainViewModel @JvmOverloads constructor(
                 cart = cartItems,
                 settlementTotal = total,
                 settlementContext = SettlementContext.RECORD_TRANSACTION,
+                settlementErrorMessage = null,
                 showSettlementSheet = true
             )
         }
     }
 
     fun dismissSettlementSheet() {
-        _uiState.update { it.copy(showSettlementSheet = false) }
+        _uiState.update { it.copy(showSettlementSheet = false, settlementErrorMessage = null) }
     }
 
     fun completeSettlement(cashAmount: Double, debtAmount: Double, notes: String, financialAccountId: String? = null) {
@@ -1500,53 +1503,84 @@ class MainViewModel @JvmOverloads constructor(
             transactionId = txId
         )
 
+        _uiState.update { it.copy(settlementErrorMessage = null) }
         viewModelScope.launch {
-            val invoiceNumber = repository.salesRepository.getNextInvoiceNumber()
-            val sale = Sale(
-                id = txId,
-                invoiceNumber = invoiceNumber,
-                customerId = customer?.id,
-                saleType = saleType.name,
-                totalAmount = total,
-                paidAmount = cashAmount,
-                creditAmount = debtAmount,
-                paymentStatus = paymentStatus.name,
-                transactionDate = todayDate,
-                createdAt = System.currentTimeMillis(),
-                updatedAt = System.currentTimeMillis(),
-                status = "ACTIVE",
-                financialAccountId = financialAccountId ?: "acc_cash"
-            )
-
-            val saleLines = cartSnapshot.mapIndexed { index, cartItem ->
-                SaleLine(
-                    id = "${txId}_line_${index + 1}",
-                    saleId = txId,
-                    productId = cartItem.product.id,
-                    productNameSnapshot = cartItem.product.name,
-                    quantity = cartItem.quantity,
-                    unitPrice = cartItem.product.price,
-                    costPriceAtSale = cartItem.product.costPrice,
-                    subtotal = cartItem.product.price * cartItem.quantity,
-                    costPriceKnown = cartItem.product.costPriceKnown
+            try {
+                val invoiceNumber = repository.salesRepository.getNextInvoiceNumber()
+                val sale = Sale(
+                    id = txId,
+                    invoiceNumber = invoiceNumber,
+                    customerId = customer?.id,
+                    saleType = saleType.name,
+                    totalAmount = total,
+                    paidAmount = cashAmount,
+                    creditAmount = debtAmount,
+                    paymentStatus = paymentStatus.name,
+                    transactionDate = todayDate,
+                    createdAt = System.currentTimeMillis(),
+                    updatedAt = System.currentTimeMillis(),
+                    status = "ACTIVE",
+                    financialAccountId = financialAccountId ?: "acc_cash"
                 )
-            }
 
-            repository.salesRepository.createSale(
-                sale = sale,
-                lines = saleLines,
-                customerNameSnapshot = customer?.customerName ?: "عميل نقدي",
-                notes = notes
-            )
-            if (updatedCustomer != null) repository.updateCustomer(updatedCustomer)
-            repository.addNotification(notif)
-            _uiState.update {
-                it.copy(
-                    cart = emptyList(),
-                    showSettlementSheet = false,
-                    currentDestination = NavDestination.HOME,
-                    activeBottomNav = NavDestination.HOME
+                val saleLines = cartSnapshot.mapIndexed { index, cartItem ->
+                    SaleLine(
+                        id = "${txId}_line_${index + 1}",
+                        saleId = txId,
+                        productId = cartItem.product.id,
+                        productNameSnapshot = cartItem.product.name,
+                        quantity = cartItem.quantity,
+                        unitPrice = cartItem.product.price,
+                        costPriceAtSale = cartItem.product.costPrice,
+                        subtotal = cartItem.product.price * cartItem.quantity,
+                        costPriceKnown = cartItem.product.costPriceKnown
+                    )
+                }
+
+                // The sale, legacy transaction, lines and stock movements remain atomic in SalesRepository.
+                repository.salesRepository.createSale(
+                    sale = sale,
+                    lines = saleLines,
+                    customerNameSnapshot = customer?.customerName ?: "عميل نقدي",
+                    notes = notes
                 )
+
+                // The authoritative sale is committed. Close checkout before best-effort metadata writes
+                // so a secondary notification/customer-metadata failure cannot cause a duplicate retry.
+                _uiState.update {
+                    it.copy(
+                        cart = emptyList(),
+                        showSettlementSheet = false,
+                        settlementErrorMessage = null,
+                        currentDestination = NavDestination.HOME,
+                        activeBottomNav = NavDestination.HOME
+                    )
+                }
+
+                if (updatedCustomer != null) {
+                    runCatching { repository.updateCustomer(updatedCustomer) }
+                        .onFailure { android.util.Log.e("MainViewModel", "Sale saved, but customer activity metadata update failed", it) }
+                }
+                runCatching { repository.addNotification(notif) }
+                    .onFailure { android.util.Log.e("MainViewModel", "Sale saved, but notification creation failed", it) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                android.util.Log.e("MainViewModel", "Could not complete customer sale", error)
+                val message = when {
+                    error.message?.contains("Customer not found", ignoreCase = true) == true ->
+                        if (state.languageMode == com.example.model.LanguageMode.ARABIC) "العميل المحدد غير موجود في قاعدة البيانات. أعد اختيار العميل وحاول مرة أخرى." else "The selected customer no longer exists. Select the customer again and retry."
+                    error.message?.contains("archived", ignoreCase = true) == true ->
+                        if (state.languageMode == com.example.model.LanguageMode.ARABIC) "لا يمكن تسجيل فاتورة لعميل مؤرشف." else "Cannot record a sale for an archived customer."
+                    error.message?.contains("Insufficient stock", ignoreCase = true) == true ->
+                        if (state.languageMode == com.example.model.LanguageMode.ARABIC) "الكمية المطلوبة غير متوفرة في المخزون." else "The requested quantity is not available in stock."
+                    else -> if (state.languageMode == com.example.model.LanguageMode.ARABIC) {
+                        "تعذر حفظ الفاتورة. لم يتم إتمام البيع، وبقيت السلة كما هي. التفاصيل: ${error.message ?: "خطأ غير معروف"}"
+                    } else {
+                        "Could not save the invoice. The sale was not completed and your cart was preserved. Details: ${error.message ?: "Unknown error"}"
+                    }
+                }
+                _uiState.update { current -> current.copy(settlementErrorMessage = message) }
             }
         }
     }

@@ -102,6 +102,7 @@ fun UnifiedSettlementSheet(
     initialDebtAmount: String = "40",
     initialNotes: String = "",
     financialAccounts: List<FinancialAccount> = emptyList(),
+    errorMessage: String? = null,
     onDismiss: () -> Unit = {},
     onComplete: (cash: Double, debt: Double, notes: String, financialAccountId: String?) -> Unit = { _, _, _, _ -> }
 ) {
@@ -138,6 +139,7 @@ fun UnifiedSettlementSheet(
                 initialDebtAmount = initialDebtAmount,
                 initialNotes = initialNotes,
                 financialAccounts = financialAccounts,
+                errorMessage = errorMessage,
                 onComplete = onComplete
             )
         }
@@ -155,6 +157,7 @@ fun UnifiedSettlementSheetContent(
     initialDebtAmount: String = "40",
     initialNotes: String = "",
     financialAccounts: List<FinancialAccount> = emptyList(),
+    errorMessage: String? = null,
     onComplete: (cash: Double, debt: Double, notes: String, financialAccountId: String?) -> Unit = { _, _, _, _ -> }
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
@@ -274,6 +277,26 @@ fun UnifiedSettlementSheetContent(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp)
         ) {
+            if (!errorMessage.isNullOrBlank()) {
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp)
+                        .testTag("settlement_error_message")
+                ) {
+                    Text(
+                        text = errorMessage,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+            }
+
             // PROMINENT TRANSACTION TOTAL AT TOP
             Card(
                 shape = RoundedCornerShape(16.dp),

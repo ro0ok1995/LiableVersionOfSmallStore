@@ -70,6 +70,13 @@ class SalesRepository(
         require(sale.customerId != null || sale.creditAmount <= 0.001) {
             "A credit or mixed sale requires a customer; anonymous sales must be fully cash"
         }
+        // Resolve persistent identity before any insert. UI state may outlive a restore or customer refresh.
+        // A missing/archived customer must fail with a domain error, not an opaque SQLite FK crash.
+        sale.customerId?.let { customerId ->
+            val customer = customerDao.getCustomerById(customerId)
+                ?: throw IllegalArgumentException("Customer not found: $customerId")
+            require(!customer.isArchived) { "Customer is archived: $customerId" }
+        }
         require(lines.map { it.id }.distinct().size == lines.size) { "Duplicate sale line IDs are not allowed" }
         require(lines.all { it.saleId == sale.id }) { "Every sale line must belong to the sale" }
         val calculatedTotal = com.example.accounting.AccountingDecimal.money(lines.sumOf { it.subtotal })
