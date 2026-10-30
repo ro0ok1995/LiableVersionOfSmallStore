@@ -249,6 +249,12 @@ class SaleEnginePhase3Test {
     }
 
     @Test
+    fun invoiceNumberGenerator_doesNotParseDemoInvoiceSuffixAsNumeric() {
+        // Imported demo invoice IDs are not part of the numeric INV sequence.
+        assertEquals("INV-000001", StoreRepository.generateNextInvoiceNumber("INV-DEMO-005"))
+    }
+
+    @Test
     fun sale_toTransactionItem_preservesBothTypedAndLegacyFields() {
         val sale = Sale(
             id = "sale_test",

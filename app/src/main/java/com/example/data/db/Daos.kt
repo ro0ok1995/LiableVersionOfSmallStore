@@ -353,7 +353,7 @@ interface SaleDao {
     @Query("SELECT * FROM sales WHERE invoiceNumber = :invoiceNumber LIMIT 1")
     suspend fun getSaleByInvoiceNumber(invoiceNumber: String): Sale?
 
-    @Query("SELECT invoiceNumber FROM sales WHERE invoiceNumber LIKE 'INV-%' ORDER BY invoiceNumber DESC LIMIT 1")
+    @Query("SELECT invoiceNumber FROM sales WHERE invoiceNumber GLOB 'INV-[0-9]*' AND SUBSTR(invoiceNumber, 5) NOT GLOB '*[^0-9]*' ORDER BY CAST(SUBSTR(invoiceNumber, 5) AS INTEGER) DESC LIMIT 1")
     suspend fun getLastInvoiceNumber(): String?
 
     @Query("SELECT COUNT(*) FROM sales")
