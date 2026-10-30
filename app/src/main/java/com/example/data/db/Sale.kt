@@ -110,7 +110,8 @@ data class Sale(
             paymentStatus = typedPaymentStatus,
             operationStatus = typedStatus,
             paidAmount = paidAmount,
-            creditAmount = creditAmount
+            creditAmount = creditAmount,
+            createdAtMillis = createdAt
         )
     }
 }

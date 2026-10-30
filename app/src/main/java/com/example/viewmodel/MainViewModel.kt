@@ -91,6 +91,11 @@ data class MainUiState(
     val transactions: List<TransactionItem> = emptyList(),
     val archivedTransactions: List<TransactionItem> = emptyList(),
     val allTransactions: List<TransactionItem> = emptyList(),
+    val reversals: List<com.example.data.db.Reversal> = emptyList(),
+    val sales: List<Sale> = emptyList(),
+    val saleReturns: List<SaleReturn> = emptyList(),
+    val customerPayments: List<com.example.data.db.CustomerPayment> = emptyList(),
+    val refunds: List<com.example.data.db.Refund> = emptyList(),
     val notifications: List<NotificationItem> = emptyList(),
     val products: List<ProductItem> = emptyList(),
     val archivedProducts: List<ProductItem> = emptyList(),
@@ -259,6 +264,36 @@ class MainViewModel @JvmOverloads constructor(
         viewModelScope.launch {
             repository.allTransactions.collect { list ->
                 _uiState.update { it.copy(allTransactions = list) }
+            }
+        }
+
+        viewModelScope.launch {
+            repository.allReversals.collect { list ->
+                _uiState.update { it.copy(reversals = list) }
+            }
+        }
+
+        viewModelScope.launch {
+            repository.allSales.collect { list ->
+                _uiState.update { it.copy(sales = list) }
+            }
+        }
+
+        viewModelScope.launch {
+            repository.allSaleReturns.collect { list ->
+                _uiState.update { it.copy(saleReturns = list) }
+            }
+        }
+
+        viewModelScope.launch {
+            repository.allCustomerPayments.collect { list ->
+                _uiState.update { it.copy(customerPayments = list) }
+            }
+        }
+
+        viewModelScope.launch {
+            repository.allRefunds.collect { list ->
+                _uiState.update { it.copy(refunds = list) }
             }
         }
 
@@ -841,6 +876,10 @@ class MainViewModel @JvmOverloads constructor(
     suspend fun getPurchaseLines(purchaseId: String): List<PurchaseLine> {
         return supplierPurchaseViewModel.getPurchaseLines(purchaseId)
     }
+
+    suspend fun getSaleReturnLines(returnId: String): List<com.example.data.db.SaleReturnLine> = repository.getReturnLines(returnId)
+
+    suspend fun getPurchaseReturnLines(returnId: String): List<com.example.data.db.PurchaseReturnLine> = repository.getPurchaseReturnLines(returnId)
 
     suspend fun getPurchasesForSupplier(supplierId: String): List<Purchase> {
         return supplierPurchaseViewModel.getPurchasesForSupplier(supplierId)

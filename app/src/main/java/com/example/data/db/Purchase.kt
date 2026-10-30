@@ -96,6 +96,7 @@ fun Purchase.toTransactionItem(supplierName: String = ""): TransactionItem {
         paymentStatus = typedPaymentStatus,
         operationStatus = typedOperationStatus,
         paidAmount = paidAmount,
-        creditAmount = creditAmount
+        creditAmount = creditAmount,
+        createdAtMillis = createdAt
     )
 }

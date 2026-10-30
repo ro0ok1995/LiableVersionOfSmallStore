@@ -414,6 +414,69 @@ fun SmallStoreApp(
                                     supplierPurchases = uiState.purchases,
                                     supplierPayments = uiState.supplierPayments,
                                     supplierReturns = uiState.purchaseReturns,
+                                    reversals = uiState.reversals,
+                                    sales = uiState.sales,
+                                    saleReturns = uiState.saleReturns,
+                                    customerPayments = uiState.customerPayments,
+                                    refunds = uiState.refunds,
+                                    expenseRecords = uiState.expenses,
+                                    onLoadActivityMetadata = { tx ->
+                                        val sourceId = tx.relatedTransactionId ?: tx.id
+                                        val paymentMethodId: String?
+                                        val financialAccountId: String?
+                                        when (tx.typedTransactionType) {
+                                            com.example.model.TransactionType.SALE -> {
+                                                val record = uiState.sales.firstOrNull { it.id == sourceId }
+                                                paymentMethodId = null
+                                                financialAccountId = record?.financialAccountId
+                                            }
+                                            com.example.model.TransactionType.PURCHASE -> {
+                                                val record = uiState.purchases.firstOrNull { it.id == sourceId }
+                                                paymentMethodId = record?.paymentMethodId
+                                                financialAccountId = record?.financialAccountId
+                                            }
+                                            com.example.model.TransactionType.CUSTOMER_PAYMENT -> {
+                                                val record = uiState.customerPayments.firstOrNull { it.id == sourceId }
+                                                paymentMethodId = record?.paymentMethodId
+                                                financialAccountId = record?.financialAccountId
+                                            }
+                                            com.example.model.TransactionType.SUPPLIER_PAYMENT -> {
+                                                val record = uiState.supplierPayments.firstOrNull { it.id == sourceId }
+                                                paymentMethodId = record?.paymentMethodId
+                                                financialAccountId = record?.financialAccountId
+                                            }
+                                            com.example.model.TransactionType.CUSTOMER_REFUND -> {
+                                                val record = uiState.refunds.firstOrNull { it.id == sourceId }
+                                                paymentMethodId = record?.paymentMethodId
+                                                financialAccountId = record?.financialAccountId
+                                            }
+                                            com.example.model.TransactionType.PURCHASE_RETURN -> {
+                                                val record = uiState.purchaseReturns.firstOrNull { it.id == sourceId }
+                                                paymentMethodId = null
+                                                financialAccountId = record?.financialAccountId
+                                            }
+                                            com.example.model.TransactionType.EXPENSE -> {
+                                                val record = uiState.expenses.firstOrNull { it.id == sourceId }
+                                                paymentMethodId = record?.paymentMethodId
+                                                financialAccountId = record?.financialAccountId
+                                            }
+                                            else -> { paymentMethodId = null; financialAccountId = null }
+                                        }
+                                        buildList {
+                                            paymentMethodId?.let { id -> uiState.paymentMethods.firstOrNull { it.id == id }?.let { add((if (uiState.languageMode == LanguageMode.ARABIC) "وسيلة الدفع" else "Payment method") to it.name) } }
+                                            financialAccountId?.let { id -> uiState.financialAccounts.firstOrNull { it.id == id }?.let { add((if (uiState.languageMode == LanguageMode.ARABIC) "الحساب المالي" else "Financial account") to it.name) } }
+                                        }
+                                    },
+                                    onLoadActivityDetails = { tx ->
+                                        val sourceId = tx.relatedTransactionId ?: tx.id
+                                        when (tx.typedTransactionType) {
+                                            com.example.model.TransactionType.SALE -> mainViewModel.getSaleLinesForSale(sourceId).map { line -> "${line.productNameSnapshot} · ${line.quantity} × ${String.format(java.util.Locale.US, "%,.2f", line.unitPrice)} = ${String.format(java.util.Locale.US, "%,.2f", line.subtotal)}" }
+                                            com.example.model.TransactionType.PURCHASE -> mainViewModel.getPurchaseLines(sourceId).map { line -> "${line.productNameSnapshot} · ${line.quantity} × ${String.format(java.util.Locale.US, "%,.2f", line.unitCost)} = ${String.format(java.util.Locale.US, "%,.2f", line.subtotal)}" }
+                                            com.example.model.TransactionType.SALE_RETURN -> mainViewModel.getSaleReturnLines(sourceId).map { line -> "${line.productNameSnapshot} · ${line.quantity} × ${String.format(java.util.Locale.US, "%,.2f", line.unitPrice)} = ${String.format(java.util.Locale.US, "%,.2f", line.subtotal)}" }
+                                            com.example.model.TransactionType.PURCHASE_RETURN -> mainViewModel.getPurchaseReturnLines(sourceId).map { line -> "${line.productNameSnapshot} · ${line.quantity} × ${String.format(java.util.Locale.US, "%,.2f", line.unitCost)} = ${String.format(java.util.Locale.US, "%,.2f", line.subtotal)}" }
+                                            else -> emptyList()
+                                        }
+                                    },
                                     onGetSupplierBalance = { supplierId -> mainViewModel.getSupplierBalance(supplierId) },
                                     onNavigateToSupplierProfile = { supplier ->
                                         mainViewModel.selectSupplierDetails(supplier)

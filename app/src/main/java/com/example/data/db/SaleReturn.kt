@@ -73,7 +73,8 @@ fun SaleReturn.toTransactionItem(customerNameSnapshot: String = "", invoiceNumbe
         paymentStatus = null,
         operationStatus = com.example.model.OperationStatus.ACTIVE,
         paidAmount = 0.0,
-        creditAmount = 0.0
+        creditAmount = 0.0,
+        createdAtMillis = createdAt
     )
 }
 

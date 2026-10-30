@@ -75,6 +75,7 @@ fun SupplierPayment.toTransactionItem(supplierName: String = ""): TransactionIte
         paymentStatus = null,
         operationStatus = typedOperationStatus,
         paidAmount = amount,
-        creditAmount = 0.0
+        creditAmount = 0.0,
+        createdAtMillis = createdAt
     )
 }

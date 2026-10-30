@@ -83,6 +83,7 @@ fun PurchaseReturn.toTransactionItem(supplierName: String = "", invoiceNumber: S
         paymentStatus = null,
         operationStatus = typedOperationStatus,
         paidAmount = 0.0,
-        creditAmount = 0.0
+        creditAmount = 0.0,
+        createdAtMillis = createdAt
     )
 }

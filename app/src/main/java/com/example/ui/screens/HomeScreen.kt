@@ -97,6 +97,11 @@ import com.example.data.db.Supplier
 import com.example.data.db.Purchase
 import com.example.data.db.SupplierPayment
 import com.example.data.db.PurchaseReturn
+import com.example.data.db.Reversal
+import com.example.data.db.SaleReturn
+import com.example.data.db.CustomerPayment
+import com.example.data.db.Refund
+import com.example.data.db.Expense
 import com.example.accounting.SupplierBalanceSummary
 import com.example.accounting.CustomerLedgerCalculator
 import com.example.ui.components.RecordSaleReturnDialog
@@ -118,6 +123,10 @@ import com.example.viewmodel.DateFilterUtils
 import com.example.viewmodel.DebtAgingUtils
 import com.example.viewmodel.StoreDebtAgingSummary
 import java.time.LocalDate
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -160,6 +169,14 @@ fun HomeScreen(
     supplierPurchases: List<Purchase> = emptyList(),
     supplierPayments: List<SupplierPayment> = emptyList(),
     supplierReturns: List<PurchaseReturn> = emptyList(),
+    reversals: List<Reversal> = emptyList(),
+    sales: List<Sale> = emptyList(),
+    saleReturns: List<SaleReturn> = emptyList(),
+    customerPayments: List<CustomerPayment> = emptyList(),
+    refunds: List<Refund> = emptyList(),
+    expenseRecords: List<Expense> = emptyList(),
+    onLoadActivityDetails: (suspend (TransactionItem) -> List<String>)? = null,
+    onLoadActivityMetadata: ((TransactionItem) -> List<Pair<String, String>>)? = null,
     onGetSupplierBalance: (suspend (String) -> SupplierBalanceSummary)? = null
 ) {
     val isArabic = languageMode == LanguageMode.ARABIC
@@ -173,6 +190,20 @@ fun HomeScreen(
     var supplierSearchQuery by remember { mutableStateOf("") }
     var showSupplierPayablesDialog by remember { mutableStateOf(false) }
     var showSupplierAdvancesDialog by remember { mutableStateOf(false) }
+    var selectedActivityDetails by remember { mutableStateOf<TransactionItem?>(null) }
+    var selectedActivityLines by remember { mutableStateOf<List<String>>(emptyList()) }
+    var selectedActivityMetadata by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    var isLoadingActivityLines by remember { mutableStateOf(false) }
+    LaunchedEffect(selectedActivityDetails?.id) {
+        val selected = selectedActivityDetails
+        selectedActivityLines = emptyList()
+        selectedActivityMetadata = selected?.let { onLoadActivityMetadata?.invoke(it) }.orEmpty()
+        if (selected != null && onLoadActivityDetails != null) {
+            isLoadingActivityLines = true
+            selectedActivityLines = runCatching { onLoadActivityDetails(selected) }.getOrDefault(emptyList())
+            isLoadingActivityLines = false
+        }
+    }
 
 
     // CURRENT BALANCES (Never filtered by period):
@@ -274,9 +305,22 @@ fun HomeScreen(
             DateFilterUtils.isDateInPeriod(tx.date, selectedPeriod, customStartDate, customEndDate)
         }
     }
-    val periodTransactions = remember(allPeriodTransactions, selectedCustomer, selectedDashboardTab) {
-        if (selectedDashboardTab == 0 && selectedCustomer != null) allPeriodTransactions.filter { it.customerId == selectedCustomer.id }
-        else allPeriodTransactions
+    val timestampEnrichedTransactions = remember(allTransactions, sales, saleReturns, customerPayments, refunds, expenseRecords) {
+        val saleCreatedAt = sales.associate { it.id to it.createdAt }
+        val returnCreatedAt = saleReturns.associate { it.id to it.createdAt }
+        val paymentCreatedAt = customerPayments.associate { it.id to it.createdAt }
+        val refundCreatedAt = refunds.associate { it.id to it.createdAt }
+        val expenseCreatedAt = expenseRecords.associate { it.id to it.createdAt }
+        allTransactions.map { tx ->
+            tx.copy(createdAtMillis = tx.createdAtMillis ?: saleCreatedAt[tx.id] ?: returnCreatedAt[tx.id] ?: paymentCreatedAt[tx.id] ?: refundCreatedAt[tx.id] ?: expenseCreatedAt[tx.id])
+        }
+    }
+    val timestampEnrichedPeriodTransactions = remember(timestampEnrichedTransactions, selectedPeriod, customStartDate, customEndDate) {
+        timestampEnrichedTransactions.filter { tx -> DateFilterUtils.isDateInPeriod(tx.date, selectedPeriod, customStartDate, customEndDate) }
+    }
+    val periodTransactions = remember(timestampEnrichedPeriodTransactions, selectedCustomer, selectedDashboardTab) {
+        if (selectedDashboardTab == 0 && selectedCustomer != null) timestampEnrichedPeriodTransactions.filter { it.customerId == selectedCustomer.id }
+        else timestampEnrichedPeriodTransactions
     }
 
     // Period KPI metrics always use the store-wide period, never the search scope.
@@ -353,7 +397,7 @@ fun HomeScreen(
                 amount = purchase.totalAmount,
                 isCredit = purchase.creditAmount > 0.0,
                 date = purchase.purchaseDate,
-                relativeTime = "الآن",
+                relativeTime = formatActivityTimestamp(purchase.createdAt),
                 notes = purchase.notes ?: (if (isArabic) "مشتريات من مورد" else "Purchase from supplier"),
                 customerId = purchase.supplierId,
                 isArchived = false,
@@ -364,7 +408,8 @@ fun HomeScreen(
                 paymentStatus = purchase.typedPaymentStatus,
                 operationStatus = purchase.typedOperationStatus,
                 paidAmount = purchase.paidAmount,
-                creditAmount = purchase.creditAmount
+                creditAmount = purchase.creditAmount,
+                createdAtMillis = purchase.createdAt
             )
         }
 
@@ -386,7 +431,7 @@ fun HomeScreen(
                 amount = payment.amount,
                 isCredit = false,
                 date = payment.paymentDate,
-                relativeTime = "الآن",
+                relativeTime = formatActivityTimestamp(payment.createdAt),
                 notes = payment.notes ?: (if (isArabic) "سداد للمورد" else "Payment to supplier"),
                 customerId = payment.supplierId,
                 isArchived = false,
@@ -397,7 +442,8 @@ fun HomeScreen(
                 paymentStatus = null,
                 operationStatus = payment.typedOperationStatus,
                 paidAmount = payment.amount,
-                creditAmount = 0.0
+                creditAmount = 0.0,
+                createdAtMillis = payment.createdAt
             )
         }
 
@@ -419,7 +465,7 @@ fun HomeScreen(
                 amount = ret.amount,
                 isCredit = false,
                 date = ret.returnDate,
-                relativeTime = "الآن",
+                relativeTime = formatActivityTimestamp(ret.createdAt),
                 notes = ret.reason ?: (if (isArabic) "مرتجع بضاعة لمورد" else "Return to supplier"),
                 customerId = ret.supplierId,
                 isArchived = false,
@@ -430,16 +476,46 @@ fun HomeScreen(
                 paymentStatus = null,
                 operationStatus = ret.typedOperationStatus,
                 paidAmount = 0.0,
-                creditAmount = 0.0
+                creditAmount = 0.0,
+                createdAtMillis = ret.createdAt
             )
         }
 
         (purchaseItems + paymentItems + returnItems)
             .distinctBy { it.id }
-            .sortedWith(compareByDescending<TransactionItem> { it.date }.thenByDescending { it.id })
+            .sortedWith(compareByDescending<TransactionItem> { activitySortMillis(it) }.thenByDescending { it.id })
     }
 
-    // Recent store activities (top 6 recent items, filtered by dashboard tab and tab-specific search query)
+    // A reversal is a separate, newer audit event. Keep the original transaction (marked reversed)
+    // and add this event at reversedAt so it naturally appears at the top of the activity timeline.
+    val reversalActivities = remember(reversals, timestampEnrichedTransactions, supplierPurchases, supplierPayments, supplierReturns, suppliers, selectedPeriod, customStartDate, customEndDate) {
+        val supplierNames = suppliers.associate { it.id to it.name }
+        val originals = buildList {
+            addAll(timestampEnrichedTransactions)
+            addAll(supplierPurchases.map { it.toTransactionItem(supplierNames[it.supplierId].orEmpty()) })
+            addAll(supplierPayments.map { it.toTransactionItem(supplierNames[it.supplierId].orEmpty()) })
+            addAll(supplierReturns.map { it.toTransactionItem(supplierNames[it.supplierId].orEmpty()) })
+        }.associateBy { it.id }
+        reversals.filter { it.status == "ACTIVE" }.mapNotNull { reversal ->
+            val original = originals[reversal.originalTransactionId] ?: return@mapNotNull null
+            if (!DateFilterUtils.isDateInPeriod(reversal.reversedAt, selectedPeriod, customStartDate, customEndDate)) return@mapNotNull null
+            original.copy(
+                id = "reversal:${reversal.id}",
+                title = if (isArabic) "إلغاء معاملة: ${original.title}" else "Transaction reversal: ${original.title}",
+                activityType = if (isArabic) "قيد عكسي / إلغاء معاملة" else "Reversal",
+                date = reversal.reversedAt,
+                relativeTime = formatActivityTimestamp(reversal.reversedAt),
+                notes = reversal.reasonLabelSnapshot.ifBlank { reversal.reason },
+                transactionType = original.transactionType,
+                operationStatus = OperationStatus.ACTIVE,
+                createdAtMillis = parseActivityTimestamp(reversal.reversedAt),
+                isReversalEvent = true,
+                relatedTransactionId = original.id
+            )
+        }
+    }
+
+    // Recent store activities (top 30 recent items, filtered by dashboard tab and tab-specific search query)
     val recentActivities = remember(
         selectedDashboardTab,
         periodTransactions,
@@ -449,7 +525,8 @@ fun HomeScreen(
         supplierPeriodActivities,
         supplierSearchQuery,
         selectedSupplier,
-        suppliers
+        suppliers,
+        reversalActivities
     ) {
         if (selectedDashboardTab == 1) {
             // SUPPLIER DASHBOARD: Real supplier purchases, payments, and returns
@@ -469,7 +546,10 @@ fun HomeScreen(
             } else {
                 supplierPeriodActivities
             }
-            filteredBySelectedSupplier.sortedWith(compareByDescending<TransactionItem> { it.date }.thenByDescending { it.id }).take(30)
+            (filteredBySelectedSupplier + reversalActivities.filter { it.isReversalEvent && suppliers.any { supplier -> supplier.id == it.customerId } && (selectedSupplier == null || it.customerId == selectedSupplier?.id) })
+                .filter { trimmedSupplierQuery.isBlank() || it.customerNameSnapshot.contains(trimmedSupplierQuery, true) || it.title.contains(trimmedSupplierQuery, true) }
+                .distinctBy { it.id }
+                .sortedWith(compareByDescending<TransactionItem> { activitySortMillis(it) }.thenByDescending { it.id }).take(30)
         } else {
             // CUSTOMER DASHBOARD: Sales, customer payments, sale returns
             val trimmedQuery = searchQuery.trim()
@@ -501,7 +581,13 @@ fun HomeScreen(
                     tx.customerNameSnapshot.contains(trimmedQuery, ignoreCase = true)
                 }
             }
-            filtered.sortedWith(compareByDescending<TransactionItem> { it.date }.thenByDescending { it.id }).take(30)
+            (filtered + reversalActivities.filter {
+                it.isReversalEvent && suppliers.none { supplier -> supplier.id == it.customerId } &&
+                    (selectedCustomer == null || it.customerId == selectedCustomer.id)
+            })
+                .filter { trimmedQuery.isBlank() || it.customerNameSnapshot.contains(trimmedQuery, true) || it.title.contains(trimmedQuery, true) }
+                .distinctBy { it.id }
+                .sortedWith(compareByDescending<TransactionItem> { activitySortMillis(it) }.thenByDescending { it.id }).take(30)
         }
     }
 
@@ -1018,6 +1104,7 @@ fun HomeScreen(
                                 valueColor = MaterialTheme.colorScheme.error,
                                 containerColor = MaterialTheme.colorScheme.surface,
                                 testTag = "kpi_supplier_payables",
+                                helpText = if (isArabic) "يمثل مجموع الالتزامات الحالية للمحل تجاه الموردين النشطين، وليس ديون الفترة المختارة فقط. يحسب من الأرصدة الافتتاحية ومشتريات الآجل والتسويات، بعد طرح مدفوعات الموردين وتخفيضات المرتجعات والتسويات المدينة. تستبعد العمليات الملغاة. الأرصدة المقدمة للموردين تعرض منفصلة ولا تخصم من مستحقات مورد آخر." else "Current net obligations to active suppliers, not payables created only in the selected period. Calculated from opening balances, credit purchases and credit adjustments, less supplier payments, payable-reducing returns and debit adjustments. Reversed operations are excluded. Supplier advances are shown separately and are not offset against another supplier.",
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -1293,7 +1380,7 @@ fun HomeScreen(
                                 tx.activityType.contains("فاتورة") || tx.activityType.contains("بيع")
                             }
                             val isReversed = tx.typedOperationStatus == OperationStatus.REVERSED
-                            val isReturnEligible = !isReversed && isSale
+                            val isReturnEligible = !isReversed && !tx.isReversalEvent && isSale
 
                             val isSupplierTx = when (tx.typedTransactionType) {
                                 TransactionType.PURCHASE,
@@ -1378,7 +1465,8 @@ fun HomeScreen(
                                 isArabic = isArabic,
                                 onClick = navigationAction,
                                 onCustomerClick = navigationAction,
-                                onReverseClick = if (onReverseTransaction != null && !isReversed) {
+                                onDetailsClick = { selectedActivityDetails = tx },
+                                onReverseClick = if (onReverseTransaction != null && !isReversed && !tx.isReversalEvent) {
                                     { transactionToReverse = tx }
                                 } else null,
                                 onReturnClick = if (onReturnTransaction != null && onLoadReturnDetails != null && isReturnEligible) {
@@ -1452,6 +1540,36 @@ fun HomeScreen(
                 onSetCustomDateRange(start, end)
             },
             onDismiss = onDismissCustomDatePicker
+        )
+    }
+
+    if (selectedActivityDetails != null) {
+        val tx = selectedActivityDetails!!
+        AlertDialog(
+            onDismissRequest = { selectedActivityDetails = null },
+            title = { Text(if (isArabic) "تفاصيل المعاملة" else "Transaction details") },
+            text = {
+                LazyColumn(modifier = Modifier.heightIn(max = 480.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    item { DetailLine(if (isArabic) "الاسم / الجهة" else "Name / Counterparty", tx.customerNameSnapshot.ifBlank { tx.customerName }.ifBlank { tx.title }) }
+                    item { DetailLine(if (isArabic) "نوع المعاملة" else "Transaction type", tx.activityType) }
+                    item { DetailLine(if (isArabic) "التاريخ والوقت" else "Date and time", formatActivityTimestamp(tx.createdAtMillis ?: tx.date)) }
+                    item { DetailLine(if (isArabic) "المبلغ الإجمالي" else "Total amount", String.format(Locale.US, "%,.2f %s", tx.amount, currency)) }
+                    if (tx.typedTransactionType == TransactionType.SALE || tx.typedTransactionType == TransactionType.PURCHASE) {
+                        item { DetailLine(if (isArabic) "المدفوع" else "Paid", String.format(Locale.US, "%,.2f %s", tx.paidAmount, currency)) }
+                        item { DetailLine(if (isArabic) "المتبقي / الآجل" else "Remaining / Credit", String.format(Locale.US, "%,.2f %s", tx.creditAmount, currency)) }
+                        item { DetailLine(if (isArabic) "طريقة التسوية" else "Settlement", if (tx.creditAmount > 0.0 && tx.paidAmount > 0.0) if (isArabic) "مختلط" else "Mixed" else if (tx.creditAmount > 0.0) if (isArabic) "آجل" else "Credit" else if (isArabic) "نقدي" else "Cash") }
+                    }
+                    if (tx.paymentMethod != null) item { DetailLine(if (isArabic) "وسيلة الدفع" else "Payment method", tx.paymentMethod.name) }
+                    items(selectedActivityMetadata) { (label, value) -> DetailLine(label, value) }
+                    if (tx.notes.isNotBlank()) item { DetailLine(if (isArabic) "ملاحظات / سبب" else "Notes / Reason", tx.notes) }
+                    item { DetailLine(if (isArabic) "الحالة" else "Status", if (tx.typedOperationStatus == OperationStatus.REVERSED) if (isArabic) "ملغي" else "Reversed" else if (tx.typedTransactionType == TransactionType.REVERSAL) if (isArabic) "قيد عكسي مسجل" else "Reversal recorded" else if (isArabic) "نشطة" else "Active") }
+                    item { Text(if (isArabic) "الأصناف" else "Items", fontWeight = FontWeight.Bold) }
+                    if (isLoadingActivityLines) item { Text(if (isArabic) "جارٍ تحميل الأصناف…" else "Loading items…") }
+                    else if (selectedActivityLines.isEmpty()) item { Text(if (isArabic) "لا توجد أصناف مرتبطة بهذه الحركة أو أن تفاصيلها غير متاحة." else "No line items are linked to this activity, or details are unavailable.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }
+                    else items(selectedActivityLines) { line -> Text(line, style = MaterialTheme.typography.bodySmall) }
+                }
+            },
+            confirmButton = { TextButton(onClick = { selectedActivityDetails = null }) { Text(if (isArabic) "إغلاق" else "Close") } }
         )
     }
 
@@ -1776,17 +1894,20 @@ private fun ActivityRowCard(
     isArabic: Boolean,
     onClick: (() -> Unit)? = null,
     onCustomerClick: (() -> Unit)? = null,
+    onDetailsClick: (() -> Unit)? = null,
     onReverseClick: (() -> Unit)? = null,
     onReturnClick: (() -> Unit)? = null
 ) {
     val type = transaction.typedTransactionType
-    val isPositiveMovement = when (type) {
+    val basePositiveMovement = when (type) {
         TransactionType.SALE,
         TransactionType.CUSTOMER_PAYMENT,
         TransactionType.PURCHASE_RETURN -> true
         else -> false
     }
     val isReversed = transaction.typedOperationStatus == OperationStatus.REVERSED
+    val isReversalEvent = transaction.isReversalEvent || type == TransactionType.REVERSAL
+    val isPositiveMovement = if (isReversalEvent) !basePositiveMovement else basePositiveMovement
     val badgeBg = if (isPositiveMovement) MaterialTheme.colorScheme.statusGreenContainer else MaterialTheme.colorScheme.statusRedContainer
     val badgeTint = if (isPositiveMovement) MaterialTheme.colorScheme.statusGreen else MaterialTheme.colorScheme.statusRed
     val iconVector = if (isPositiveMovement) Icons.Default.Add else Icons.Default.Remove
@@ -1880,7 +2001,7 @@ private fun ActivityRowCard(
                         shape = RoundedCornerShape(4.dp)
                     ) {
                         Text(
-                            text = transaction.activityType,
+                            text = activityTypeLabel(transaction, isArabic),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1916,10 +2037,17 @@ private fun ActivityRowCard(
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = transaction.relativeTime,
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = formatActivityTimestamp(transaction.createdAtMillis ?: transaction.date),
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
                 )
+                TextButton(
+                    onClick = { onDetailsClick?.invoke() },
+                    enabled = onDetailsClick != null,
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                    modifier = Modifier.height(28.dp)
+                ) { Text(if (isArabic) "التفاصيل" else "Details", fontSize = 11.sp) }
             }
             if (!isReversed && onReturnClick != null) {
                 Spacer(modifier = Modifier.width(4.dp))
@@ -1956,6 +2084,77 @@ private fun ActivityRowCard(
         }
     }
 }
+
+private fun activityTypeLabel(tx: TransactionItem, isArabic: Boolean): String {
+    if (tx.isReversalEvent || tx.typedTransactionType == TransactionType.REVERSAL) {
+        return if (isArabic) "قيد عكسي / إلغاء معاملة" else "Reversal / Cancellation"
+    }
+    return when (tx.typedTransactionType) {
+        TransactionType.SALE -> when (tx.saleType) {
+            com.example.model.SaleType.CASH -> if (isArabic) "بيع نقدي" else "Cash sale"
+            com.example.model.SaleType.CREDIT -> if (isArabic) "بيع بالدين" else "Credit sale"
+            com.example.model.SaleType.MIXED -> if (isArabic) "بيع مختلط" else "Mixed sale"
+            else -> tx.activityType
+        }
+        TransactionType.CUSTOMER_PAYMENT -> if (isArabic) "تسديد عميل" else "Customer payment"
+        TransactionType.SALE_RETURN -> if (isArabic) "مرتجع مبيعات" else "Sales return"
+        TransactionType.CUSTOMER_REFUND -> if (isArabic) "استرداد مبلغ للعميل" else "Customer refund"
+        TransactionType.PURCHASE -> when {
+            tx.paidAmount > 0.0 && tx.creditAmount > 0.0 -> if (isArabic) "مشتريات مختلطة" else "Mixed purchase"
+            tx.creditAmount > 0.0 -> if (isArabic) "مشتريات بالآجل" else "Credit purchase"
+            else -> if (isArabic) "مشتريات نقدية" else "Cash purchase"
+        }
+        TransactionType.SUPPLIER_PAYMENT -> if (isArabic) "سداد مورد" else "Supplier payment"
+        TransactionType.PURCHASE_RETURN -> if (isArabic) "مرتجع مشتريات" else "Purchase return"
+        TransactionType.EXPENSE -> if (isArabic) "مصروف" else "Expense"
+        TransactionType.OPENING_BALANCE -> if (isArabic) "رصيد افتتاحي" else "Opening balance"
+        TransactionType.BALANCE_ADJUSTMENT -> if (isArabic) "تسوية رصيد" else "Balance adjustment"
+        TransactionType.STOCK_ADJUSTMENT -> if (isArabic) "تسوية مخزون" else "Stock adjustment"
+        TransactionType.REVERSAL -> if (isArabic) "قيد عكسي" else "Reversal"
+        null -> tx.activityType
+    }
+}
+
+@Composable
+private fun DetailLine(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+    }
+}
+
+private fun parseActivityTimestamp(value: String): Long? {
+    val text = value.trim()
+    if (text.isBlank()) return null
+    val instantMillis = runCatching { Instant.parse(text).toEpochMilli() }.getOrNull()
+    if (instantMillis != null) return instantMillis
+    val patterns = listOf("yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ss.SSS", "yyyy-MM-dd")
+    for (pattern in patterns) {
+        val parsed = runCatching {
+            java.text.SimpleDateFormat(pattern, Locale.US).apply { isLenient = false }.parse(text)?.time
+        }.getOrNull()
+        if (parsed != null) return parsed
+    }
+    return null
+}
+
+private fun activitySortMillis(item: TransactionItem): Long =
+    item.createdAtMillis ?: parseActivityTimestamp(item.date) ?: Long.MIN_VALUE
+
+private fun formatActivityTimestamp(value: String): String {
+    val text = value.trim()
+    // Date-only historical records have no stored time; never fabricate midnight as an event time.
+    if (text.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) {
+        return runCatching { LocalDate.parse(text).format(DateTimeFormatter.ofPattern("dd/MM/yyyy", Locale.getDefault())) }.getOrDefault(text)
+    }
+    val millis = parseActivityTimestamp(text) ?: return text
+    return formatActivityTimestamp(millis)
+}
+
+private fun formatActivityTimestamp(millis: Long): String = runCatching {
+    DateTimeFormatter.ofPattern("dd/MM/yyyy · HH:mm:ss", Locale.getDefault())
+        .withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(millis))
+}.getOrDefault("—")
 
 private fun normalizeCustomerName(name: String?): String {
     if (name.isNullOrBlank()) return ""

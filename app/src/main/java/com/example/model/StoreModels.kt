@@ -158,7 +158,11 @@ data class TransactionItem(
     val paymentMethod: PaymentMethodType? = null,
     // Phase 2 mixed sales representation:
     val paidAmount: Double = 0.0,
-    val creditAmount: Double = 0.0
+    val creditAmount: Double = 0.0,
+    /** Exact creation/reversal instant when supplied by the persistent source. */
+    val createdAtMillis: Long? = null,
+    val isReversalEvent: Boolean = false,
+    val relatedTransactionId: String? = null
 ) {
     @Deprecated("Legacy constructor for backward compatibility. Use customerNameSnapshot.")
     constructor(
